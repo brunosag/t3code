@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ProviderDriverKind } from "@t3tools/contracts";
 
-import { DRIVER_OPTION_BY_VALUE } from "./providerDriverMeta";
+import { PROVIDER_ICON_BY_PROVIDER } from "../chat/providerIconUtils";
+import { PiIcon } from "../Icons";
+import { DRIVER_OPTION_BY_VALUE, getDriverOption } from "./providerDriverMeta";
 import {
   deriveProviderSettingsFields,
   nextProviderConfigWithFieldValue,
@@ -149,5 +151,15 @@ describe("ProviderSettingsForm helpers", () => {
     );
 
     expect(next).toEqual({ experimental: false });
+  });
+
+  it("exposes the Pi driver with a binary-path-only form and matching icon", () => {
+    const pi = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("pi")];
+    expect(pi).toBeDefined();
+    expect(pi?.label).toBe("Pi");
+    expect(deriveProviderSettingsFields(pi!).map((field) => field.key)).toEqual(["binaryPath"]);
+    expect(pi?.icon).toBe(PiIcon);
+    expect(PROVIDER_ICON_BY_PROVIDER[ProviderDriverKind.make("pi")]).toBe(PiIcon);
+    expect(getDriverOption(ProviderDriverKind.make("pi"))).toBe(pi);
   });
 });

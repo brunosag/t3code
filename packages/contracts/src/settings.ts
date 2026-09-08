@@ -842,6 +842,28 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
 export type OpenCodeSettings = typeof OpenCodeSettings.Type;
 
 /**
+ * Pi instance connection settings. Deliberately binary-path-only: the
+ * enabled flag lives on the generic `ProviderInstanceConfig` envelope (see
+ * `resolveProviderInstanceEnabled`), and Pi exposes no legacy
+ * `providers.pi` blob, settings patch, or extra configuration fields.
+ */
+export const PiConnectionSettings = makeProviderSettingsSchema(
+  {
+    binaryPath: makeBinaryPathSetting("pi").pipe(
+      Schema.annotateKey({
+        title: "Binary path",
+        description: "Path to the Pi binary used by this instance.",
+        providerSettingsForm: { placeholder: "pi", clearWhenEmpty: "omit" },
+      }),
+    ),
+  },
+  {
+    order: ["binaryPath"],
+  },
+);
+export type PiConnectionSettings = typeof PiConnectionSettings.Type;
+
+/**
  * A read-only quota source outside this environment's provider CLIs. The
  * only kind today is a CLIProxyAPI hub, whose management API reports the
  * windows of every pooled account. The key travels in settings for now, like
