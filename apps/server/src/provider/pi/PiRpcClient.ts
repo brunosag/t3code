@@ -1,37 +1,17 @@
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off -- Node subprocess callback boundary: direct child_process stdio framing and setTimeout request/kill timers outside any Effect runtime.
 /**
- * PiRpcClient — subprocess JSONL transport for `pi --mode rpc`.
+ * PiRpcClient — JSONL transport for `pi --mode rpc`.
  *
- * This module is both the adapter and the driver for the Pi provider's RPC
- * transport: it spawns the `pi` binary, frames strict JSONL records on
- * stdin/stdout, correlates `request()` calls with `response` envelopes by id,
- * and surfaces every other envelope (agent events, `extension_ui_request`
- * turns, `bash_execution_update` chunks) to `onEvent`.
- *
- * Deliberately dependency-free: it speaks the external `pi --mode rpc`
- * protocol without importing the Pi package, reading Pi config files, or
- * overriding the environment. The caller supplies `binaryPath`, `cwd`, and
- * the full `environment`; the child is spawned with exactly
- * `["--mode", "rpc"]` plus `["--session", sessionPath]` when a session path
- * is given — no provider/model inference, no extra flags.
- *
- * Framing follows the strict JSONL contract: LF (`\n`) is the only record
- * delimiter (a trailing `\r` is tolerated for `\r\n` writers), UTF-8 decoding
- * is incremental so multi-byte characters split across `data` events survive,
- * and Node `readline` is never used because it also splits on U+2028/U+2029,
- * which are legal inside JSON strings.
- *
- * Failure policy: any transport error (spawn failure, unexpected exit,
- * malformed JSON, an envelope without a string `type`, an over-long line, a
- * write failure) rejects every pending request and notifies `onExit` exactly
- * once. A request that exceeds `requestTimeoutMs` rejects and fails the whole
- * transport, so a late response can never resolve a recycled operation.
- * `close()` stops the child with SIGTERM, escalates to SIGKILL after a
- * bounded wait, and only ever signals the child it spawned — never by name
- * or pattern. `onExit` is for unexpected failures; intentional `close()` does
- * not report through it.
+ * Spawns the binary with `["--mode", "rpc"]` (plus `--session` when given),
+ * correlates `request()` calls with `response` envelopes by id, and forwards
+ * other envelopes to `onEvent`. Any transport failure rejects pending work
+ * and reports via `onExit` once; `close()` stops the owned child and never
+ * reports via `onExit`.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeStringDecoder from "node:string_decoder";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 /** Options for {@link PiRpcClient}. */
 export interface PiRpcClientOptions {
@@ -39,13 +19,9 @@ export interface PiRpcClientOptions {
   readonly binaryPath: string;
   /** Working directory the child process runs in. */
   readonly cwd: string;
-  /**
-   * Complete environment for the child, passed through as-is. The client
-   * never merges `process.env` or reads Pi config — the caller owns the
-   * environment it hands in.
-   */
+  /** Complete environment for the child, passed through as-is. */
   readonly environment: NodeJS.ProcessEnv;
-  /** Optional session file, forwarded as `--session <path>` and nothing else. */
+  /** Optional session file, forwarded as `--session <path>`. */
   readonly sessionPath?: string;
   /** Receives every stdout envelope that is not a correlated `response`. */
   readonly onEvent: (event: Record<string, unknown>) => void;
@@ -65,16 +41,18 @@ interface PendingRequest {
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 /** Upper bound for one buffered stdout line before the transport is failed. */
 const MAX_LINE_CHARS = 4 * 1024 * 1024;
-/** Retained stderr tail attached to exit errors. */
+/** Retained stderr tail kept as an `Error` cause diagnostic. */
 const MAX_STDERR_CHARS = 64 * 1024;
 /** Wait after SIGTERM before escalating to SIGKILL. */
 const STOP_TERM_TIMEOUT_MS = 2_000;
-/** Bounded wait after SIGKILL before `close()` gives up waiting. */
+/** Bounded wait after SIGKILL before teardown gives up waiting. */
 const STOP_KILL_TIMEOUT_MS = 2_000;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const RpcEnvelopeRecord = Schema.Record(Schema.String, Schema.Unknown);
+const RpcEnvelopeFromJson = Schema.fromJsonString(RpcEnvelopeRecord);
+const decodeJsonUnknown = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+const decodeEnvelopeRecord = Schema.decodeUnknownOption(RpcEnvelopeRecord);
+const encodeRpcMessage = Schema.encodeSync(RpcEnvelopeFromJson);
 
 function toError(value: unknown, fallback: string): Error {
   if (value instanceof Error) return value;
@@ -96,7 +74,7 @@ export class PiRpcClient {
   private stderrTail = "";
   private failed: Error | null = null;
   private closing = false;
-  private closePromise: Promise<void> | null = null;
+  private teardownPromise: Promise<void> | null = null;
   private exitNotified = false;
 
   constructor(options: PiRpcClientOptions) {
@@ -123,46 +101,64 @@ export class PiRpcClient {
         windowsHide: true,
       });
     } catch (error) {
-      // Synchronous spawn failure (bad binary path, bad cwd): mark the
-      // transport failed now and report asynchronously so the constructor
-      // itself never throws for spawn errors and the host always observes
-      // exactly one onExit.
-      const failure = new Error(
-        `pi rpc: failed to spawn "${options.binaryPath}": ${toError(error, "unknown spawn error").message}`,
-      );
+      const failure = new Error(`pi rpc: failed to spawn "${options.binaryPath}"`, {
+        cause: toError(error, "unknown spawn error"),
+      });
       this.child = null;
       this.failed = failure;
+      this.teardownPromise = Promise.resolve();
       queueMicrotask(() => {
         this.notifyExit(failure);
       });
       return;
     }
     this.child = child;
-    // Lifecycle listeners attach synchronously in the constructor, before any
-    // request can be written — there is no handshake to race with.
     child.on("error", (error) => {
       if (this.closing) return;
-      this.failTransport(
-        new Error(
-          `pi rpc: process error for "${this.binaryPath}": ${error.message}. Stderr: ${this.stderrTail}`,
-        ),
-      );
+      const tail = this.stderrTail;
+      const failure =
+        tail.length > 0
+          ? new Error(`pi rpc: process error for "${this.binaryPath}"`, {
+              cause: new Error(tail, { cause: error }),
+            })
+          : new Error(`pi rpc: process error for "${this.binaryPath}"`, { cause: error });
+      this.failTransport(failure);
     });
-    child.on("exit", (code, signal) => {
+    child.on("close", (code, signal) => {
       if (this.closing) return;
       this.failTransport(this.exitError(code, signal));
     });
     child.stdout?.on("data", (chunk: Buffer | string) => {
       this.handleStdoutData(chunk);
     });
+    child.stdout?.on("close", () => {
+      if (this.closing || this.failed !== null) return;
+      // Stdio closes before the child `close` event on exit; defer so the
+      // exit handler (code/signal + stderr cause) wins. A standalone stdout
+      // closure with a live child still fails after the grace window.
+      const timer = setTimeout(() => {
+        if (this.closing || this.failed !== null || this.hasExited()) return;
+        this.failTransport(new Error("pi rpc: stdout closed unexpectedly"));
+      }, 100);
+      timer.unref();
+    });
+    child.stdout?.on("error", (error) => {
+      if (this.closing || this.failed !== null) return;
+      this.failTransport(
+        new Error("pi rpc: stdout error", { cause: toError(error, "unknown stdout error") }),
+      );
+    });
     child.stderr?.on("data", (chunk: Buffer | string) => {
       const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
       this.stderrTail = `${this.stderrTail}${text}`.slice(-MAX_STDERR_CHARS);
     });
+    child.stderr?.on("error", () => {
+      // Stderr is diagnostics only; errors here must not take the transport down.
+    });
     child.stdin?.on("error", (error) => {
       if (this.closing) return;
       this.failTransport(
-        new Error(`pi rpc: process stdin error for "${this.binaryPath}": ${error.message}`),
+        new Error(`pi rpc: process stdin error for "${this.binaryPath}"`, { cause: error }),
       );
     });
   }
@@ -191,8 +187,6 @@ export class PiRpcClient {
           `pi rpc: request "${type}" timed out after ${this.requestTimeoutMs}ms`,
         );
         reject(timeoutError);
-        // A late response must never resolve a recycled operation, so the
-        // timeout takes the whole transport down with it.
         this.failTransport(timeoutError);
       }, this.requestTimeoutMs);
       timer.unref();
@@ -221,13 +215,12 @@ export class PiRpcClient {
   }
 
   /**
-   * Stop the child (SIGTERM, then bounded SIGKILL of only the spawned
-   * process) and resolve once it exits. Idempotent; never reports via
-   * `onExit`.
+   * Stop the owned child (SIGTERM, then bounded SIGKILL) and resolve once it
+   * exits. Idempotent; never reports via `onExit`.
    */
   close(): Promise<void> {
-    if (this.closePromise !== null) {
-      return this.closePromise;
+    if (this.teardownPromise !== null && this.closing) {
+      return this.teardownPromise;
     }
     this.closing = true;
     const closedError = new Error("pi rpc: client is closed");
@@ -239,8 +232,8 @@ export class PiRpcClient {
       pending.reject(closedError);
     }
     this.pending.clear();
-    this.closePromise = this.stopChild();
-    return this.closePromise;
+    this.child?.stdout?.removeAllListeners("data");
+    return this.ensureTeardown();
   }
 
   private writeLine(message: Record<string, unknown>): void {
@@ -254,12 +247,12 @@ export class PiRpcClient {
     }
     let line: string;
     try {
-      line = `${JSON.stringify(message)}\n`;
+      line = `${encodeRpcMessage(message)}\n`;
     } catch (error) {
       this.failTransport(
-        new Error(
-          `pi rpc: failed to serialize message: ${toError(error, "unknown error").message}`,
-        ),
+        new Error("pi rpc: failed to serialize message", {
+          cause: toError(error, "unknown error"),
+        }),
       );
       return;
     }
@@ -267,7 +260,9 @@ export class PiRpcClient {
       child.stdin.write(line, "utf8");
     } catch (error) {
       this.failTransport(
-        new Error(`pi rpc: failed to write message: ${toError(error, "unknown error").message}`),
+        new Error("pi rpc: failed to write message", {
+          cause: toError(error, "unknown error"),
+        }),
       );
     }
   }
@@ -277,18 +272,18 @@ export class PiRpcClient {
       return;
     }
     this.stdoutBuffer += typeof chunk === "string" ? chunk : this.decoder.write(chunk);
-    if (this.stdoutBuffer.length > MAX_LINE_CHARS) {
-      this.failTransport(
-        new Error(`pi rpc: stdout line exceeds ${MAX_LINE_CHARS} characters, failing transport`),
-      );
-      return;
-    }
     let newlineIndex = this.stdoutBuffer.indexOf("\n");
     while (newlineIndex !== -1) {
       let line = this.stdoutBuffer.slice(0, newlineIndex);
       this.stdoutBuffer = this.stdoutBuffer.slice(newlineIndex + 1);
       if (line.endsWith("\r")) {
         line = line.slice(0, -1);
+      }
+      if (line.length > MAX_LINE_CHARS) {
+        this.failTransport(
+          new Error(`pi rpc: stdout line exceeds ${MAX_LINE_CHARS} characters, failing transport`),
+        );
+        return;
       }
       if (line.length > 0) {
         this.handleLine(line);
@@ -298,58 +293,74 @@ export class PiRpcClient {
       }
       newlineIndex = this.stdoutBuffer.indexOf("\n");
     }
+    if (this.stdoutBuffer.length > MAX_LINE_CHARS) {
+      this.failTransport(
+        new Error(`pi rpc: stdout line exceeds ${MAX_LINE_CHARS} characters, failing transport`),
+      );
+    }
   }
 
   private handleLine(line: string): void {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      this.failTransport(new Error(`pi rpc: invalid JSON from process: ${line.slice(0, 200)}`));
+    const json = decodeJsonUnknown(line);
+    if (Option.isNone(json)) {
+      this.failTransport(new Error("pi rpc: invalid JSON from process"));
       return;
     }
-    if (!isRecord(parsed) || typeof parsed.type !== "string") {
+    const record = decodeEnvelopeRecord(json.value);
+    if (Option.isNone(record)) {
       this.failTransport(new Error("pi rpc: malformed envelope without a string type"));
       return;
     }
-    if (parsed.type === "response") {
-      this.handleResponse(parsed);
+    const envelope: Record<string, unknown> = { ...record.value };
+    if (typeof envelope["type"] !== "string") {
+      this.failTransport(new Error("pi rpc: malformed envelope without a string type"));
+      return;
+    }
+    if (envelope["type"] === "response") {
+      this.handleResponse(envelope);
       return;
     }
     try {
-      this.onEventCallback(parsed);
+      this.onEventCallback(envelope);
     } catch (error) {
       this.failTransport(
-        new Error(`pi rpc: onEvent threw: ${toError(error, "unknown error").message}`),
+        new Error("pi rpc: onEvent threw", { cause: toError(error, "unknown error") }),
       );
     }
   }
 
   private handleResponse(envelope: Record<string, unknown>): void {
-    const id = envelope.id;
+    const id = envelope["id"];
     if (typeof id !== "string" && typeof id !== "number") {
-      // No correlation id — nothing can be resolved; ignore rather than fail
-      // so unsolicited responses cannot take the transport down.
       return;
     }
-    const pending = this.pending.get(String(id));
+    const key = String(id);
+    const pending = this.pending.get(key);
     if (pending === undefined) {
-      // Unknown or already-settled id (e.g. a late arrival after a timeout):
-      // ignore to prevent zombie operations from resolving the wrong caller.
       return;
     }
-    this.pending.delete(String(id));
+    const responseCommand = envelope["command"];
+    if (typeof responseCommand === "string" && responseCommand !== pending.command) {
+      this.pending.delete(key);
+      clearTimeout(pending.timer);
+      const failure = new Error(
+        `pi rpc: mismatched response command for "${pending.command}": got "${responseCommand}"`,
+      );
+      pending.reject(failure);
+      this.failTransport(failure);
+      return;
+    }
+    this.pending.delete(key);
     clearTimeout(pending.timer);
-    if (envelope.success === true) {
-      pending.resolve(envelope.data);
+    if (envelope["success"] === true) {
+      pending.resolve(envelope["data"]);
       return;
     }
-    if (envelope.success === false) {
-      const command = typeof envelope.command === "string" ? envelope.command : pending.command;
+    if (envelope["success"] === false) {
       const detail =
-        typeof envelope.error === "string" && envelope.error.length > 0
-          ? envelope.error
-          : `command "${command}" failed`;
+        typeof envelope["error"] === "string" && envelope["error"].length > 0
+          ? envelope["error"]
+          : `command "${pending.command}" failed`;
       pending.reject(new Error(`pi rpc: ${detail}`));
       return;
     }
@@ -361,10 +372,11 @@ export class PiRpcClient {
   }
 
   private exitError(code: number | null, signal: NodeJS.Signals | null): Error {
-    const tail = this.stderrTail.length > 0 ? `. Stderr: ${this.stderrTail}` : "";
-    return new Error(
-      `pi rpc: process "${this.binaryPath}" exited (code=${code} signal=${signal})${tail}`,
-    );
+    const tail = this.stderrTail;
+    const message =
+      `pi rpc: process "${this.binaryPath}" exited unexpectedly ` +
+      `(code=${code} signal=${signal})`;
+    return tail.length > 0 ? new Error(message, { cause: new Error(tail) }) : new Error(message);
   }
 
   private failTransport(error: Error): void {
@@ -377,9 +389,9 @@ export class PiRpcClient {
       pending.reject(error);
     }
     this.pending.clear();
-    this.destroyChild();
-    this.detachChild();
+    this.child?.stdout?.removeAllListeners("data");
     this.notifyExit(error);
+    void this.ensureTeardown();
   }
 
   private notifyExit(error: Error): void {
@@ -394,38 +406,70 @@ export class PiRpcClient {
     }
   }
 
-  /** SIGTERM now, bounded SIGKILL escalation, only the spawned child. */
-  private destroyChild(): void {
+  private hasExited(): boolean {
     const child = this.child;
-    if (child === null || child.exitCode !== null) {
-      return;
+    if (child === null) {
+      return true;
     }
-    try {
-      child.kill("SIGTERM");
-    } catch {
-      // Already reaped; its exit event (or lack of process) settles the rest.
-      return;
-    }
-    const killTimer = setTimeout(() => {
-      try {
-        if (child.exitCode === null) {
-          child.kill("SIGKILL");
-        }
-      } catch {
-        // Reaped between the check and the kill.
-      }
-    }, STOP_TERM_TIMEOUT_MS);
-    killTimer.unref();
+    return child.exitCode !== null || child.signalCode !== null;
   }
 
-  private detachChild(): void {
+  private ensureTeardown(): Promise<void> {
+    if (this.teardownPromise !== null) {
+      return this.teardownPromise;
+    }
+    const child = this.child;
+    if (child === null || this.hasExited()) {
+      this.detachFinal();
+      this.teardownPromise = Promise.resolve();
+      return this.teardownPromise;
+    }
+    this.teardownPromise = new Promise<void>((resolve) => {
+      let killTimer: NodeJS.Timeout | undefined;
+      let settled = false;
+      const finish = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(termTimer);
+        if (killTimer !== undefined) {
+          clearTimeout(killTimer);
+        }
+        child.off("close", onClose);
+        this.detachFinal();
+        resolve();
+      };
+      const onClose = () => {
+        finish();
+      };
+      child.once("close", onClose);
+      const termTimer = setTimeout(() => {
+        try {
+          if (!this.hasExited()) {
+            child.kill("SIGKILL");
+          }
+        } catch {
+          // Reaped between the check and the kill; the close event resolves.
+        }
+        killTimer = setTimeout(finish, STOP_KILL_TIMEOUT_MS);
+        killTimer.unref();
+      }, STOP_TERM_TIMEOUT_MS);
+      termTimer.unref();
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        finish();
+      }
+    });
+    return this.teardownPromise;
+  }
+
+  private detachFinal(): void {
     const child = this.child;
     if (child === null) {
       return;
     }
-    child.stdout?.removeAllListeners("data");
-    child.stderr?.removeAllListeners("data");
-    child.stdin?.removeAllListeners("error");
     try {
       child.stdin?.destroy();
     } catch {
@@ -441,52 +485,10 @@ export class PiRpcClient {
     } catch {
       // Already destroyed.
     }
-  }
-
-  private stopChild(): Promise<void> {
-    const child = this.child;
-    if (child === null || child.exitCode !== null) {
-      this.detachChild();
-      return Promise.resolve();
-    }
-    return new Promise<void>((resolve) => {
-      let killTimer: NodeJS.Timeout | undefined;
-      let settled = false;
-      const finish = () => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        clearTimeout(termTimer);
-        if (killTimer !== undefined) {
-          clearTimeout(killTimer);
-        }
-        child.off("exit", onExit);
-        this.detachChild();
-        resolve();
-      };
-      const onExit = () => {
-        finish();
-      };
-      child.once("exit", onExit);
-      const termTimer = setTimeout(() => {
-        try {
-          if (child.exitCode === null) {
-            child.kill("SIGKILL");
-          }
-        } catch {
-          // Reaped between the check and the kill; the exit event resolves.
-        }
-        killTimer = setTimeout(finish, STOP_KILL_TIMEOUT_MS);
-        killTimer.unref();
-      }, STOP_TERM_TIMEOUT_MS);
-      termTimer.unref();
-      try {
-        child.kill("SIGTERM");
-      } catch {
-        // Already gone; resolve without waiting for an exit event.
-        finish();
-      }
-    });
+    child.stdout?.removeAllListeners();
+    child.stderr?.removeAllListeners();
+    child.stdin?.removeAllListeners();
+    child.removeAllListeners("close");
+    child.removeAllListeners("error");
   }
 }

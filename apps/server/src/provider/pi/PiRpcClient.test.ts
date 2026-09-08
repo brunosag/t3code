@@ -1,13 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off preferSchemaOverJson:off -- Node fixture subprocess speaks raw JSONL with setTimeout polling; assertions use JSON directly.
 /**
- * PiRpcClient tests — focused fixture-subprocess coverage of the
- * `pi --mode rpc` JSONL transport.
- *
- * Every test spawns a throwaway fixture script (an executable Node program
- * that tolerates the exact `["--mode", "rpc", ...]` argv and speaks the
- * response/event framing from `docs/rpc.md`) instead of a real `pi` binary,
- * so no Pi config, credentials, or model access are involved. The client
- * under test receives a minimal environment (PATH plus one sentinel variable)
- * to prove the transport passes the supplied environment through untouched.
+ * PiRpcClient tests — fixture-subprocess coverage of the `pi --mode rpc`
+ * JSONL transport.
  */
 import { afterEach, describe, expect, it } from "@effect/vitest";
 import * as NodeFS from "node:fs";
@@ -26,10 +20,6 @@ const CHUNKED_TEXT = "hello 🌍 rooftop U+2028:\u2028 U+2029:\u2029 end";
 
 const FIXTURE_SCRIPT = `#!/usr/bin/env node
 "use strict";
-// Fixture stand-in for \`pi --mode rpc\`: tolerates any argv, reads JSONL on
-// stdin, and answers a small set of test commands. Unknown types with an id
-// get success:false; unknown types without an id are stored silently (the
-// fire-and-forget path the client uses for extension_ui_response).
 let buffer = "";
 const received = [];
 const writeLine = (text) => { process.stdout.write(text + "\\n"); };
@@ -104,6 +94,38 @@ const handle = (message) => {
       process.stderr.write("fixture dying\\n");
       process.exit(1);
       break;
+    case "burst": {
+      const lines = [];
+      for (let i = 0; i < 100; i += 1) {
+        lines.push(JSON.stringify({ type: "burst_event", index: i, pad: "x".repeat(50 * 1024) }));
+      }
+      process.stdout.write(lines.join("\\n") + "\\n");
+      respondTo(message, { success: true, data: { count: 100 } });
+      break;
+    }
+    case "long_line":
+      process.stdout.write("x".repeat(4 * 1024 * 1024 + 1) + "\\n");
+      break;
+    case "wrong_command": {
+      const response = { type: "response", command: "other_command", success: true, data: {} };
+      if (message.id !== undefined) response.id = message.id;
+      writeLine(JSON.stringify(response));
+      break;
+    }
+    case "echo_then_die": {
+      respondTo(message, { success: true, data: { payload: message.payload ?? null } });
+      setTimeout(() => {
+        process.stderr.write("goodbye\\n");
+        process.exit(1);
+      }, 50);
+      break;
+    }
+    case "close_stdout":
+      process.stdout.end();
+      break;
+    case "die_signal":
+      process.kill(process.pid, "SIGTERM");
+      break;
     case "get_received":
       respondTo(message, {
         success: true,
@@ -173,6 +195,27 @@ function createClient(input?: {
   return { client, events, exits };
 }
 
+function flattenCause(error: unknown): string {
+  const seen: Array<unknown> = [error];
+  let current: unknown = error;
+  let text = "";
+  while (current instanceof Error) {
+    text += `\n${current.message}`;
+    const cause: unknown = (current as { cause?: unknown }).cause;
+    if (cause === undefined || cause === null || seen.includes(cause)) {
+      break;
+    }
+    seen.push(cause);
+    if (cause instanceof Error) {
+      current = cause;
+    } else {
+      text += `\n${String(cause)}`;
+      break;
+    }
+  }
+  return text;
+}
+
 async function waitFor(condition: () => boolean, timeoutMs = 10_000): Promise<void> {
   const start = NodeProcess.hrtime.bigint();
   while (!condition()) {
@@ -234,7 +277,6 @@ describe("PiRpcClient", () => {
   it("rejects when the response reports success:false", async () => {
     const { client, exits } = createClient();
     await expect(client.request("fail_me")).rejects.toThrow("boom");
-    // A failed command is not a transport failure: the client stays usable.
     const echoed = (await client.request("echo", { payload: "after" })) as { payload: unknown };
     expect(echoed).toEqual({ payload: "after" });
     expect(exits).toEqual([]);
@@ -243,8 +285,6 @@ describe("PiRpcClient", () => {
   it("reassembles split UTF-8 bytes with LF-only framing", async () => {
     const { client } = createClient();
     const data = (await client.request("chunked")) as { text: unknown };
-    // The payload carries an emoji plus U+2028/U+2029: a reader splitting on
-    // anything but LF would have broken the record apart.
     expect(data).toEqual({ text: CHUNKED_TEXT });
   });
 
@@ -271,24 +311,34 @@ describe("PiRpcClient", () => {
     await expect(client.request("hang")).rejects.toThrow("timed out");
     await waitFor(() => exits.length > 0);
     expect(exits).toHaveLength(1);
-    // The transport stays failed so no recycled operation can observe a late
-    // response from the hung command.
     await expect(client.request("echo", { payload: "late" })).rejects.toThrow();
   });
 
-  it("rejects pending work and notifies onExit when the process crashes", async () => {
+  it("keeps stderr in the cause diagnostic, not the exit message", async () => {
     const { client, exits } = createClient();
-    await expect(client.request("die")).rejects.toThrow(/exited.*fixture dying/);
+    const failure = await client.request("die").then(
+      () => {
+        throw new Error("expected die to reject");
+      },
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/exited unexpectedly/);
+    expect((failure as Error).message).not.toContain("fixture dying");
     await waitFor(() => exits.length > 0);
     expect(exits).toHaveLength(1);
-    expect(exits[0]?.message).toMatch(/exited.*fixture dying/);
+    expect(exits[0]?.message).toMatch(/exited unexpectedly/);
+    expect(exits[0]?.message).not.toContain("fixture dying");
+    expect(flattenCause(exits[0])).toContain("fixture dying");
   });
 
-  it("fails the transport on malformed JSON", async () => {
+  it("fails the transport on malformed JSON without leaking the raw payload", async () => {
     const { client, exits } = createClient();
     await expect(client.request("bad_json")).rejects.toThrow("invalid JSON");
     await waitFor(() => exits.length > 0);
     expect(exits).toHaveLength(1);
+    expect(exits[0]?.message).toBe("pi rpc: invalid JSON from process");
+    expect(exits[0]?.message).not.toContain("this is not json");
   });
 
   it("fails the transport on envelopes and responses that miss the schema", async () => {
@@ -299,6 +349,66 @@ describe("PiRpcClient", () => {
     const second = createClient();
     await expect(second.client.request("broken_response")).rejects.toThrow(/malformed response/);
     await waitFor(() => second.exits.length > 0);
+  });
+
+  it("fails when a correlated response carries a mismatched command", async () => {
+    const { client, exits } = createClient();
+    await expect(client.request("wrong_command")).rejects.toThrow(/mismatched response command/);
+    await waitFor(() => exits.length > 0);
+    expect(exits).toHaveLength(1);
+    expect(exits[0]?.message).toMatch(/mismatched response command/);
+    await expect(client.request("echo", { payload: "late" })).rejects.toThrow();
+  });
+
+  it("accepts many short frames in one chunk without tripping the line limit", async () => {
+    const { client, events, exits } = createClient();
+    const data = (await client.request("burst")) as { count: unknown };
+    expect(data).toEqual({ count: 100 });
+    expect(events.filter((event) => event["type"] === "burst_event")).toHaveLength(100);
+    expect(exits).toEqual([]);
+  });
+
+  it("fails a single over-long line", async () => {
+    const { client, exits } = createClient();
+    await expect(client.request("long_line")).rejects.toThrow(/exceeds/);
+    await waitFor(() => exits.length > 0);
+    expect(exits).toHaveLength(1);
+  });
+
+  it("delivers final stdout before an unexpected close", async () => {
+    const { client, exits } = createClient();
+    await expect(client.request("echo_then_die", { payload: "final" })).resolves.toEqual({
+      payload: "final",
+    });
+    await waitFor(() => exits.length > 0);
+    expect(exits).toHaveLength(1);
+    expect(exits[0]?.message).toMatch(/exited unexpectedly/);
+  });
+
+  it("fails when stdout closes while the child stays alive", async () => {
+    const { client, exits } = createClient();
+    await expect(client.request("close_stdout")).rejects.toThrow(/stdout closed/);
+    await waitFor(() => exits.length > 0);
+    expect(exits).toHaveLength(1);
+    expect(exits[0]?.message).toMatch(/stdout closed/);
+  });
+
+  it("reports signal exits and lets close() await the shared teardown", async () => {
+    const { client, exits } = createClient();
+    await expect(client.request("die_signal")).rejects.toThrow(/exited unexpectedly/);
+    await waitFor(() => exits.length > 0);
+    expect(exits[0]?.message).toMatch(/SIGTERM/);
+    await expect(client.close()).resolves.toBeUndefined();
+    expect(exits).toHaveLength(1);
+  });
+
+  it("shares close teardown after a failure without a second onExit", async () => {
+    const { client, exits } = createClient();
+    await expect(client.request("bad_json")).rejects.toThrow("invalid JSON");
+    await waitFor(() => exits.length > 0);
+    await expect(client.close()).resolves.toBeUndefined();
+    await expect(client.close()).resolves.toBeUndefined();
+    expect(exits).toHaveLength(1);
   });
 
   it("close() stops the process and rejects later work without onExit", async () => {
