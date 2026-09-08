@@ -91,6 +91,10 @@ export const deriveProviderInstanceConfigMap = (
     const legacyKey = driver.driverKind as keyof ServerSettings["providers"];
     const legacyConfig = settings.providers[legacyKey];
     if (legacyConfig === undefined) {
+      // Fork-only driver: bootstrap without adding a parallel legacy settings schema.
+      if (driver.driverKind === "pi") {
+        merged[instanceId] = { driver: driver.driverKind, config: driver.defaultConfig() };
+      }
       continue;
     }
 
