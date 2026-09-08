@@ -322,6 +322,13 @@ type ThreadSettingsSessionProps = {
   readonly onUpdateOptionSelections: (selections: ReadonlyArray<ProviderOptionSelection>) => void;
   readonly runtimeMode: RuntimeMode;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
+  /**
+   * When the selected driver is Pi, T3 runtime modes are not enforced —
+   * permissions come from the Pi runtime. Shows a static "Pi managed"
+   * label instead of the T3 access picker. The stored runtimeMode value is
+   * untouched.
+   */
+  readonly isPiDriver?: boolean;
 };
 
 export type ExistingThreadSettingsRouteSession = ThreadSettingsSessionProps & {
@@ -371,6 +378,7 @@ type ThreadSettingsSessionValue = {
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
   readonly runtimeMode: RuntimeMode;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
+  readonly isPiDriver: boolean;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly providerExpansionOverrides: ReadonlySet<string>;
   readonly hasLegacyModels: boolean;
@@ -499,6 +507,7 @@ function ThreadSettingsSessionProvider(
       providerGroups: props.providerGroups,
       runtimeMode: props.runtimeMode,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
+      isPiDriver: props.isPiDriver ?? false,
       displayedDescriptors,
       providerExpansionOverrides,
       hasLegacyModels,
@@ -529,6 +538,7 @@ function ThreadSettingsSessionProvider(
       pendingModel,
       pressModel,
       providerFilter,
+      props.isPiDriver,
       props.onUpdateRuntimeMode,
       props.providerGroups,
       props.runtimeMode,
@@ -752,14 +762,28 @@ function ThreadSettingsOptionsItem(props: {
           );
         })}
         <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
-          <DisclosureRow
-            isLast
-            label="Runtime"
-            value={
-              RUNTIME_MODE_CHOICES.find((choice) => choice.mode === session.runtimeMode)?.label
-            }
-            onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
-          />
+          {session.isPiDriver ? (
+            <View
+              accessibilityLabel="Runtime. Pi managed. Permissions and tool behavior come from your Pi runtime."
+              accessibilityRole="text"
+              className="min-h-11 flex-row items-center gap-2 bg-card px-4 py-2"
+            >
+              <Text className="text-sm font-t3-medium text-foreground">Runtime</Text>
+              <View className="flex-1" />
+              <Text className="text-sm text-foreground-muted" numberOfLines={1}>
+                Pi managed
+              </Text>
+            </View>
+          ) : (
+            <DisclosureRow
+              isLast
+              label="Runtime"
+              value={
+                RUNTIME_MODE_CHOICES.find((choice) => choice.mode === session.runtimeMode)?.label
+              }
+              onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
+            />
+          )}
         </Animated.View>
       </Animated.View>
 
@@ -904,35 +928,52 @@ function ThreadSettingsChoiceContent(props: {
       : undefined;
 
   const submenuContent =
-    props.submenu.kind === "runtime"
+    props.submenu.kind === "runtime" && session.isPiDriver
       ? {
-          rows: RUNTIME_MODE_CHOICES.map((choice) => ({
-            id: choice.mode,
-            label: choice.label,
-            description: choice.description,
-            selected: choice.mode === session.runtimeMode,
-            onPress: () => {
-              void Haptics.selectionAsync();
-              session.onUpdateRuntimeMode(choice.mode);
-              props.onSelected();
+          // Unreachable through the UI (the Runtime row is static for Pi),
+          // but a stale navigation state must still not advertise T3 modes.
+          // Tapping back out changes nothing: the stored value stays as-is.
+          rows: [
+            {
+              id: "pi-managed",
+              label: "Pi managed",
+              description: "Permissions and tool behavior come from your Pi runtime.",
+              selected: true,
+              onPress: () => {
+                props.onSelected();
+              },
             },
-          })),
+          ],
         }
-      : activeDescriptor?.type === "select"
+      : props.submenu.kind === "runtime"
         ? {
-            rows: selectableChoices(activeDescriptor).map((choice) => ({
-              id: choice.id,
+            rows: RUNTIME_MODE_CHOICES.map((choice) => ({
+              id: choice.mode,
               label: choice.label,
-              description: undefined,
-              selected: choice.id === getProviderOptionCurrentValue(activeDescriptor),
+              description: choice.description,
+              selected: choice.mode === session.runtimeMode,
               onPress: () => {
                 void Haptics.selectionAsync();
-                session.applyOptionChange(activeDescriptor.id, choice.id);
+                session.onUpdateRuntimeMode(choice.mode);
                 props.onSelected();
               },
             })),
           }
-        : null;
+        : activeDescriptor?.type === "select"
+          ? {
+              rows: selectableChoices(activeDescriptor).map((choice) => ({
+                id: choice.id,
+                label: choice.label,
+                description: undefined,
+                selected: choice.id === getProviderOptionCurrentValue(activeDescriptor),
+                onPress: () => {
+                  void Haptics.selectionAsync();
+                  session.applyOptionChange(activeDescriptor.id, choice.id);
+                  props.onSelected();
+                },
+              })),
+            }
+          : null;
 
   if (!submenuContent) {
     return <View className="flex-1 bg-sheet" />;
@@ -1112,6 +1153,9 @@ function ThreadSettingsModelsScreen() {
       />
       <ThreadSettingsMainContent
         onOpenSubmenu={(submenu) => {
+          // The Pi Runtime row is static and never navigates here; guard
+          // stale navigation state so T3 modes stay unoffered for Pi.
+          if (submenu.kind === "runtime" && session.isPiDriver) return;
           const title =
             submenu.kind === "runtime"
               ? "Runtime"
@@ -1304,6 +1348,7 @@ export function NewTaskThreadSettingsRouteScreen() {
       onUpdateOptionSelections={flow.setSelectedModelOptions}
       runtimeMode={flow.runtimeMode}
       onUpdateRuntimeMode={flow.setRuntimeMode}
+      isPiDriver={flow.selectedProviderStatus?.driver === "pi"}
     >
       <ThreadSettingsPickerNavigator onClose={() => navigation.goBack()} />
     </ThreadSettingsSessionProvider>

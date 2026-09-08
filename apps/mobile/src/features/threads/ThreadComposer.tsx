@@ -470,6 +470,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     [currentModelOption?.capabilities, currentModelSelection.options],
   );
   const settingsOwnerId = composerOwnerKey;
+  // Pi owns all permission policy: the T3 runtime picker must not look
+  // enforced when the Pi driver runs the turn. The stored runtimeMode value
+  // stays as-is; the Pi adapter intentionally ignores T3 policies.
+  const isPiDriver = selectedProviderStatus?.driver === "pi";
   const settingsRouteSession = useMemo<ExistingThreadSettingsRouteSession>(
     () => ({
       ownerId: settingsOwnerId,
@@ -483,10 +487,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         props.onUpdateModelSelection({ ...currentModelSelection, options }),
       runtimeMode: currentRuntimeMode,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
+      isPiDriver,
     }),
     [
       currentModelSelection,
       currentRuntimeMode,
+      isPiDriver,
       props.onUpdateModelSelection,
       props.onUpdateRuntimeMode,
       providerOptionDescriptors,

@@ -20,6 +20,12 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   traitsMenuContent?: ReactNode;
   size?: "sm" | "xs";
   /**
+   * When the selected driver is Pi, T3 runtime modes are not enforced —
+   * permissions come from the Pi runtime. Shows a static label instead of
+   * the T3 access picker.
+   */
+  isPiDriver?: boolean;
+  /**
    * The resting strip keeps this menu mounted out of flow while every block
    * fits inline. Its portaled popup would outlive that transition, so an
    * open menu closes when its trigger hides.
@@ -69,18 +75,27 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
           </>
         ) : null}
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
-        <MenuRadioGroup
-          value={props.runtimeMode}
-          onValueChange={(value) => {
-            if (!value || value === props.runtimeMode) return;
-            props.onRuntimeModeChange(value as RuntimeMode);
-          }}
-        >
-          <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
-          <MenuRadioItem value="auto-accept-edits">Auto-accept edits</MenuRadioItem>
-          <MenuRadioItem value="auto">Auto</MenuRadioItem>
-          <MenuRadioItem value="full-access">Full access</MenuRadioItem>
-        </MenuRadioGroup>
+        {props.isPiDriver ? (
+          <div className="px-2 pb-1.5">
+            <div className="text-sm font-medium text-foreground">Pi managed</div>
+            <div className="text-muted-foreground text-xs leading-4">
+              Permissions and tool behavior come from your Pi runtime.
+            </div>
+          </div>
+        ) : (
+          <MenuRadioGroup
+            value={props.runtimeMode}
+            onValueChange={(value) => {
+              if (!value || value === props.runtimeMode) return;
+              props.onRuntimeModeChange(value as RuntimeMode);
+            }}
+          >
+            <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
+            <MenuRadioItem value="auto-accept-edits">Auto-accept edits</MenuRadioItem>
+            <MenuRadioItem value="auto">Auto</MenuRadioItem>
+            <MenuRadioItem value="full-access">Full access</MenuRadioItem>
+          </MenuRadioGroup>
+        )}
       </MenuPopup>
     </Menu>
   );

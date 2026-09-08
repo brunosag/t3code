@@ -995,6 +995,12 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   runtimeMode: RuntimeMode;
   size?: "sm" | "xs";
   hidden?: boolean;
+  /**
+   * When the selected driver is Pi, T3 runtime modes are not enforced —
+   * permissions come from the Pi runtime. Shows a static label instead of
+   * the T3 permission picker. The stored runtimeMode value is untouched.
+   */
+  isPiDriver?: boolean;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
@@ -1055,49 +1061,72 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
     <>
       <ComposerControlSeparator size={size} />
 
-      <Tooltip>
-        <Select
-          open={open}
-          onOpenChange={setOpen}
-          value={props.runtimeMode}
-          onValueChange={(value) => props.onRuntimeModeChange(value!)}
-        >
+      {props.isPiDriver ? (
+        <Tooltip>
           <TooltipTrigger
             render={
-              <ComposerSelectControl
-                size={size}
-                className={size === "xs" ? undefined : "font-medium"}
-                aria-label="Runtime mode"
-              />
+              <span
+                className={cn(
+                  "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap",
+                  size === "xs"
+                    ? "px-1 text-muted-foreground/70 text-xs"
+                    : "px-2.5 text-secondary-label text-[13px] font-medium",
+                )}
+                aria-label="Runtime permissions"
+              >
+                Pi managed
+              </span>
             }
+          />
+          <TooltipPopup side="top">
+            Permissions and tool behavior come from your Pi runtime.
+          </TooltipPopup>
+        </Tooltip>
+      ) : (
+        <Tooltip>
+          <Select
+            open={open}
+            onOpenChange={setOpen}
+            value={props.runtimeMode}
+            onValueChange={(value) => props.onRuntimeModeChange(value!)}
           >
-            <ComposerControlIcon icon={RuntimeModeIcon} size={size} />
-            <SelectValue>{runtimeModeOption.label}</SelectValue>
-          </TooltipTrigger>
-          <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
-            {runtimeModeOptions.map((mode) => {
-              const option = runtimeModeConfig[mode];
-              const OptionIcon = option.icon;
-              return (
-                <SelectItem key={mode} value={mode} hideIndicator className="min-w-64 py-2">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="grid min-w-0 flex-1 gap-0.5">
-                      <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                        <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                        {option.label}
-                      </span>
-                      <span className="text-muted-foreground text-xs leading-4">
-                        {option.description}
-                      </span>
+            <TooltipTrigger
+              render={
+                <ComposerSelectControl
+                  size={size}
+                  className={size === "xs" ? undefined : "font-medium"}
+                  aria-label="Runtime mode"
+                />
+              }
+            >
+              <ComposerControlIcon icon={RuntimeModeIcon} size={size} />
+              <SelectValue>{runtimeModeOption.label}</SelectValue>
+            </TooltipTrigger>
+            <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
+              {runtimeModeOptions.map((mode) => {
+                const option = runtimeModeConfig[mode];
+                const OptionIcon = option.icon;
+                return (
+                  <SelectItem key={mode} value={mode} hideIndicator className="min-w-64 py-2">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="grid min-w-0 flex-1 gap-0.5">
+                        <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                          <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                          {option.label}
+                        </span>
+                        <span className="text-muted-foreground text-xs leading-4">
+                          {option.description}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                </SelectItem>
-              );
-            })}
-          </SelectPopup>
-        </Select>
-        <TooltipPopup side="top">{runtimeModeOption.description}</TooltipPopup>
-      </Tooltip>
+                  </SelectItem>
+                );
+              })}
+            </SelectPopup>
+          </Select>
+          <TooltipPopup side="top">{runtimeModeOption.description}</TooltipPopup>
+        </Tooltip>
+      )}
 
       {interactionModeToggle}
     </>
@@ -1725,6 +1754,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // disabled.
   const selectedProvider: ProviderDriverKind =
     selectedProviderEntry?.driverKind ?? requestedDriverKind;
+  // Pi owns all permission policy: the T3 runtime permission picker must
+  // not look enforced when the Pi driver runs the turn. The stored
+  // runtimeMode value stays as-is (keybindings may still change it); the Pi
+  // adapter intentionally ignores T3 policies.
+  const isPiDriver = selectedProvider === "pi";
 
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
     threadRef: composerDraftTarget,
@@ -4079,6 +4113,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           runtimeMode={runtimeMode}
           size={composerControlsInStrip ? "xs" : "sm"}
           hidden={composerControlsHidden || restingHiddenBlockCount > 0}
+          isPiDriver={isPiDriver}
           onToggleInteractionMode={toggleInteractionMode}
           onRuntimeModeChange={handleRuntimeModeChange}
         />
@@ -4158,6 +4193,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           runtimeMode={runtimeMode}
           showInteractionModeToggle={planModeUiEnabled}
           traitsMenuContent={providerTraitsMenuContent}
+          isPiDriver={isPiDriver}
           onToggleInteractionMode={toggleInteractionMode}
           onRuntimeModeChange={handleRuntimeModeChange}
         />
@@ -4198,6 +4234,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 runtimeMode={runtimeMode}
                 size="xs"
                 hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
+                isPiDriver={isPiDriver}
                 showInteractionModeToggle={
                   planModeUiEnabled && hiddenRestingBlockIds.includes("mode")
                 }
