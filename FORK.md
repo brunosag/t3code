@@ -38,9 +38,9 @@ For an explicitly configured instance, the server's existing `providerInstances`
 
 ## Verification
 
-The focused Pi and provider-regression suite passes 191 tests. Server, web, mobile, and contracts typechecks pass. Local Chromium checks exercised provider discovery, enable/disable, model selection, the compact and expanded permission UI, and a real Pi turn in a T3-created worktree with a resulting Git diff. An active FIFO-gated tool call survived a full browser disconnect; after restarting the server, Pi resumed and recalled the prior result without tools.
+The focused Pi and provider-regression suite passes 191 tests across 14 files, on both `pi-provider` and the upstream review branch described below. Server, web, mobile, contracts, and client-runtime typechecks pass on both branches. Local Chromium checks exercised provider discovery, enable/disable, model selection, the compact and expanded permission UI, and a real Pi turn in a T3-created worktree with a resulting Git diff. An active FIFO-gated tool call survived a full browser disconnect; after restarting the server, Pi resumed and recalled the prior result without tools.
 
-Browser layout was checked at 375, 768, and 1280 pixels. Native Electron/React Native clients and relay/tunnel deployments have not been exercised. No deployment was performed.
+Browser layout was checked at 375, 768, and 1280 pixels. The generic permission label and tooltip were rechecked on the merged upstream review at desktop and compact-phone sizes. Native Electron/React Native clients and relay/tunnel deployments have not been exercised. No deployment was performed.
 
 ## Compatibility and maintenance
 
@@ -49,5 +49,7 @@ Development targets the installed Pi **0.85.1** RPC protocol, including `agent_s
 The integration uses T3's open provider-driver SPI. Pi-specific server code lives in `provider/pi/` and `provider/Drivers/PiDriver.ts`; connection settings live in `packages/contracts/src/pi.ts`. Upstream conflict points are driver registration/bootstrap, the optional permission capability in the provider snapshot, client provider metadata/model defaults, and the small generic permission presentation hooks in the web/mobile composers. No Pi dependency is added to T3.
 
 Upstream proposals considered include [#402](https://github.com/pingdotgg/t3code/issues/402), [#7211](https://github.com/pingdotgg/t3code/pull/7211), and [#10474](https://github.com/pingdotgg/t3code/pull/10474). This implementation deliberately keeps the external RPC boundary and defers tree navigation rather than replacing Pi startup with an SDK host.
+
+As a maintainability check, upstream `08463e2c4` was merged into the separate local `pi-provider-upstream-review` branch. There were no textual conflicts, including in `ChatComposer.tsx` and `ThreadSettingsSheet.tsx`. Inspection confirmed that upstream's composer-loading and Material You changes coexist with the generic permission hooks. The upstream merge has not been applied to `pi-provider`.
 
 The fork branch is `pi-provider`; `upstream` points to `pingdotgg/t3code` and `origin` to `brunosag/t3code`. To update, fetch upstream, merge the desired upstream revision into a review branch, resolve the narrow integration points above, and rerun focused Pi tests plus server/web/mobile typechecks and local client verification before updating `pi-provider`. Do not deploy as part of that workflow.
