@@ -199,6 +199,9 @@ export const ServerProvider = Schema.Struct({
   // When true, permission policy belongs to the runtime, not T3's runtime-mode selector.
   managesRuntimePermissions: Schema.optional(Schema.Boolean),
   showInteractionModeToggle: Schema.optional(Schema.Boolean),
+  // The driver streams context window usage, so a started thread will have a
+  // meter once its activities load. Clients reserve the meter's space on it.
+  reportsContextWindow: Schema.optional(Schema.Boolean),
   requiresNewThreadForModelChange: Schema.optional(Schema.Boolean),
   supportsConversationRollback: Schema.optional(Schema.Boolean),
   supportsTextGeneration: Schema.optional(Schema.Boolean),

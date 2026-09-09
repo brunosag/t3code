@@ -73,7 +73,9 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
         {props.managedPermissions ? (
           <div className="px-2 pb-1.5">
-            <div className="text-sm font-medium text-foreground">{props.managedPermissions.label}</div>
+            <div className="text-sm font-medium text-foreground">
+              {props.managedPermissions.label}
+            </div>
             <div className="text-muted-foreground text-xs leading-4">
               {props.managedPermissions.description}
             </div>
