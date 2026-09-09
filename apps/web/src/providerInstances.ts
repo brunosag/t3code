@@ -150,7 +150,8 @@ export function deriveProviderEntriesByEnvironment(
  * for probe reconciliation.
  *
  * Only built-in default instances have a legacy `providers` entry. Every
- * other instance exists through `providerInstances`; if it is absent there,
+ * other instance (except the fork's bootstrapped Pi default) exists through
+ * `providerInstances`; if it is absent there,
  * its streamed snapshot is stale (for example immediately after deletion)
  * and is treated as disabled.
  */
@@ -173,7 +174,7 @@ export function applyProviderInstanceSettings(
       ? resolveProviderInstanceEnabled(explicitInstance)
       : entry.isDefault && legacyProvider
         ? (legacyProvider.enabled ?? entry.enabled)
-        : false;
+        : entry.isDefault && entry.driverKind === "pi";
     return enabled === entry.enabled ? entry : { ...entry, enabled };
   });
 }

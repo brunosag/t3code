@@ -88,6 +88,30 @@ describe("isProviderInstancePickerVisible", () => {
 });
 
 describe("applyProviderInstanceSettings", () => {
+  it("keeps the bootstrapped Pi default visible without a legacy settings mirror", () => {
+    const entries = deriveProviderInstanceEntries([
+      provider({ provider: ProviderDriverKind.make("pi"), instanceId: "pi" }),
+      provider({ provider: ProviderDriverKind.make("pi"), instanceId: "pi_custom" }),
+    ]);
+    const settings = { providerInstances: {}, providers: {} as never };
+    expect(applyProviderInstanceSettings(entries, settings).map((entry) => entry.enabled)).toEqual([
+      true,
+      false,
+    ]);
+    expect(
+      applyProviderInstanceSettings(entries, {
+        ...settings,
+        providerInstances: {
+          [ProviderInstanceId.make("pi")]: {
+            driver: ProviderDriverKind.make("pi"),
+            enabled: false,
+            config: { binaryPath: "pi" },
+          },
+        },
+      }).map((entry) => entry.enabled),
+    ).toEqual([false, false]);
+  });
+
   it("uses settings when a streamed snapshot still reports a disabled default as enabled", () => {
     const entries = deriveProviderInstanceEntries([
       provider({ provider: ProviderDriverKind.make("codex"), instanceId: "codex" }),

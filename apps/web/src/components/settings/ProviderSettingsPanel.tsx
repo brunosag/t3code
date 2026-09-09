@@ -729,7 +729,11 @@ export function EnvironmentProviderSettings({
     // turn a default-off provider on.
     const synthesizedInstance = (): ProviderInstanceConfig | undefined => {
       if (legacyConfig === undefined) {
-        return undefined;
+        // Pi has no legacy settings mirror. Only offer it when this server
+        // advertises the default instance (older remote servers may not).
+        return driver === "pi" && serverProviders.some((p) => p.instanceId === defaultInstanceId)
+          ? { driver, enabled: true, config: { binaryPath: "pi" } }
+          : undefined;
       }
       const { enabled: legacyEnabled, ...legacyConfigRest } = legacyConfig;
       return {
@@ -857,7 +861,17 @@ export function EnvironmentProviderSettings({
     >;
     const defaultInstanceId = defaultInstanceIdForDriver(driverKind);
     const defaultLegacyProvider = defaultLegacyProviders[driverKind];
-    if (defaultLegacyProvider === undefined) return;
+    if (defaultLegacyProvider === undefined) {
+      if (driverKind === "pi") {
+        updateSettings({
+          providerInstances: withoutProviderInstanceKey(
+            settings.providerInstances,
+            defaultInstanceId,
+          ),
+        });
+      }
+      return;
+    }
     updateSettings({
       providers: {
         ...settings.providers,
