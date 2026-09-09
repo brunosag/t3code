@@ -18,6 +18,9 @@ import { PiRpcClient } from "../pi/PiRpcClient.ts";
 import { PiCommands, PiModels, PiState } from "../pi/PiProtocol.ts";
 import { makePiTextGeneration } from "../pi/PiTextGeneration.ts";
 
+const decodePiState = Schema.decodeUnknownSync(PiState);
+const decodePiModels = Schema.decodeUnknownSync(PiModels);
+const decodePiCommands = Schema.decodeUnknownSync(PiCommands);
 const DRIVER = ProviderDriverKind.make("pi");
 export type PiDriverEnv = ServerConfig;
 const maintenance = makeManualOnlyProviderMaintenanceCapabilities({
@@ -96,13 +99,9 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
             };
             signal.addEventListener("abort", abort, { once: true });
             try {
-              Schema.decodeUnknownSync(PiState)(await client.request("get_state"));
-              const models = Schema.decodeUnknownSync(PiModels)(
-                await client.request("get_available_models"),
-              );
-              const commands = Schema.decodeUnknownSync(PiCommands)(
-                await client.request("get_commands"),
-              );
+              decodePiState(await client.request("get_state"));
+              const models = decodePiModels(await client.request("get_available_models"));
+              const commands = decodePiCommands(await client.request("get_commands"));
               return {
                 ...base(),
                 installed: true,

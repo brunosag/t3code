@@ -1,3 +1,4 @@
+// @effect-diagnostics preferSchemaOverJson:off - Fixed RPC fixture payloads.
 import { describe, it } from "@effect/vitest";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -47,6 +48,7 @@ class FakePiRpcClient implements PiRpcClientLike {
     const recorded = { type, fields };
     this.requests.push(recorded);
     this.shared.push(recorded);
+    if (type === "get_state") return { sessionId: "fixture", isStreaming: false };
     if (type === "set_model") {
       return { ok: true };
     }
@@ -59,20 +61,39 @@ class FakePiRpcClient implements PiRpcClientLike {
     }
     queueMicrotask(() => {
       if (behavior.kind === "errorEvent") {
-        this.init.onEvent({ type: "error", message: behavior.message });
+        this.init.onEvent({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [],
+            stopReason: "error",
+            errorMessage: behavior.message,
+          },
+        });
+        this.init.onEvent({ type: "agent_settled" });
         return;
       }
       if (behavior.kind === "aborted") {
         this.init.onEvent({
           type: "message_end",
-          role: "assistant",
-          text: JSON.stringify({ title: "Discarded title" }),
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: JSON.stringify({ title: "Discarded title" }) }],
+            stopReason: "aborted",
+          },
         });
         this.init.onEvent({ type: "agent_settled", reason: "aborted" });
         return;
       }
       if (behavior.text !== null) {
-        this.init.onEvent({ type: "message_end", role: "assistant", text: behavior.text });
+        this.init.onEvent({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: behavior.text }],
+            stopReason: "stop",
+          },
+        });
       }
       this.init.onEvent({ type: "agent_settled", reason: "completed" });
     });
@@ -104,9 +125,13 @@ describe("PiTextGeneration", () => {
         kind: "succeed",
         text: JSON.stringify({ title: "Investigate failing CI" }),
       });
-      const textGeneration = makePiTextGeneration({ binaryPath: "/bin/pi" }, {}, {
-        createClient: harness.factory,
-      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
 
       const generated = yield* textGeneration.generateThreadTitle({
         cwd: process.cwd(),
@@ -115,8 +140,8 @@ describe("PiTextGeneration", () => {
       });
 
       expect(generated.title).toBe("Investigate failing CI");
-      expect(harness.requests.map((request) => request.type)).toEqual(["prompt"]);
-      expect(harness.requests[0]?.fields).toMatchObject({
+      expect(harness.requests.map((request) => request.type)).toEqual(["get_state", "prompt"]);
+      expect(harness.requests[1]?.fields).toMatchObject({
         message: expect.stringContaining("the lint job is red") as unknown,
       });
       expect(harness.clients).toHaveLength(1);
@@ -133,9 +158,13 @@ describe("PiTextGeneration", () => {
           JSON.stringify({ title: "Investigate failing CI" }) +
           "\n\nLet me know if you need anything else.",
       });
-      const textGeneration = makePiTextGeneration({ binaryPath: "/bin/pi" }, {}, {
-        createClient: harness.factory,
-      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
 
       const generated = yield* textGeneration.generateThreadTitle({
         cwd: process.cwd(),
@@ -153,9 +182,13 @@ describe("PiTextGeneration", () => {
         kind: "succeed",
         text: JSON.stringify({ branch: "fix/ci-flake" }),
       });
-      const textGeneration = makePiTextGeneration({ binaryPath: "/bin/pi" }, {}, {
-        createClient: harness.factory,
-      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
 
       const generated = yield* textGeneration.generateBranchName({
         cwd: process.cwd(),
@@ -165,12 +198,13 @@ describe("PiTextGeneration", () => {
 
       expect(generated.branch).toBe("fix/ci-flake");
       expect(harness.requests.map((request) => request.type)).toEqual([
+        "get_state",
         "set_model",
         "prompt",
       ]);
-      expect(harness.requests[0]?.fields).toEqual({
+      expect(harness.requests[1]?.fields).toEqual({
         provider: "acme",
-        model: "text-pro/v2",
+        modelId: "text-pro/v2",
       });
     }),
   );
@@ -181,9 +215,13 @@ describe("PiTextGeneration", () => {
         kind: "succeed",
         text: JSON.stringify({ branch: "fix/ci-flake" }),
       });
-      const textGeneration = makePiTextGeneration({ binaryPath: "/bin/pi" }, {}, {
-        createClient: harness.factory,
-      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
 
       const error = yield* Effect.flip(
         textGeneration.generateBranchName({
@@ -194,7 +232,7 @@ describe("PiTextGeneration", () => {
       );
 
       expect(error._tag).toBe("TextGenerationError");
-      expect(error.detail).toContain("provider/model");
+      expect(String(error.cause)).toContain("provider/model");
       expect(harness.clients[0]?.closed).toBe(true);
     }),
   );
@@ -202,9 +240,13 @@ describe("PiTextGeneration", () => {
   it.effect("fails and closes when the agent reports an error event", () =>
     Effect.gen(function* () {
       const harness = makeHarness({ kind: "errorEvent", message: "model overloaded" });
-      const textGeneration = makePiTextGeneration({ binaryPath: "/bin/pi" }, {}, {
-        createClient: harness.factory,
-      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
 
       const error = yield* Effect.flip(
         textGeneration.generateThreadTitle({
@@ -223,9 +265,13 @@ describe("PiTextGeneration", () => {
   it.effect("fails when settlement reports aborted", () =>
     Effect.gen(function* () {
       const harness = makeHarness({ kind: "aborted" });
-      const textGeneration = makePiTextGeneration({ binaryPath: "/bin/pi" }, {}, {
-        createClient: harness.factory,
-      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
 
       const error = yield* Effect.flip(
         textGeneration.generateThreadTitle({
@@ -244,9 +290,13 @@ describe("PiTextGeneration", () => {
   it.effect("fails with TextGenerationError when output is empty", () =>
     Effect.gen(function* () {
       const harness = makeHarness({ kind: "succeed", text: null });
-      const textGeneration = makePiTextGeneration({ binaryPath: "/bin/pi" }, {}, {
-        createClient: harness.factory,
-      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
 
       const error = yield* Effect.flip(
         textGeneration.generateThreadTitle({
@@ -267,9 +317,13 @@ describe("PiTextGeneration", () => {
         kind: "succeed",
         text: "totally not json output from a confused model",
       });
-      const textGeneration = makePiTextGeneration({ binaryPath: "/bin/pi" }, {}, {
-        createClient: harness.factory,
-      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
 
       const error = yield* Effect.flip(
         textGeneration.generateThreadTitle({
@@ -294,9 +348,13 @@ describe("PiTextGeneration", () => {
           branch: "Add Pi Provider!!",
         }),
       });
-      const textGeneration = makePiTextGeneration({ binaryPath: "/bin/pi" }, {}, {
-        createClient: harness.factory,
-      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
 
       const generated = yield* textGeneration.generateCommitMessage({
         cwd: process.cwd(),
@@ -320,9 +378,13 @@ describe("PiTextGeneration", () => {
         kind: "promptRejected",
         message: "connection reset",
       });
-      const textGeneration = makePiTextGeneration({ binaryPath: "/bin/pi" }, {}, {
-        createClient: harness.factory,
-      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
 
       const error = yield* Effect.flip(
         textGeneration.generatePrContent({
@@ -337,7 +399,7 @@ describe("PiTextGeneration", () => {
       );
 
       expect(error._tag).toBe("TextGenerationError");
-      expect(error.detail).toContain("prompt");
+      expect(error.detail).toContain("request failed");
       expect(harness.clients[0]?.closed).toBe(true);
     }),
   );

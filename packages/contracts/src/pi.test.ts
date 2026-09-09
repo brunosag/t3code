@@ -7,11 +7,9 @@ import {
   PROVIDER_DISPLAY_NAMES,
 } from "./model.ts";
 import { ProviderDriverKind } from "./providerInstance.ts";
-import {
-  PiConnectionSettings,
-  resolveProviderInstanceEnabled,
-  ServerSettings,
-} from "./settings.ts";
+import { resolveProviderInstanceEnabled, ServerSettings } from "./settings.ts";
+
+import { PiConnectionSettings } from "./pi.ts";
 
 const piDriver = ProviderDriverKind.make("pi");
 const decodePiConnectionSettings = Schema.decodeUnknownSync(PiConnectionSettings);
@@ -22,11 +20,11 @@ describe("Pi UI integration", () => {
     expect(decodePiConnectionSettings({}).binaryPath).toBe("pi");
   });
 
-  it("trims an explicit Pi binary path and falls back on empty", () => {
+  it("trims an explicit Pi binary path and rejects empty paths", () => {
     expect(decodePiConnectionSettings({ binaryPath: "  /usr/local/bin/pi  " }).binaryPath).toBe(
       "/usr/local/bin/pi",
     );
-    expect(decodePiConnectionSettings({ binaryPath: "   " }).binaryPath).toBe("pi");
+    expect(() => decodePiConnectionSettings({ binaryPath: "   " })).toThrow();
   });
 
   it("keeps Pi connection settings to the binary path only", () => {
@@ -45,8 +43,8 @@ describe("Pi UI integration", () => {
 
   it("resolves Pi enabled state generically from the instance envelope", () => {
     expect(resolveProviderInstanceEnabled({ driver: piDriver, config: {} })).toBe(true);
-    expect(
-      resolveProviderInstanceEnabled({ driver: piDriver, enabled: false, config: {} }),
-    ).toBe(false);
+    expect(resolveProviderInstanceEnabled({ driver: piDriver, enabled: false, config: {} })).toBe(
+      false,
+    );
   });
 });

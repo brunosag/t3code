@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off - Promise/callback boundary for the external RPC process; timers are cleared with its owner.
-import { randomUUID } from "node:crypto";
-import { readFile, access } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 import {
   EventId,
   ProviderDriverKind,
@@ -16,6 +16,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as PubSub from "effect/PubSub";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -32,7 +33,41 @@ import {
   piModelSelection,
 } from "./PiProtocol.ts";
 
+const decodePiMessage = Schema.decodeUnknownSync(PiMessage);
+const decodePiDelta = Schema.decodeUnknownSync(PiDelta);
+const decodePiUiRequest = Schema.decodeUnknownSync(PiUiRequest);
+const decodePiResumeCursor = Schema.decodeUnknownSync(PiResumeCursor);
+const decodePiState = Schema.decodeUnknownSync(PiState);
 const PROVIDER = ProviderDriverKind.make("pi");
+const decodeAnswer = Schema.decodeUnknownSync(
+  Schema.optional(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
+);
+const decodeTool = Schema.decodeUnknownSync(
+  Schema.Struct({
+    toolCallId: Schema.String,
+    toolName: Schema.String,
+    isError: Schema.optional(Schema.Boolean),
+  }),
+);
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const decodeToolResult = Schema.decodeUnknownOption(
+  Schema.Struct({
+    content: Schema.Array(
+      Schema.Struct({ type: Schema.String, text: Schema.optional(Schema.String) }),
+    ),
+  }),
+);
+const toolDetail = (value: unknown): string | undefined => {
+  const decoded = decodeToolResult(value);
+  if (Option.isNone(decoded)) return undefined;
+  return (
+    decoded.value.content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text ?? "")
+      .join("\n")
+      .slice(0, 12_000) || undefined
+  );
+};
 type EventBody = ProviderRuntimeEvent extends infer E
   ? E extends ProviderRuntimeEvent
     ? Pick<E, "type" | "payload">
@@ -56,6 +91,7 @@ interface Session {
   failure?: string | undefined;
   interrupted: boolean;
   runStarted: boolean;
+  interruptEpoch: number;
   pending: Map<
     string,
     { method: string; options?: readonly string[]; timer?: ReturnType<typeof setTimeout> }
@@ -72,7 +108,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
   const emit = (ctx: Session, body: EventBody, refs: Partial<ProviderRuntimeEventBase> = {}) => {
     if (ctx.stopped) return;
     PubSub.publishUnsafe(events, {
-      eventId: EventId.make(randomUUID()),
+      eventId: EventId.make(NodeCrypto.randomUUID()),
       provider: PROVIDER,
       providerInstanceId: options.instanceId,
       threadId: ctx.session.threadId,
@@ -103,10 +139,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     ctx.operations = next.catch(() => {});
     return next;
   };
-  const resolveUi = (ctx: Session, id: string, response: Record<string, unknown>) => {
+  const resolveUi = (ctx: Session, id: string, response: Record<string, unknown>, send = true) => {
     const pending = ctx.pending.get(id);
     if (!pending) throw new Error(`Pi input request ${id} is no longer pending.`);
-    ctx.client.send({ type: "extension_ui_response", id, ...response });
+    if (send) ctx.client.send({ type: "extension_ui_response", id, ...response });
     clearTimeout(pending.timer);
     ctx.pending.delete(id);
     emit(
@@ -117,7 +153,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
   };
   const finish = (ctx: Session) => {
     if (!ctx.session.activeTurnId) return;
-    for (const id of ctx.pending.keys()) resolveUi(ctx, id, { cancelled: true });
+    // Settlement/exit means Pi no longer awaits these dialogs. Resolve only the T3 UI.
+    for (const id of ctx.pending.keys()) resolveUi(ctx, id, { cancelled: true }, false);
     emit(ctx, {
       type: "turn.completed",
       payload: {
@@ -137,9 +174,9 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           ctx.runStarted = true;
           break;
         case "message_start": {
-          const message = Schema.decodeUnknownSync(PiMessage)(event.message);
+          const message = decodePiMessage(event.message);
           if (message.role !== "assistant") break;
-          ctx.itemId = RuntimeItemId.make(randomUUID());
+          ctx.itemId = RuntimeItemId.make(NodeCrypto.randomUUID());
           ctx.text = "";
           emit(
             ctx,
@@ -149,9 +186,9 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           break;
         }
         case "message_update": {
-          const delta = Schema.decodeUnknownSync(PiDelta)(event.assistantMessageEvent);
+          const delta = decodePiDelta(event.assistantMessageEvent);
           if (delta.type !== "text_delta" && delta.type !== "thinking_delta") break;
-          if (!ctx.itemId) ctx.itemId = RuntimeItemId.make(randomUUID());
+          if (!ctx.itemId) ctx.itemId = RuntimeItemId.make(NodeCrypto.randomUUID());
           if (delta.type === "text_delta") ctx.text += delta.delta ?? "";
           emit(
             ctx,
@@ -168,9 +205,9 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           break;
         }
         case "message_end": {
-          const message = Schema.decodeUnknownSync(PiMessage)(event.message);
+          const message = decodePiMessage(event.message);
           if (message.role !== "assistant") break;
-          if (!ctx.itemId) ctx.itemId = RuntimeItemId.make(randomUUID());
+          if (!ctx.itemId) ctx.itemId = RuntimeItemId.make(NodeCrypto.randomUUID());
           const text = piMessageText(message);
           if (text.startsWith(ctx.text) && text.length > ctx.text.length) {
             emit(
@@ -202,13 +239,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         case "tool_execution_start":
         case "tool_execution_update":
         case "tool_execution_end": {
-          const tool = Schema.decodeUnknownSync(
-            Schema.Struct({
-              toolCallId: Schema.String,
-              toolName: Schema.String,
-              isError: Schema.optional(Schema.Boolean),
-            }),
-          )(event);
+          const tool = decodeTool(event);
           emit(
             ctx,
             {
@@ -227,10 +258,15 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
                       ? "failed"
                       : "completed"
                     : "inProgress",
+                ...(toolDetail(event.result ?? event.partialResult)
+                  ? { detail: toolDetail(event.result ?? event.partialResult)! }
+                  : {}),
+                // Keep extension internals and image/base64 results off the wire.
                 data: {
                   toolName: tool.toolName,
-                  arguments: event.args,
-                  result: event.result ?? event.partialResult,
+                  ...(event.args !== undefined
+                    ? { input: encodeJson(event.args).slice(0, 12_000) }
+                    : {}),
                 },
               },
             },
@@ -261,7 +297,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           });
           break;
         case "extension_ui_request": {
-          const req = Schema.decodeUnknownSync(PiUiRequest)(event);
+          const req = decodePiUiRequest(event);
           if (["confirm", "select", "input", "editor"].includes(req.method)) {
             const choices = req.method === "confirm" ? ["Yes", "No"] : (req.options ?? []);
             const pending: Session["pending"] extends Map<string, infer P> ? P : never = {
@@ -310,6 +346,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
                 },
                 Math.max(0, req.timeout),
               );
+            pending.timer?.unref();
           } else if (req.method === "notify" && req.message) {
             emit(ctx, { type: "runtime.warning", payload: { message: req.message } });
           }
@@ -323,7 +360,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
   };
   const stop = async (ctx: Session) => {
     if (ctx.stopped) return;
-    for (const id of ctx.pending.keys()) resolveUi(ctx, id, { cancelled: true });
+    for (const id of ctx.pending.keys()) resolveUi(ctx, id, { cancelled: true }, false);
     emit(ctx, { type: "session.exited", payload: { exitKind: "graceful", recoverable: true } });
     ctx.stopped = true;
     sessions.delete(ctx.session.threadId);
@@ -352,14 +389,12 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         if (inFlight) return inFlight;
         const start = async () => {
           const cursor =
-            input.resumeCursor === undefined
-              ? undefined
-              : Schema.decodeUnknownSync(PiResumeCursor)(input.resumeCursor);
+            input.resumeCursor === undefined ? undefined : decodePiResumeCursor(input.resumeCursor);
           if (cursor) {
-            if (!isAbsolute(cursor.sessionPath))
+            if (!NodePath.isAbsolute(cursor.sessionPath))
               throw new Error("Pi resume path must be absolute.");
             // Pi treats a missing --session path as a new session; never silently lose history.
-            await access(cursor.sessionPath);
+            await NodeFSP.access(cursor.sessionPath);
           }
           const now = new Date().toISOString();
           const ctx: Session = {
@@ -378,6 +413,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             text: "",
             interrupted: false,
             runStarted: false,
+            interruptEpoch: 0,
             pending: new Map(),
             operations: Promise.resolve(),
           };
@@ -401,7 +437,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             },
           });
           try {
-            const state = Schema.decodeUnknownSync(PiState)(await ctx.client.request("get_state"));
+            const state = decodePiState(await ctx.client.request("get_state"));
             if (!state.sessionFile)
               throw new Error("Pi must provide a persistent session file for T3 resume.");
             if (cursor && state.sessionFile !== cursor.sessionPath)
@@ -436,6 +472,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     sendTurn: (input) =>
       call("sendTurn", async () => {
         const ctx = get(input.threadId);
+        const epoch = ctx.interruptEpoch;
         return serialize(ctx, async () => {
           if (ctx.stopped) throw new Error("Pi session is closed.");
           if (input.interactionMode === "plan")
@@ -453,7 +490,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
                 if (!path) throw new Error("Invalid Pi image attachment.");
                 return {
                   type: "image",
-                  data: (await readFile(path)).toString("base64"),
+                  data: (await NodeFSP.readFile(path)).toString("base64"),
                   mimeType: attachment.mimeType,
                 };
               }),
@@ -465,8 +502,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             await ctx.client.request("set_model", selection);
             ctx.session = { ...ctx.session, model: input.modelSelection!.model };
           }
+          if (ctx.stopped || ctx.interruptEpoch !== epoch)
+            throw new Error("Pi prompt was interrupted before acceptance.");
           const steering = !!ctx.session.activeTurnId;
-          const turnId = ctx.session.activeTurnId ?? TurnId.make(randomUUID());
+          const turnId = ctx.session.activeTurnId ?? TurnId.make(NodeCrypto.randomUUID());
           if (!steering) {
             ctx.failure = undefined;
             ctx.interrupted = false;
@@ -487,7 +526,12 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               ...(steering ? { streamingBehavior: "steer" } : {}),
             });
             // Extension commands may be handled without ever starting an agent run.
-            const state = Schema.decodeUnknownSync(PiState)(await ctx.client.request("get_state"));
+            const state = decodePiState(await ctx.client.request("get_state"));
+            if (state.sessionFile)
+              ctx.session = {
+                ...ctx.session,
+                resumeCursor: { version: 1, sessionPath: state.sessionFile },
+              };
             if (!ctx.runStarted && !state.isStreaming && ctx.session.activeTurnId === turnId)
               finish(ctx);
             return { threadId: input.threadId, turnId, resumeCursor: ctx.session.resumeCursor };
@@ -505,10 +549,17 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         const ctx = get(id);
         if (turnId && ctx.session.activeTurnId !== turnId) return;
         ctx.interrupted = true;
+        ctx.interruptEpoch += 1;
         for (const requestId of ctx.pending.keys()) resolveUi(ctx, requestId, { cancelled: true });
-        await ctx.client.request("clear_queue");
-        await ctx.client.request("abort");
-        finish(ctx);
+        const previous = ctx.operations;
+        const abort = (async () => {
+          await ctx.client.request("clear_queue");
+          await ctx.client.request("abort");
+          finish(ctx);
+        })();
+        // Interrupt in-flight preflight immediately, but keep later prompts behind abort.
+        ctx.operations = Promise.allSettled([previous, abort]);
+        await abort;
       }),
     respondToRequest: (id, requestId, decision) =>
       call("respondToRequest", async () => {
@@ -521,9 +572,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         const ctx = get(id);
         const pending = ctx.pending.get(requestId);
         if (!pending) throw new Error("Pi request is no longer pending.");
-        const answer = Schema.decodeUnknownSync(
-          Schema.optional(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
-        )(answers[requestId]);
+        const answer = decodeAnswer(answers[requestId]);
         const value = typeof answer === "string" ? answer : answer?.[0];
         if (value === undefined) return resolveUi(ctx, requestId, { cancelled: true });
         if (pending.options?.length && !pending.options.includes(value))

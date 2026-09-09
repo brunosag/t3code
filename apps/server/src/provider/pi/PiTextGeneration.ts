@@ -28,6 +28,7 @@ export type PiRpcClientFactory = (
 ) => PiRpcClientLike | Promise<PiRpcClientLike>;
 type Operation = keyof TextGeneration.TextGeneration["Service"];
 const decodeMessage = Schema.decodeUnknownSync(PiMessage);
+const decodeState = Schema.decodeUnknownSync(PiState);
 
 /** Auxiliary prompts use the same external runtime, with no tool/resource/config overrides. */
 export const makePiTextGeneration = (
@@ -106,7 +107,7 @@ export const makePiTextGeneration = (
       const owned = client;
       yield* Effect.tryPromise({
         try: async () => {
-          Schema.decodeUnknownSync(PiState)(await owned.request("get_state"));
+          decodeState(await owned.request("get_state"));
           const selection = piModelSelection(input.modelSelection.model);
           if (selection) await owned.request("set_model", selection);
           await owned.request("prompt", { message: input.prompt });
@@ -115,6 +116,8 @@ export const makePiTextGeneration = (
       });
       yield* Deferred.await(settled);
       if (!assistantText.trim()) return yield* failure("Pi agent returned empty output.");
+      // The output schema varies by operation (title, commit, or pull request).
+      // oxlint-disable-next-line t3code/no-inline-schema-compile
       return yield* Schema.decodeEffect(Schema.fromJsonString(input.outputSchema))(
         extractJsonObject(assistantText.trim()),
       ).pipe(

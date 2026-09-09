@@ -51,7 +51,11 @@ class FakePiClient implements Client {
   };
   private readonly failures = new Map<string, Error>();
 
-  constructor(private readonly init: ClientInit) {}
+  private readonly init: ClientInit;
+
+  constructor(init: ClientInit) {
+    this.init = init;
+  }
 
   failRequest(type: string, message: string): void {
     this.failures.set(type, new Error(message));
@@ -167,9 +171,7 @@ function subscribe(adapter: PiAdapter, count: number) {
   });
 }
 
-const assertRuntimeEvent = (event: unknown): void => {
-  Schema.decodeUnknownSync(ProviderRuntimeEvent)(event);
-};
+const assertRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent);
 
 describe("PiAdapter", () => {
   it.effect("reuses a live session and passes cwd/environment through unchanged", () =>
@@ -308,9 +310,7 @@ describe("PiAdapter", () => {
       yield* startSession(adapter, ThreadId.make("thread-model"), {
         modelSelection: createModelSelection(piInstance, "acme/text-pro/v2"),
       });
-      const setModel = harness.clients[1]?.requests.find(
-        (request) => request.type === "set_model",
-      );
+      const setModel = harness.clients[1]?.requests.find((request) => request.type === "set_model");
       expect(setModel?.fields).toEqual({ provider: "acme", modelId: "text-pro/v2" });
 
       const malformed = yield* Effect.flip(
@@ -501,9 +501,7 @@ describe("PiAdapter", () => {
 
       expect(second.turnId).toBe(first.turnId);
       expect(second.resumeCursor).toEqual(first.resumeCursor);
-      const prompts = harness.clients[0]?.requests.filter(
-        (request) => request.type === "prompt",
-      );
+      const prompts = harness.clients[0]?.requests.filter((request) => request.type === "prompt");
       expect(prompts).toHaveLength(2);
       expect(prompts?.[0]?.fields).not.toHaveProperty("streamingBehavior");
       expect(prompts?.[1]?.fields).toMatchObject({ streamingBehavior: "steer" });
@@ -665,6 +663,39 @@ describe("PiAdapter", () => {
     }),
   );
 
+  it.effect("interrupts blocked model preflight before accepting a prompt", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-preflight-interrupt");
+      yield* startSession(adapter, threadId);
+      const client = harness.clients[0]!;
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<unknown>();
+      const request = client.request.bind(client);
+      client.request = (type, fields) => {
+        if (type !== "set_model") return request(type, fields);
+        entered.resolve();
+        return release.promise;
+      };
+      const pending = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "must not run",
+          modelSelection: createModelSelection(piInstance, "provider/model"),
+        })
+        .pipe(Effect.flip, Effect.forkChild);
+      yield* Effect.promise(() => entered.promise);
+      yield* adapter.interruptTurn(threadId);
+      expect(client.requestTypes().slice(-2)).toEqual(["clear_queue", "abort"]);
+      release.resolve({});
+      const failure = yield* Fiber.join(pending);
+      expect(failure.detail).toContain("interrupted before acceptance");
+      expect(client.requestTypes()).not.toContain("prompt");
+      expect(yield* adapter.hasSession(threadId)).toBe(true);
+    }),
+  );
+
   it.effect("fails the turn on prompt rejection without killing the session", () =>
     Effect.gen(function* () {
       const harness = makeHarness();
@@ -672,15 +703,20 @@ describe("PiAdapter", () => {
       const threadId = ThreadId.make("thread-failure");
       yield* startSession(adapter, threadId);
       harness.clients[0]!.failRequest("prompt", "connection reset");
-      const receipts = yield* subscribe(adapter, 2);
+      const receipts = yield* subscribe(adapter, 4);
 
       const failure = yield* Effect.flip(adapter.sendTurn({ threadId, input: "hello" }));
       expect(failure._tag).toBe("ProviderAdapterRequestError");
       expect(failure.method).toBe("sendTurn");
       expect(String(failure.detail)).toContain("connection reset");
       const events = Array.from(yield* Fiber.join(receipts));
-      expect(events.map((event) => event.type)).toEqual(["turn.completed", "session.state.changed"]);
-      expect(events[0]).toMatchObject({
+      expect(events.map((event) => event.type)).toEqual([
+        "turn.started",
+        "session.state.changed",
+        "turn.completed",
+        "session.state.changed",
+      ]);
+      expect(events[2]).toMatchObject({
         type: "turn.completed",
         payload: { state: "failed", errorMessage: "connection reset" },
       });
