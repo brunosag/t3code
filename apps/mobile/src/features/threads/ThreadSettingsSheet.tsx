@@ -14,6 +14,7 @@ import {
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
+import { getProviderManagedPermissions } from "@t3tools/client-runtime/providerPermissions";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import {
   createNativeStackNavigator,
@@ -322,13 +323,7 @@ type ThreadSettingsSessionProps = {
   readonly onUpdateOptionSelections: (selections: ReadonlyArray<ProviderOptionSelection>) => void;
   readonly runtimeMode: RuntimeMode;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
-  /**
-   * When the selected driver is Pi, T3 runtime modes are not enforced —
-   * permissions come from the Pi runtime. Shows a static "Pi managed"
-   * label instead of the T3 access picker. The stored runtimeMode value is
-   * untouched.
-   */
-  readonly isPiDriver?: boolean;
+  readonly managedPermissions?: ReturnType<typeof getProviderManagedPermissions>;
 };
 
 export type ExistingThreadSettingsRouteSession = ThreadSettingsSessionProps & {
@@ -378,7 +373,7 @@ type ThreadSettingsSessionValue = {
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
   readonly runtimeMode: RuntimeMode;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
-  readonly isPiDriver: boolean;
+  readonly managedPermissions: ReturnType<typeof getProviderManagedPermissions>;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly providerExpansionOverrides: ReadonlySet<string>;
   readonly hasLegacyModels: boolean;
@@ -507,7 +502,7 @@ function ThreadSettingsSessionProvider(
       providerGroups: props.providerGroups,
       runtimeMode: props.runtimeMode,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
-      isPiDriver: props.isPiDriver ?? false,
+      managedPermissions: props.managedPermissions,
       displayedDescriptors,
       providerExpansionOverrides,
       hasLegacyModels,
@@ -538,7 +533,7 @@ function ThreadSettingsSessionProvider(
       pendingModel,
       pressModel,
       providerFilter,
-      props.isPiDriver,
+      props.managedPermissions,
       props.onUpdateRuntimeMode,
       props.providerGroups,
       props.runtimeMode,
@@ -762,16 +757,16 @@ function ThreadSettingsOptionsItem(props: {
           );
         })}
         <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
-          {session.isPiDriver ? (
+          {session.managedPermissions ? (
             <View
-              accessibilityLabel="Runtime. Pi managed. Permissions and tool behavior come from your Pi runtime."
+              accessibilityLabel={`Runtime. ${session.managedPermissions.label}. ${session.managedPermissions.description}`}
               accessibilityRole="text"
               className="min-h-11 flex-row items-center gap-2 bg-card px-4 py-2"
             >
               <Text className="text-sm font-t3-medium text-foreground">Runtime</Text>
               <View className="flex-1" />
               <Text className="text-sm text-foreground-muted" numberOfLines={1}>
-                Pi managed
+                {session.managedPermissions.label}
               </Text>
             </View>
           ) : (
@@ -928,16 +923,13 @@ function ThreadSettingsChoiceContent(props: {
       : undefined;
 
   const submenuContent =
-    props.submenu.kind === "runtime" && session.isPiDriver
+    props.submenu.kind === "runtime" && session.managedPermissions
       ? {
-          // Unreachable through the UI (the Runtime row is static for Pi),
-          // but a stale navigation state must still not advertise T3 modes.
-          // Tapping back out changes nothing: the stored value stays as-is.
           rows: [
             {
-              id: "pi-managed",
-              label: "Pi managed",
-              description: "Permissions and tool behavior come from your Pi runtime.",
+              id: "managed",
+              label: session.managedPermissions.label,
+              description: session.managedPermissions.description,
               selected: true,
               onPress: () => {
                 props.onSelected();
@@ -1153,9 +1145,7 @@ function ThreadSettingsModelsScreen() {
       />
       <ThreadSettingsMainContent
         onOpenSubmenu={(submenu) => {
-          // The Pi Runtime row is static and never navigates here; guard
-          // stale navigation state so T3 modes stay unoffered for Pi.
-          if (submenu.kind === "runtime" && session.isPiDriver) return;
+          if (submenu.kind === "runtime" && session.managedPermissions) return;
           const title =
             submenu.kind === "runtime"
               ? "Runtime"
@@ -1337,6 +1327,10 @@ export function NewTaskThreadSettingsRouteScreen() {
       }),
     [flow.selectedModel?.options, flow.selectedModelOption?.capabilities],
   );
+  const managedPermissions = useMemo(
+    () => getProviderManagedPermissions(flow.selectedProviderStatus ?? undefined),
+    [flow.selectedProviderStatus],
+  );
 
   return (
     <ThreadSettingsSessionProvider
@@ -1348,7 +1342,7 @@ export function NewTaskThreadSettingsRouteScreen() {
       onUpdateOptionSelections={flow.setSelectedModelOptions}
       runtimeMode={flow.runtimeMode}
       onUpdateRuntimeMode={flow.setRuntimeMode}
-      isPiDriver={flow.selectedProviderStatus?.driver === "pi"}
+      managedPermissions={managedPermissions}
     >
       <ThreadSettingsPickerNavigator onClose={() => navigation.goBack()} />
     </ThreadSettingsSessionProvider>

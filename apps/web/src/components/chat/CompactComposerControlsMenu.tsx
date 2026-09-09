@@ -1,4 +1,5 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import { getProviderManagedPermissions } from "@t3tools/client-runtime/providerPermissions";
 import { memo, type ReactNode } from "react";
 import { EllipsisIcon } from "lucide-react";
 import {
@@ -19,12 +20,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
   size?: "sm" | "xs";
-  /**
-   * When the selected driver is Pi, T3 runtime modes are not enforced —
-   * permissions come from the Pi runtime. Shows a static label instead of
-   * the T3 access picker.
-   */
-  isPiDriver?: boolean;
+  managedPermissions?: ReturnType<typeof getProviderManagedPermissions>;
   /**
    * The resting strip keeps this menu mounted out of flow while every block
    * fits inline. Its portaled popup would outlive that transition, so an
@@ -75,11 +71,11 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
           </>
         ) : null}
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
-        {props.isPiDriver ? (
+        {props.managedPermissions ? (
           <div className="px-2 pb-1.5">
-            <div className="text-sm font-medium text-foreground">Pi managed</div>
+            <div className="text-sm font-medium text-foreground">{props.managedPermissions.label}</div>
             <div className="text-muted-foreground text-xs leading-4">
-              Permissions and tool behavior come from your Pi runtime.
+              {props.managedPermissions.description}
             </div>
           </div>
         ) : (

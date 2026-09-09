@@ -27,6 +27,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
+import { getProviderManagedPermissions } from "@t3tools/client-runtime/providerPermissions";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
@@ -995,12 +996,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   runtimeMode: RuntimeMode;
   size?: "sm" | "xs";
   hidden?: boolean;
-  /**
-   * When the selected driver is Pi, T3 runtime modes are not enforced —
-   * permissions come from the Pi runtime. Shows a static label instead of
-   * the T3 permission picker. The stored runtimeMode value is untouched.
-   */
-  isPiDriver?: boolean;
+  managedPermissions?: ReturnType<typeof getProviderManagedPermissions>;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
@@ -1061,7 +1057,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
     <>
       <ComposerControlSeparator size={size} />
 
-      {props.isPiDriver ? (
+      {props.managedPermissions ? (
         <Tooltip>
           <TooltipTrigger
             render={
@@ -1074,13 +1070,11 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                 )}
                 aria-label="Runtime permissions"
               >
-                Pi managed
+                {props.managedPermissions.label}
               </span>
             }
           />
-          <TooltipPopup side="top">
-            Permissions and tool behavior come from your Pi runtime.
-          </TooltipPopup>
+          <TooltipPopup side="top">{props.managedPermissions.description}</TooltipPopup>
         </Tooltip>
       ) : (
         <Tooltip>
@@ -1754,11 +1748,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // disabled.
   const selectedProvider: ProviderDriverKind =
     selectedProviderEntry?.driverKind ?? requestedDriverKind;
-  // Pi owns all permission policy: the T3 runtime permission picker must
-  // not look enforced when the Pi driver runs the turn. The stored
-  // runtimeMode value stays as-is (keybindings may still change it); the Pi
-  // adapter intentionally ignores T3 policies.
-  const isPiDriver = selectedProvider === "pi";
+  const managedPermissions = useMemo(
+    () => getProviderManagedPermissions(selectedProviderEntry?.snapshot),
+    [selectedProviderEntry?.snapshot],
+  );
 
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
     threadRef: composerDraftTarget,
@@ -4113,7 +4106,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           runtimeMode={runtimeMode}
           size={composerControlsInStrip ? "xs" : "sm"}
           hidden={composerControlsHidden || restingHiddenBlockCount > 0}
-          isPiDriver={isPiDriver}
+          managedPermissions={managedPermissions}
           onToggleInteractionMode={toggleInteractionMode}
           onRuntimeModeChange={handleRuntimeModeChange}
         />
@@ -4193,7 +4186,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           runtimeMode={runtimeMode}
           showInteractionModeToggle={planModeUiEnabled}
           traitsMenuContent={providerTraitsMenuContent}
-          isPiDriver={isPiDriver}
+          managedPermissions={managedPermissions}
           onToggleInteractionMode={toggleInteractionMode}
           onRuntimeModeChange={handleRuntimeModeChange}
         />
@@ -4234,7 +4227,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 runtimeMode={runtimeMode}
                 size="xs"
                 hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
-                isPiDriver={isPiDriver}
+                managedPermissions={managedPermissions}
                 showInteractionModeToggle={
                   planModeUiEnabled && hiddenRestingBlockIds.includes("mode")
                 }
