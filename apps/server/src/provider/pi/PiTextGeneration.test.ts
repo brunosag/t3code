@@ -21,7 +21,15 @@ type PromptBehavior =
   | { readonly kind: "succeed"; readonly text: string | null }
   | { readonly kind: "errorEvent"; readonly message: string }
   | { readonly kind: "aborted" }
-  | { readonly kind: "promptRejected"; readonly message: string };
+  | { readonly kind: "promptRejected"; readonly message: string }
+  | { readonly kind: "interactive"; readonly method: string; readonly id?: string }
+  | { readonly kind: "errorThenRetry"; readonly errorMessage: string; readonly text: string }
+  | {
+      readonly kind: "successThenError";
+      readonly text: string;
+      readonly errorMessage: string;
+    }
+  | { readonly kind: "ignoredUi"; readonly method: string; readonly text: string };
 
 interface FakeHarness {
   readonly factory: PiRpcClientFactory;
@@ -31,6 +39,7 @@ interface FakeHarness {
 
 class FakePiRpcClient implements PiRpcClientLike {
   readonly requests: Array<RecordedRequest> = [];
+  readonly sent: Array<Record<string, unknown>> = [];
   closed = false;
   private readonly init: PiRpcClientInit;
   private readonly behavior: PromptBehavior;
@@ -42,7 +51,9 @@ class FakePiRpcClient implements PiRpcClientLike {
     this.shared = shared;
   }
 
-  send(): void {}
+  send(message: Record<string, unknown>): void {
+    this.sent.push(message);
+  }
 
   async request(type: string, fields?: Record<string, unknown>): Promise<unknown> {
     const recorded = { type, fields };
@@ -60,6 +71,74 @@ class FakePiRpcClient implements PiRpcClientLike {
       throw new Error(behavior.message);
     }
     queueMicrotask(() => {
+      if (behavior.kind === "interactive") {
+        this.init.onEvent({
+          type: "extension_ui_request",
+          id: behavior.id ?? "ui-1",
+          method: behavior.method,
+        });
+        this.init.onEvent({ type: "agent_settled", reason: "completed" });
+        return;
+      }
+      if (behavior.kind === "errorThenRetry") {
+        this.init.onEvent({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [],
+            stopReason: "error",
+            errorMessage: behavior.errorMessage,
+          },
+        });
+        this.init.onEvent({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: behavior.text }],
+            stopReason: "stop",
+          },
+        });
+        this.init.onEvent({ type: "agent_settled", reason: "completed" });
+        return;
+      }
+      if (behavior.kind === "successThenError") {
+        this.init.onEvent({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: behavior.text }],
+            stopReason: "stop",
+          },
+        });
+        this.init.onEvent({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [],
+            stopReason: "error",
+            errorMessage: behavior.errorMessage,
+          },
+        });
+        this.init.onEvent({ type: "agent_settled" });
+        return;
+      }
+      if (behavior.kind === "ignoredUi") {
+        this.init.onEvent({
+          type: "extension_ui_request",
+          id: "ui-ignored",
+          method: behavior.method,
+        });
+        this.init.onEvent({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: behavior.text }],
+            stopReason: "stop",
+          },
+        });
+        this.init.onEvent({ type: "agent_settled", reason: "completed" });
+        return;
+      }
       if (behavior.kind === "errorEvent") {
         this.init.onEvent({
           type: "message_end",
@@ -400,6 +479,116 @@ describe("PiTextGeneration", () => {
 
       expect(error._tag).toBe("TextGenerationError");
       expect(error.detail).toContain("request failed");
+      expect(harness.clients[0]?.closed).toBe(true);
+    }),
+  );
+
+  it.effect("cancels an interactive confirm dialog and closes the client", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({ kind: "interactive", method: "confirm", id: "ui-42" });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
+
+      const error = yield* Effect.flip(
+        textGeneration.generateThreadTitle({
+          cwd: process.cwd(),
+          message: "anything",
+          modelSelection: createModelSelection(piInstance, "default"),
+        }),
+      );
+
+      expect(error._tag).toBe("TextGenerationError");
+      expect(error.detail).toMatch(/interactive input/i);
+      expect(harness.clients[0]?.sent).toEqual([
+        { type: "extension_ui_response", id: "ui-42", cancelled: true },
+      ]);
+      expect(harness.clients[0]?.closed).toBe(true);
+    }),
+  );
+
+  it.effect("recovers when Pi retries after a transient error before agent_settled", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        kind: "errorThenRetry",
+        errorMessage: "transient model overloaded",
+        text: JSON.stringify({ title: "Recovered title" }),
+      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
+
+      const generated = yield* textGeneration.generateThreadTitle({
+        cwd: process.cwd(),
+        message: "anything",
+        modelSelection: createModelSelection(piInstance, "default"),
+      });
+
+      expect(generated.title).toBe("Recovered title");
+      expect(harness.clients[0]?.closed).toBe(true);
+    }),
+  );
+
+  it.effect("fails when the final retry ends in error after an earlier success", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        kind: "successThenError",
+        text: JSON.stringify({ title: "Stale title" }),
+        errorMessage: "final retry failed",
+      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
+
+      const error = yield* Effect.flip(
+        textGeneration.generateThreadTitle({
+          cwd: process.cwd(),
+          message: "anything",
+          modelSelection: createModelSelection(piInstance, "default"),
+        }),
+      );
+
+      expect(error._tag).toBe("TextGenerationError");
+      expect(error.detail).toContain("final retry failed");
+      expect(harness.clients[0]?.closed).toBe(true);
+    }),
+  );
+
+  it.effect("ignores non-interactive extension UI requests", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        kind: "ignoredUi",
+        method: "toast",
+        text: JSON.stringify({ title: "Ordinary title" }),
+      });
+      const textGeneration = makePiTextGeneration(
+        { binaryPath: "/bin/pi" },
+        {},
+        {
+          createClient: harness.factory,
+        },
+      );
+
+      const generated = yield* textGeneration.generateThreadTitle({
+        cwd: process.cwd(),
+        message: "anything",
+        modelSelection: createModelSelection(piInstance, "default"),
+      });
+
+      expect(generated.title).toBe("Ordinary title");
+      expect(harness.clients[0]?.sent).toEqual([]);
       expect(harness.clients[0]?.closed).toBe(true);
     }),
   );
