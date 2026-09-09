@@ -323,6 +323,80 @@ describe("PiAdapter", () => {
     }),
   );
 
+  it.effect(
+    "restores the initial Pi model after an explicit override, including after resume",
+    () =>
+      Effect.gen(function* () {
+        const harness = makeHarness();
+        const adapter = yield* makePiAdapter(harness.options);
+        const threadId = ThreadId.make("default-restore");
+        const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pi-default-"));
+        try {
+          const sessionPath = NodePath.join(directory, "session.jsonl");
+          NodeFS.writeFileSync(sessionPath, "");
+          harness.initialState = {
+            ...harness.initialState,
+            sessionFile: sessionPath,
+            model: { provider: "native", id: "original/model" },
+          };
+          yield* startSession(adapter, threadId, {
+            modelSelection: createModelSelection(piInstance, "acme/override"),
+          });
+          const result = yield* adapter.sendTurn({
+            threadId,
+            input: "hello",
+            modelSelection: createModelSelection(piInstance, "default"),
+          });
+          expect(
+            harness.clients[0]!.requests.filter((r) => r.type === "set_model").map((r) => r.fields),
+          ).toEqual([
+            { provider: "acme", modelId: "override" },
+            { provider: "native", modelId: "original/model" },
+          ]);
+          expect((yield* adapter.listSessions())[0]?.model).toBe("default");
+          yield* adapter.stopSession(threadId);
+          // A resumed Pi session can report the last explicit model. The saved baseline wins.
+          harness.initialState = {
+            ...harness.initialState,
+            model: { provider: "acme", id: "override" },
+          };
+          yield* startSession(adapter, threadId, {
+            resumeCursor: result.resumeCursor,
+            modelSelection: createModelSelection(piInstance, "default"),
+          });
+          expect(harness.clients[1]!.requests.find((r) => r.type === "set_model")?.fields).toEqual({
+            provider: "native",
+            modelId: "original/model",
+          });
+        } finally {
+          NodeFS.rmSync(directory, { recursive: true, force: true });
+        }
+      }),
+  );
+
+  it.effect(
+    "fails default restoration without an initial model instead of accepting a mislabeled turn",
+    () =>
+      Effect.gen(function* () {
+        const harness = makeHarness();
+        const adapter = yield* makePiAdapter(harness.options);
+        const threadId = ThreadId.make("missing-default");
+        yield* startSession(adapter, threadId, {
+          modelSelection: createModelSelection(piInstance, "acme/override"),
+        });
+        const error = yield* Effect.flip(
+          adapter.sendTurn({
+            threadId,
+            input: "hello",
+            modelSelection: createModelSelection(piInstance, "default"),
+          }),
+        );
+        expect(error.detail).toContain("cannot restore Pi default");
+        expect(harness.clients[0]!.requestTypes()).not.toContain("prompt");
+        expect((yield* adapter.listSessions())[0]?.model).toBe("acme/override");
+      }),
+  );
+
   it.effect("switches models mid-session through sendTurn", () =>
     Effect.gen(function* () {
       const harness = makeHarness();

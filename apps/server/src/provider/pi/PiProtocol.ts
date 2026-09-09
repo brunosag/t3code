@@ -24,6 +24,7 @@ export const PiCommands = Schema.Struct({
 export const PiResumeCursor = Schema.Struct({
   version: Schema.Literal(1),
   sessionPath: Schema.String.check(Schema.isMinLength(1)),
+  defaultModel: Schema.optional(Schema.Struct({ provider: Schema.String, modelId: Schema.String })),
 });
 export const PiMessage = Schema.Struct({
   role: Schema.String,

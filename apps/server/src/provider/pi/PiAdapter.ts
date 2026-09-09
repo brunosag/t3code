@@ -85,6 +85,7 @@ export interface PiAdapterOptions {
 interface Session {
   client: Client;
   session: ProviderSession;
+  defaultModel?: typeof PiResumeCursor.Type.defaultModel;
   stopped: boolean;
   itemId?: RuntimeItemId | undefined;
   text: string;
@@ -442,13 +443,24 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               throw new Error("Pi must provide a persistent session file for T3 resume.");
             if (cursor && state.sessionFile !== cursor.sessionPath)
               throw new Error("Pi resumed a different session than requested.");
-            const selection = input.modelSelection && piModelSelection(input.modelSelection.model);
+            // Capture Pi's choice before any T3 override, retaining it across process resumes.
+            ctx.defaultModel =
+              cursor?.defaultModel ??
+              (state.model
+                ? { provider: state.model.provider, modelId: state.model.id }
+                : undefined);
+            const selection =
+              piModelSelection(input.modelSelection?.model ?? "default") ?? cursor?.defaultModel;
             if (selection) await ctx.client.request("set_model", selection);
             ctx.session = {
               ...ctx.session,
               status: "ready",
               model: input.modelSelection?.model ?? "default",
-              resumeCursor: { version: 1, sessionPath: state.sessionFile },
+              resumeCursor: {
+                version: 1,
+                sessionPath: state.sessionFile,
+                ...(ctx.defaultModel ? { defaultModel: ctx.defaultModel } : {}),
+              },
             };
             if (ctx.stopped) throw new Error("Pi exited during initialization.");
             sessions.set(input.threadId, ctx);
@@ -497,10 +509,13 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           );
           if (!input.input && images.length === 0)
             throw new Error("Pi requires a prompt or image.");
-          const selection = input.modelSelection && piModelSelection(input.modelSelection.model);
-          if (selection && input.modelSelection?.model !== ctx.session.model) {
+          const requestedModel = input.modelSelection?.model;
+          if (requestedModel && requestedModel !== ctx.session.model) {
+            const selection = piModelSelection(requestedModel) ?? ctx.defaultModel;
+            if (!selection)
+              throw new Error("Pi did not report an initial model; cannot restore Pi default.");
             await ctx.client.request("set_model", selection);
-            ctx.session = { ...ctx.session, model: input.modelSelection!.model };
+            ctx.session = { ...ctx.session, model: requestedModel };
           }
           if (ctx.stopped || ctx.interruptEpoch !== epoch)
             throw new Error("Pi prompt was interrupted before acceptance.");
@@ -530,7 +545,11 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             if (state.sessionFile)
               ctx.session = {
                 ...ctx.session,
-                resumeCursor: { version: 1, sessionPath: state.sessionFile },
+                resumeCursor: {
+                  version: 1,
+                  sessionPath: state.sessionFile,
+                  ...(ctx.defaultModel ? { defaultModel: ctx.defaultModel } : {}),
+                },
               };
             if (!ctx.runStarted && !state.isStreaming && ctx.session.activeTurnId === turnId)
               finish(ctx);

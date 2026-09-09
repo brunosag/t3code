@@ -63,6 +63,7 @@ export interface ProviderProbeResult {
 export interface ServerProviderPresentation {
   readonly displayName: string;
   readonly badgeLabel?: string;
+  readonly managesRuntimePermissions?: boolean;
   readonly showInteractionModeToggle?: boolean;
   readonly requiresNewThreadForModelChange?: boolean;
 }
@@ -209,6 +210,9 @@ export function buildServerProvider(input: {
   return {
     displayName: input.presentation.displayName,
     ...(input.presentation.badgeLabel ? { badgeLabel: input.presentation.badgeLabel } : {}),
+    ...(typeof input.presentation.managesRuntimePermissions === "boolean"
+      ? { managesRuntimePermissions: input.presentation.managesRuntimePermissions }
+      : {}),
     ...(typeof input.presentation.showInteractionModeToggle === "boolean"
       ? { showInteractionModeToggle: input.presentation.showInteractionModeToggle }
       : {}),

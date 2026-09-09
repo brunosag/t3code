@@ -570,7 +570,7 @@ describe("PiTextGeneration", () => {
     Effect.gen(function* () {
       const harness = makeHarness({
         kind: "ignoredUi",
-        method: "toast",
+        method: "notify",
         text: JSON.stringify({ title: "Ordinary title" }),
       });
       const textGeneration = makePiTextGeneration(

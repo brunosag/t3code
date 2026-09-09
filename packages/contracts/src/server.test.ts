@@ -12,6 +12,7 @@ import {
 import { ServerSettings } from "./settings.ts";
 
 const decodeServerProvider = Schema.decodeUnknownSync(ServerProvider);
+const encodeServerProvider = Schema.encodeSync(ServerProvider);
 const decodeServerProviders = Schema.decodeUnknownSync(ServerProviders);
 const decodeUpsertKeybindingResult = Schema.decodeUnknownSync(ServerUpsertKeybindingResult);
 const decodeAvailableEditors = Schema.decodeUnknownSync(ServerConfig.fields.availableEditors);
@@ -29,6 +30,16 @@ const baseProviderSnapshot = {
 };
 
 describe("ServerProvider", () => {
+  it("round-trips provider-managed permissions while accepting older snapshots", () => {
+    expect(decodeServerProvider(baseProviderSnapshot).managesRuntimePermissions).toBeUndefined();
+    for (const managesRuntimePermissions of [true, false]) {
+      const parsed = decodeServerProvider({ ...baseProviderSnapshot, managesRuntimePermissions });
+      expect(decodeServerProvider(encodeServerProvider(parsed)).managesRuntimePermissions).toBe(
+        managesRuntimePermissions,
+      );
+    }
+  });
+
   it("defaults capability arrays when decoding provider snapshots", () => {
     const parsed = decodeServerProvider({
       instanceId: "codex",

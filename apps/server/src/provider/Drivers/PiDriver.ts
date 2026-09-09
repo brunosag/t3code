@@ -54,6 +54,7 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
         status: enabled ? "warning" : "disabled",
         auth: { status: "unknown" },
         checkedAt: new Date().toISOString(),
+        managesRuntimePermissions: true,
         showInteractionModeToggle: false,
         requiresNewThreadForModelChange: false,
         supportsConversationRollback: false,
