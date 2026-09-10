@@ -165,7 +165,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     });
     const { activeTurnId: _, ...rest } = ctx.session;
     ctx.session = { ...rest, status: "ready", updatedAt: new Date().toISOString() };
-    emit(ctx, { type: "session.state.changed", payload: { state: "ready" } });
+    // A ready event would clear the failed turn's visible error in orchestration.
+    if (!ctx.failure) emit(ctx, { type: "session.state.changed", payload: { state: "ready" } });
   };
   const handleEvent = (ctx: Session, event: Record<string, unknown>) => {
     if (ctx.stopped) return;

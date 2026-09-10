@@ -777,7 +777,7 @@ describe("PiAdapter", () => {
       const threadId = ThreadId.make("thread-failure");
       yield* startSession(adapter, threadId);
       harness.clients[0]!.failRequest("prompt", "connection reset");
-      const receipts = yield* subscribe(adapter, 4);
+      const receipts = yield* subscribe(adapter, 3);
 
       const failure = yield* Effect.flip(adapter.sendTurn({ threadId, input: "hello" }));
       expect(failure._tag).toBe("ProviderAdapterRequestError");
@@ -788,7 +788,6 @@ describe("PiAdapter", () => {
         "turn.started",
         "session.state.changed",
         "turn.completed",
-        "session.state.changed",
       ]);
       expect(events[2]).toMatchObject({
         type: "turn.completed",
@@ -798,6 +797,43 @@ describe("PiAdapter", () => {
       harness.clients[0]!.clearFailure("prompt");
       const recovered = yield* adapter.sendTurn({ threadId, input: "retry" });
       expect(recovered.threadId).toBe(threadId);
+    }),
+  );
+
+  it.effect("preserves a settled model failure until the next turn starts", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-model-failure");
+      yield* startSession(adapter, threadId);
+      harness.clients[0]!.state.isStreaming = true;
+      yield* adapter.sendTurn({ threadId, input: "hello" });
+      const receipts = yield* subscribe(adapter, 4);
+
+      harness.clients[0]!.emit({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          errorMessage: "Model is not supported by this account.",
+        },
+      });
+      harness.clients[0]!.emit({ type: "agent_settled" });
+      yield* adapter.sendTurn({ threadId, input: "retry with a supported model" });
+
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events.map((event) => event.type)).toEqual([
+        "item.completed",
+        "turn.completed",
+        "turn.started",
+        "session.state.changed",
+      ]);
+      expect(events[1]).toMatchObject({
+        payload: { state: "failed", errorMessage: "Model is not supported by this account." },
+      });
+      expect(events[3]).toMatchObject({ payload: { state: "running" } });
+      expect(harness.clients[0]!.closed).toBe(false);
     }),
   );
 
