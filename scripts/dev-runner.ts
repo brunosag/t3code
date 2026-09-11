@@ -367,6 +367,8 @@ export function createDevRunnerEnv({
         // phone): the remote browser dials its own machine.
         delete output.VITE_HTTP_URL;
         delete output.VITE_WS_URL;
+        // An ambient build marker must not reach a build run from this env.
+        delete output.T3CODE_DEV_SERVER_ONLY_ORIGIN;
         // Deleting is not enough on its own: vite.config.ts calls loadRepoEnv,
         // which merges `.env`/`.env.local` *under* this env, so a developer
         // with either URL in their `.env` would get it back and silently lose
@@ -377,6 +379,7 @@ export function createDevRunnerEnv({
         output.VITE_HTTP_URL = `http://localhost:${serverPort}`;
         output.VITE_WS_URL = `ws://localhost:${serverPort}`;
         delete output.T3CODE_SINGLE_ORIGIN_DEV;
+        delete output.T3CODE_DEV_SERVER_ONLY_ORIGIN;
       }
     } else {
       output.T3CODE_PORT = String(serverPort);
@@ -385,6 +388,14 @@ export function createDevRunnerEnv({
       // Desktop pins the renderer to loopback on purpose; an ambient marker
       // must not make Vite drop those URLs.
       delete output.T3CODE_SINGLE_ORIGIN_DEV;
+      // Those loopback URLs are for the desktop renderer's dev server only. The
+      // same env is inherited by the dependency build that produces the client
+      // the server embeds and serves same-origin (t3#build ->
+      // @t3tools/web#build), so the build has to ignore them — otherwise the
+      // artifact is pinned to this machine's loopback and every other origin
+      // (the browser launcher on another port, a tailnet browser, a phone)
+      // loads a page that fetches a dead socket. See apps/web/vite.config.ts.
+      output.T3CODE_DEV_SERVER_ONLY_ORIGIN = "1";
       delete output.T3CODE_MODE;
       delete output.T3CODE_NO_BROWSER;
       delete output.T3CODE_HOST;

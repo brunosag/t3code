@@ -366,6 +366,9 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.T3CODE_NO_BROWSER, undefined);
         assert.equal(env.T3CODE_HOST, undefined);
         assert.equal(env.VITE_WS_URL, "ws://127.0.0.1:4222");
+        // The loopback URLs are for the renderer's dev server; the dependency
+        // build that produces the server's bundled client must ignore them.
+        assert.equal(env.T3CODE_DEV_SERVER_ONLY_ORIGIN, "1");
       }),
     );
 
@@ -401,6 +404,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             baseEnv: {
               VITE_HTTP_URL: "http://localhost:1234",
               VITE_WS_URL: "ws://localhost:1234",
+              T3CODE_DEV_SERVER_ONLY_ORIGIN: "1",
             },
             serverOffset: 0,
             webOffset: 0,
@@ -416,6 +420,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           assert.equal(env.VITE_HTTP_URL, undefined);
           assert.equal(env.VITE_WS_URL, undefined);
           assert.equal(env.T3CODE_PORT, "13773");
+          assert.equal(env.T3CODE_DEV_SERVER_ONLY_ORIGIN, undefined);
           // Deleting the keys is not sufficient — vite.config.ts merges
           // `.env`/`.env.local` underneath this env and would revive them, so
           // the intent has to be stated positively.
@@ -451,7 +456,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
           mode: "dev:server",
-          baseEnv: { T3CODE_SINGLE_ORIGIN_DEV: "1" },
+          baseEnv: { T3CODE_SINGLE_ORIGIN_DEV: "1", T3CODE_DEV_SERVER_ONLY_ORIGIN: "1" },
           serverOffset: 0,
           webOffset: 0,
           t3Home: undefined,
@@ -464,6 +469,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         });
 
         assert.equal(env.T3CODE_SINGLE_ORIGIN_DEV, undefined);
+        assert.equal(env.T3CODE_DEV_SERVER_ONLY_ORIGIN, undefined);
         assert.equal(env.VITE_HTTP_URL, "http://localhost:13773");
       }),
     );

@@ -152,7 +152,17 @@ const configuredAllowedHosts = (process.env.T3CODE_DEV_ALLOWED_HOSTS ?? "")
   .filter((entry) => entry.length > 0);
 const allowedHosts = [".ts.net", ...configuredAllowedHosts];
 
-export default defineConfig(() => {
+export default defineConfig(({ command }) => {
+  // `dev:desktop` exports VITE_HTTP_URL/VITE_WS_URL for its dev server (loopback
+  // 127.0.0.1:3775), and the dependency build that produces the client the t3
+  // server embeds and serves same-origin (t3#build -> @t3tools/web#build)
+  // inherits that same environment. Baking it into the artifact points every
+  // browser at the dev machine's loopback, so those URLs are for `vp dev` only.
+  const devServerOnlyOrigin =
+    command === "build" && process.env.T3CODE_DEV_SERVER_ONLY_ORIGIN === "1";
+  const definedWsUrl = devServerOnlyOrigin ? undefined : configuredWsUrl;
+  const definedHttpUrl = devServerOnlyOrigin ? undefined : configuredHttpUrl;
+
   return {
     assetsInclude: ["**/*.wasm"],
     plugins: [
@@ -187,11 +197,11 @@ export default defineConfig(() => {
     },
     define: {
       // In dev mode, tell the web app where the WebSocket server lives
-      "import.meta.env.VITE_WS_URL": JSON.stringify(configuredWsUrl ?? ""),
+      "import.meta.env.VITE_WS_URL": JSON.stringify(definedWsUrl ?? ""),
       // Pinned explicitly rather than left to Vite's automatic VITE_ exposure:
       // under single-origin dev this must stay empty even when a `.env`
       // supplies it, so the client falls back to window.location.origin.
-      "import.meta.env.VITE_HTTP_URL": JSON.stringify(configuredHttpUrl ?? ""),
+      "import.meta.env.VITE_HTTP_URL": JSON.stringify(definedHttpUrl ?? ""),
       "import.meta.env.VITE_T3CODE_RELAY_URL": JSON.stringify(configuredRelayUrl),
       "import.meta.env.VITE_CLERK_PUBLISHABLE_KEY": JSON.stringify(configuredClerkPublishableKey),
       "import.meta.env.VITE_CLERK_JWT_TEMPLATE": JSON.stringify(configuredClerkJwtTemplate),
