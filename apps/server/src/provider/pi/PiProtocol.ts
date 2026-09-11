@@ -6,11 +6,25 @@ export const PiModel = Schema.Struct({
   provider: Schema.String,
   name: Schema.optional(Schema.String),
 });
+// Pi's `ThinkingLevel`. Unknown values are a protocol mismatch, not a level to guess at.
+export const PiThinkingLevel = Schema.Literals([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+export type PiThinkingLevel = typeof PiThinkingLevel.Type;
+export const PiThinkingLevels = Schema.Struct({ levels: Schema.Array(PiThinkingLevel) });
 export const PiState = Schema.Struct({
   sessionFile: Schema.optional(Schema.String),
   sessionId: Schema.String,
   model: Schema.optional(Schema.NullOr(PiModel)),
   isStreaming: Schema.Boolean,
+  // Absent on Pi builds that predate thinking levels; those expose no picker.
+  thinkingLevel: Schema.optional(PiThinkingLevel),
 });
 export const PiModels = Schema.Struct({ models: Schema.Array(PiModel) });
 export const PiCommands = Schema.Struct({

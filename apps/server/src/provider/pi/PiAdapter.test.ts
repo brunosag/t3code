@@ -49,6 +49,8 @@ class FakePiClient implements Client {
     model: null,
     isStreaming: false,
   };
+  /** Levels Pi reports for the current model; scenarios override this per model. */
+  thinkingLevels: Array<string> = ["off", "low", "high"];
   private readonly failures = new Map<string, Error>();
 
   private readonly init: ClientInit;
@@ -72,6 +74,11 @@ class FakePiClient implements Client {
     switch (type) {
       case "get_state":
         return Promise.resolve({ ...this.state });
+      case "get_available_thinking_levels":
+        return Promise.resolve({ levels: [...this.thinkingLevels] });
+      case "set_thinking_level":
+        this.state = { ...this.state, thinkingLevel: fields.level };
+        return Promise.resolve({});
       case "set_model":
       case "prompt":
       case "clear_queue":
@@ -111,6 +118,7 @@ interface Harness {
   readonly environment: NodeJS.ProcessEnv;
   readonly options: Parameters<typeof makePiAdapter>[0];
   initialState: Record<string, unknown>;
+  initialThinkingLevels: Array<string>;
 }
 
 const piInstance = ProviderInstanceId.make("pi-test");
@@ -133,6 +141,7 @@ function makeHarness(): Harness {
         inits.push(init);
         const client = new FakePiClient(init);
         client.state = { ...harness.initialState };
+        client.thinkingLevels = [...harness.initialThinkingLevels];
         clients.push(client);
         return client;
       },
@@ -143,6 +152,7 @@ function makeHarness(): Harness {
       model: null,
       isStreaming: false,
     },
+    initialThinkingLevels: ["off", "low", "high"],
   };
   return harness;
 }
@@ -425,6 +435,183 @@ describe("PiAdapter", () => {
         modelSelection: createModelSelection(piInstance, "acme/model-b"),
       });
       expect(harness.clients[0]?.requests.length).toBe((before ?? 0) + 2);
+    }),
+  );
+
+  it.effect(
+    "applies the selected reasoning level after the model switch and before the prompt",
+    () =>
+      Effect.gen(function* () {
+        const harness = makeHarness();
+        const adapter = yield* makePiAdapter(harness.options);
+        const threadId = ThreadId.make("thread-reasoning");
+        harness.initialState = { ...harness.initialState, thinkingLevel: "low" };
+        harness.initialThinkingLevels = ["off", "low", "high", "xhigh", "max"];
+        yield* startSession(adapter, threadId, {
+          modelSelection: createModelSelection(piInstance, "acme/model-a"),
+        });
+        // An untouched picker must leave Pi's own setting alone.
+        expect(harness.clients[0]?.requestTypes()).toEqual(["get_state", "set_model"]);
+
+        yield* adapter.sendTurn({
+          threadId,
+          input: "hello",
+          modelSelection: createModelSelection(piInstance, "acme/model-b", [
+            { id: "reasoningEffort", value: "xhigh" },
+          ]),
+        });
+        expect(harness.clients[0]?.requestTypes().slice(2)).toEqual([
+          "set_model",
+          "get_available_thinking_levels",
+          "set_thinking_level",
+          "prompt",
+          "get_state",
+        ]);
+        expect(
+          harness.clients[0]?.requests.find((request) => request.type === "set_thinking_level")
+            ?.fields,
+        ).toEqual({ level: "xhigh" });
+
+        // Pi is already on that level, so repeating it must not touch the session again.
+        const before = harness.clients[0]!.requests.length;
+        yield* adapter.sendTurn({
+          threadId,
+          input: "again",
+          modelSelection: createModelSelection(piInstance, "acme/model-b", [
+            { id: "reasoningEffort", value: "xhigh" },
+          ]),
+        });
+        expect(harness.clients[0]?.requestTypes().slice(before)).toEqual(["prompt", "get_state"]);
+      }),
+  );
+
+  it.effect(
+    "rejects a level the selected model does not report instead of letting Pi clamp it",
+    () =>
+      Effect.gen(function* () {
+        const harness = makeHarness();
+        const adapter = yield* makePiAdapter(harness.options);
+        harness.initialThinkingLevels = ["off", "low"];
+        const unsupported = yield* Effect.flip(
+          startSession(adapter, ThreadId.make("thread-reasoning-unsupported"), {
+            modelSelection: createModelSelection(piInstance, "acme/model-a", [
+              { id: "reasoningEffort", value: "max" },
+            ]),
+          }),
+        );
+        expect(unsupported.detail).toContain("does not support thinking level 'max'");
+        expect(harness.clients[0]?.requestTypes()).not.toContain("set_thinking_level");
+        expect(harness.clients[0]?.requestTypes()).not.toContain("prompt");
+
+        const unrecognized = yield* Effect.flip(
+          startSession(adapter, ThreadId.make("thread-reasoning-unknown"), {
+            modelSelection: createModelSelection(piInstance, "acme/model-a", [
+              { id: "reasoningEffort", value: "turbo" },
+            ]),
+          }),
+        );
+        expect(unrecognized.detail).toContain("does not support thinking level 'turbo'");
+      }),
+  );
+
+  it.effect("re-validates the level when the model changes mid-thread", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-reasoning-switch");
+      yield* startSession(adapter, threadId, {
+        modelSelection: createModelSelection(piInstance, "acme/reasoner", [
+          { id: "reasoningEffort", value: "high" },
+        ]),
+      });
+      expect(harness.clients[0]?.requestTypes()).toContain("set_thinking_level");
+      // The new model tops out at `low`, so the stale `high` choice must fail loudly.
+      harness.clients[0]!.thinkingLevels = ["off", "low"];
+      const error = yield* Effect.flip(
+        adapter.sendTurn({
+          threadId,
+          input: "hello",
+          modelSelection: createModelSelection(piInstance, "acme/basic", [
+            { id: "reasoningEffort", value: "high" },
+          ]),
+        }),
+      );
+      expect(error.detail).toContain("does not support thinking level 'high'");
+      const types = harness.clients[0]!.requestTypes();
+      expect(types.filter((type) => type === "set_model")).toHaveLength(2);
+      expect(types).not.toContain("prompt");
+    }),
+  );
+
+  it.effect("fails the turn when Pi refuses the requested level", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-reasoning-refused");
+      yield* startSession(adapter, threadId, {
+        modelSelection: createModelSelection(piInstance, "acme/model-a"),
+      });
+      harness.clients[0]!.failRequest("set_thinking_level", "boom");
+      const error = yield* Effect.flip(
+        adapter.sendTurn({
+          threadId,
+          input: "hello",
+          modelSelection: createModelSelection(piInstance, "acme/model-a", [
+            { id: "reasoningEffort", value: "high" },
+          ]),
+        }),
+      );
+      expect(error.detail).toContain("boom");
+      expect(harness.clients[0]!.requestTypes()).not.toContain("prompt");
+    }),
+  );
+
+  it.effect("fails the turn when Pi cannot report the model's levels", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-reasoning-unreported");
+      yield* startSession(adapter, threadId, {
+        modelSelection: createModelSelection(piInstance, "acme/model-a"),
+      });
+      harness.clients[0]!.failRequest("get_available_thinking_levels", "unknown command");
+      const error = yield* Effect.flip(
+        adapter.sendTurn({
+          threadId,
+          input: "hello",
+          modelSelection: createModelSelection(piInstance, "acme/model-a", [
+            { id: "reasoningEffort", value: "high" },
+          ]),
+        }),
+      );
+      expect(error.detail).toContain("did not report thinking levels");
+      expect(harness.clients[0]!.requestTypes()).not.toContain("prompt");
+    }),
+  );
+
+  it.effect("adopts Pi's own thinking-level changes instead of re-applying a stale level", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-reasoning-event");
+      yield* startSession(adapter, threadId, {
+        modelSelection: createModelSelection(piInstance, "acme/model-a"),
+      });
+      harness.clients[0]!.emit({ type: "thinking_level_changed", level: "high" });
+      const before = harness.clients[0]!.requests.length;
+      yield* adapter.sendTurn({
+        threadId,
+        input: "hello",
+        modelSelection: createModelSelection(piInstance, "acme/model-a", [
+          { id: "reasoningEffort", value: "high" },
+        ]),
+      });
+      expect(harness.clients[0]!.requestTypes().slice(before)).toEqual([
+        "get_available_thinking_levels",
+        "prompt",
+        "get_state",
+      ]);
+      expect(harness.clients[0]!.requestTypes()).not.toContain("set_thinking_level");
     }),
   );
 

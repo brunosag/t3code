@@ -14,6 +14,7 @@ import {
   type ProviderSession,
   type ThreadId,
 } from "@t3tools/contracts";
+import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import * as Effect from "effect/Effect";
 import * as PubSub from "effect/PubSub";
 import * as Option from "effect/Option";
@@ -28,6 +29,8 @@ import {
   PiMessage,
   PiResumeCursor,
   PiState,
+  PiThinkingLevel,
+  PiThinkingLevels,
   PiUiRequest,
   piMessageText,
   piModelSelection,
@@ -38,6 +41,8 @@ const decodePiDelta = Schema.decodeUnknownSync(PiDelta);
 const decodePiUiRequest = Schema.decodeUnknownSync(PiUiRequest);
 const decodePiResumeCursor = Schema.decodeUnknownSync(PiResumeCursor);
 const decodePiState = Schema.decodeUnknownSync(PiState);
+const decodePiThinkingLevel = Schema.decodeUnknownOption(PiThinkingLevel);
+const decodePiThinkingLevels = Schema.decodeUnknownSync(PiThinkingLevels);
 const PROVIDER = ProviderDriverKind.make("pi");
 const decodeAnswer = Schema.decodeUnknownSync(
   Schema.optional(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
@@ -92,6 +97,10 @@ interface Session {
   failure?: string | undefined;
   interrupted: boolean;
   runStarted: boolean;
+  /** Last level T3 knows Pi is running with; `undefined` means "not known yet". */
+  thinkingLevel?: PiThinkingLevel | undefined;
+  /** Levels Pi reported for the current model; cleared whenever the model changes. */
+  thinkingLevels?: readonly PiThinkingLevel[] | undefined;
   interruptEpoch: number;
   pending: Map<
     string,
@@ -140,6 +149,36 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     ctx.operations = next.catch(() => {});
     return next;
   };
+  const readThinkingLevels = async (ctx: Session): Promise<readonly PiThinkingLevel[]> => {
+    try {
+      return decodePiThinkingLevels(await ctx.client.request("get_available_thinking_levels"))
+        .levels;
+    } catch (cause) {
+      throw new Error(
+        `Pi did not report thinking levels for model '${ctx.session.model ?? "default"}' (${
+          cause instanceof Error ? cause.message : String(cause)
+        }).`,
+        { cause },
+      );
+    }
+  };
+  // Pi silently clamps a level its model does not support, so T3 validates the
+  // user's choice against Pi's own report and fails the turn instead of lying.
+  const applyThinkingLevel = async (ctx: Session, requested: string): Promise<void> => {
+    const level = decodePiThinkingLevel(requested);
+    if (Option.isNone(level)) throw new Error(`Pi does not support thinking level '${requested}'.`);
+    if (ctx.thinkingLevels?.includes(level.value) !== true)
+      ctx.thinkingLevels = await readThinkingLevels(ctx);
+    if (!ctx.thinkingLevels.includes(level.value))
+      throw new Error(
+        `Pi model '${ctx.session.model ?? "default"}' does not support thinking level '${
+          level.value
+        }'.`,
+      );
+    if (ctx.thinkingLevel === level.value) return;
+    await ctx.client.request("set_thinking_level", { level: level.value });
+    ctx.thinkingLevel = level.value;
+  };
   const resolveUi = (ctx: Session, id: string, response: Record<string, unknown>, send = true) => {
     const pending = ctx.pending.get(id);
     if (!pending) throw new Error(`Pi input request ${id} is no longer pending.`);
@@ -175,6 +214,12 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         case "agent_start":
           ctx.runStarted = true;
           break;
+        // Pi changes its own level too (commands, model switches), so keep the cache honest.
+        case "thinking_level_changed": {
+          const level = decodePiThinkingLevel(event.level);
+          if (Option.isSome(level)) ctx.thinkingLevel = level.value;
+          break;
+        }
         case "message_start": {
           const message = decodePiMessage(event.message);
           if (message.role !== "assistant") break;
@@ -450,9 +495,20 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               (state.model
                 ? { provider: state.model.provider, modelId: state.model.id }
                 : undefined);
+            // Pi reports the level for the model it is currently on, before any T3 override.
+            ctx.thinkingLevel = state.thinkingLevel;
             const selection =
               piModelSelection(input.modelSelection?.model ?? "default") ?? cursor?.defaultModel;
-            if (selection) await ctx.client.request("set_model", selection);
+            if (selection) {
+              await ctx.client.request("set_model", selection);
+              // Pi derives its own level for the new model, so the previous one no longer holds.
+              ctx.thinkingLevel = undefined;
+            }
+            const reasoningEffort = getModelSelectionStringOptionValue(
+              input.modelSelection,
+              "reasoningEffort",
+            );
+            if (reasoningEffort !== undefined) await applyThinkingLevel(ctx, reasoningEffort);
             ctx.session = {
               ...ctx.session,
               status: "ready",
@@ -517,7 +573,15 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               throw new Error("Pi did not report an initial model; cannot restore Pi default.");
             await ctx.client.request("set_model", selection);
             ctx.session = { ...ctx.session, model: requestedModel };
+            // Pi derives its own level for the new model, so the previous one no longer holds.
+            ctx.thinkingLevel = undefined;
+            ctx.thinkingLevels = undefined;
           }
+          const reasoningEffort = getModelSelectionStringOptionValue(
+            input.modelSelection,
+            "reasoningEffort",
+          );
+          if (reasoningEffort !== undefined) await applyThinkingLevel(ctx, reasoningEffort);
           if (ctx.stopped || ctx.interruptEpoch !== epoch)
             throw new Error("Pi prompt was interrupted before acceptance.");
           const steering = !!ctx.session.activeTurnId;

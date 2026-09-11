@@ -1,6 +1,12 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
-import { PiMessage, piMessageText, piModelSelection } from "./PiProtocol.ts";
+import {
+  PiMessage,
+  PiState,
+  PiThinkingLevels,
+  piMessageText,
+  piModelSelection,
+} from "./PiProtocol.ts";
 
 describe("Pi protocol translation", () => {
   it("leaves the runtime default unchanged and preserves slashes in explicit model IDs", () => {
@@ -28,5 +34,15 @@ describe("Pi protocol translation", () => {
     expect(piMessageText(message)).toBe("Hello world");
     expect(piMessageText({ role: "assistant", content: "plain text" })).toBe("plain text");
     expect(piMessageText({ role: "assistant" })).toBe("");
+  });
+
+  it("decodes thinking levels and tolerates a Pi build that does not report one", () => {
+    const decodeState = Schema.decodeUnknownSync(PiState);
+    const decodeThinkingLevels = Schema.decodeSync(PiThinkingLevels);
+    const base = { sessionId: "pi-session-1", isStreaming: false };
+    expect(decodeState({ ...base, thinkingLevel: "xhigh" }).thinkingLevel).toBe("xhigh");
+    expect(decodeState(base).thinkingLevel).toBeUndefined();
+    expect(() => decodeState({ ...base, thinkingLevel: "turbo" })).toThrow();
+    expect(decodeThinkingLevels({ levels: ["off", "max"] }).levels).toEqual(["off", "max"]);
   });
 });

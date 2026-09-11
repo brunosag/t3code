@@ -1,5 +1,10 @@
 // @effect-diagnostics schemaSyncInEffect:off globalDate:off - RPC Promise boundary; decode failures are caught by tryPromise.
-import { PiConnectionSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import {
+  type ModelCapabilities,
+  PiConnectionSettings,
+  ProviderDriverKind,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
@@ -14,13 +19,46 @@ import {
 } from "../ProviderDriver.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import { makePiAdapter } from "../pi/PiAdapter.ts";
+import { mapPiThinkingCapabilities } from "../pi/PiCapabilities.ts";
 import { PiRpcClient } from "../pi/PiRpcClient.ts";
-import { PiCommands, PiModels, PiState } from "../pi/PiProtocol.ts";
+import { PiCommands, PiModels, PiState, PiThinkingLevels } from "../pi/PiProtocol.ts";
 import { makePiTextGeneration } from "../pi/PiTextGeneration.ts";
 
 const decodePiState = Schema.decodeUnknownSync(PiState);
 const decodePiModels = Schema.decodeUnknownSync(PiModels);
 const decodePiCommands = Schema.decodeUnknownSync(PiCommands);
+const decodePiThinkingLevels = Schema.decodeUnknownSync(PiThinkingLevels);
+
+/**
+ * Pi builds predating thinking levels do not answer here at all. Probing then
+ * stays off entirely instead of spending a failed round trip on every model.
+ */
+const readPiThinkingLevels = async (client: PiRpcClient) => {
+  try {
+    return decodePiThinkingLevels(await client.request("get_available_thinking_levels")).levels;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * A model T3 cannot select (missing API key, since-deleted model) simply reports
+ * no traits rather than taking the whole catalog probe down with it.
+ */
+const probePiModelCapabilities = async (
+  client: PiRpcClient,
+  model: { readonly provider: string; readonly id: string },
+): Promise<ModelCapabilities | null> => {
+  try {
+    await client.request("set_model", { provider: model.provider, modelId: model.id });
+    const levels = decodePiThinkingLevels(await client.request("get_available_thinking_levels"));
+    const state = decodePiState(await client.request("get_state"));
+    return mapPiThinkingCapabilities(levels.levels, state.thinkingLevel);
+  } catch {
+    return null;
+  }
+};
+
 const DRIVER = ProviderDriverKind.make("pi");
 export type PiDriverEnv = ServerConfig;
 const maintenance = makeManualOnlyProviderMaintenanceCapabilities({
@@ -42,7 +80,7 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
         instanceId,
       });
       const changes = yield* PubSub.unbounded<ServerProvider>();
-      const base = (): ServerProvider => ({
+      const base = (defaultCapabilities: ModelCapabilities | null = null): ServerProvider => ({
         instanceId,
         driver: DRIVER,
         displayName: displayName ?? "Pi",
@@ -66,7 +104,7 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
             name: "Pi default",
             isDefault: true,
             isCustom: false,
-            capabilities: null,
+            capabilities: defaultCapabilities,
           },
         ],
         slashCommands: [],
@@ -100,21 +138,38 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
             };
             signal.addEventListener("abort", abort, { once: true });
             try {
-              decodePiState(await client.request("get_state"));
+              const state = decodePiState(await client.request("get_state"));
               const models = decodePiModels(await client.request("get_available_models"));
               const commands = decodePiCommands(await client.request("get_commands"));
+              // Pi reports thinking levels per model, so the catalog is built by
+              // asking Pi about each model instead of guessing from its name.
+              const capabilities = new Map<string, ModelCapabilities | null>();
+              const defaultLevels = await readPiThinkingLevels(client);
+              if (defaultLevels !== null) {
+                capabilities.set(
+                  "default",
+                  mapPiThinkingCapabilities(defaultLevels, state.thinkingLevel),
+                );
+                for (const model of models.models) {
+                  capabilities.set(
+                    `${model.provider}/${model.id}`,
+                    await probePiModelCapabilities(client, model),
+                  );
+                }
+              }
+              const defaultCapabilities = capabilities.get("default") ?? null;
               return {
-                ...base(),
+                ...base(defaultCapabilities),
                 installed: true,
                 status: "ready" as const,
                 models: [
-                  ...base().models,
+                  ...base(defaultCapabilities).models,
                   ...models.models.map((model) => ({
                     slug: `${model.provider}/${model.id}`,
                     name: model.name || model.id,
                     subProvider: model.provider,
                     isCustom: false,
-                    capabilities: null,
+                    capabilities: capabilities.get(`${model.provider}/${model.id}`) ?? null,
                   })),
                 ],
                 slashCommands: commands.commands
