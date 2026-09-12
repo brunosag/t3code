@@ -23,6 +23,7 @@ import { mapPiThinkingCapabilities } from "../pi/PiCapabilities.ts";
 import { PiRpcClient } from "../pi/PiRpcClient.ts";
 import { PiCommands, PiModels, PiState, PiThinkingLevels } from "../pi/PiProtocol.ts";
 import { makePiTextGeneration } from "../pi/PiTextGeneration.ts";
+import { materializePiUserInputExtension } from "../pi/PiUserInputExtension.ts";
 
 const decodePiState = Schema.decodeUnknownSync(PiState);
 const decodePiModels = Schema.decodeUnknownSync(PiModels);
@@ -75,6 +76,18 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
     Effect.gen(function* () {
       const server = yield* ServerConfig;
       const processEnv = mergeProviderInstanceEnvironment(environment);
+      const userInputExtensionPath = yield* Effect.tryPromise({
+        try: () => materializePiUserInputExtension(server.stateDir),
+        catch: (cause) =>
+          new ProviderDriverError({
+            driver: DRIVER,
+            instanceId,
+            detail: `Failed to prepare the Pi user-input extension: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`,
+            cause,
+          }),
+      });
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER,
         instanceId,
@@ -209,6 +222,7 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
         cwd: server.cwd,
         attachmentsDir: server.attachmentsDir,
         environment: processEnv,
+        userInputExtensionPath,
       });
       yield* refresh;
       return {
