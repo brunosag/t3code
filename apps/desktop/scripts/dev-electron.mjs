@@ -50,6 +50,9 @@ const forcedShutdownTimeoutMs = 1_500;
 const restartDebounceMs = 120;
 const childTreeGracePeriodMs = 1_200;
 const remoteDebuggingPort = process.env.T3CODE_DESKTOP_REMOTE_DEBUGGING_PORT?.trim();
+// Supervisors that manage their own lifecycle (fork `t3-pi-desktop`) set this so a
+// closed window ends the dev tree instead of parking it.
+const exitOnClose = process.env.T3CODE_DESKTOP_EXIT_ON_CLOSE?.trim() === "1";
 // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone dev script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
 
@@ -134,10 +137,23 @@ function startApp() {
       currentApp = null;
     }
 
-    const exitedAbnormally = signal !== null || code !== 0;
-    if (!shuttingDown && !expectedExits.has(app) && exitedAbnormally) {
-      scheduleRestart();
+    if (shuttingDown || expectedExits.has(app)) {
+      return;
     }
+
+    if (signal !== null || code !== 0) {
+      scheduleRestart();
+      return;
+    }
+
+    // A clean exit means the window was closed. Staying alive is the default so a
+    // rebuild of a watched file relaunches Electron; exitOnClose opts out of that.
+    if (exitOnClose) {
+      void shutdown(0);
+      return;
+    }
+
+    console.log("[dev-electron] window closed; parked until a watched file changes");
   });
 }
 
