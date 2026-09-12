@@ -16,6 +16,8 @@ import { Type } from "typebox";
 const CHANNEL_FD = 3;
 const MAX_LINE_CHARS = 4 * 1024 * 1024;
 const pending = new Map();
+// T3 renders questions itself, so any other question tool would bypass its UI.
+const SUPERSEDED_TOOLS = ["ask_user"];
 let buffer = "";
 let input;
 
@@ -152,6 +154,11 @@ const Question = Type.Object({
 });
 
 export default function t3UserInput(pi) {
+  pi.on("session_start", () => {
+    const active = pi.getActiveTools();
+    const kept = active.filter((name) => !SUPERSEDED_TOOLS.includes(name));
+    if (kept.length !== active.length) pi.setActiveTools(kept);
+  });
   pi.on("session_shutdown", () => {
     input?.destroy();
     input = undefined;

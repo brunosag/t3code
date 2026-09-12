@@ -26,7 +26,60 @@ afterEach(async () => {
   );
 });
 
+/**
+ * The extension is shipped as source text for stock Pi, so it has no importable
+ * seam. Stub its imports and evaluate it to exercise the real handler bodies.
+ */
+function loadExtension(): (pi: unknown) => void {
+  const source = PI_USER_INPUT_EXTENSION_SOURCE.replace(/^import .*$/gm, "").replace(
+    "export default function t3UserInput(pi) {",
+    "function t3UserInput(pi) {",
+  );
+  const stubs = `
+    const Type = new Proxy(function () {}, { get: () => Type, apply: () => ({}) });
+    const createReadStream = () => ({ setEncoding() {}, on() {}, destroy() {} });
+    const writeSync = () => 0;
+    class Socket {}
+  `;
+  return new Function(`${stubs}${source}; return t3UserInput;`)() as (pi: unknown) => void;
+}
+
+function makeFakePi(activeTools: string[]) {
+  const handlers = new Map<string, () => void>();
+  const active = [...activeTools];
+  return {
+    handlers,
+    active,
+    pi: {
+      on: (name: string, handler: () => void) => handlers.set(name, handler),
+      registerTool: () => {},
+      getActiveTools: () => [...active],
+      setActiveTools: (names: string[]) => {
+        active.splice(0, active.length, ...names);
+      },
+    },
+  };
+}
+
 describe("PiUserInputExtension", () => {
+  it("deactivates competing question tools and keeps every other tool active", () => {
+    const fake = makeFakePi(["read", "bash", "ask_user", "t3_ask_user"]);
+    loadExtension()(fake.pi);
+
+    fake.handlers.get("session_start")?.();
+
+    expect(fake.active).toEqual(["read", "bash", "t3_ask_user"]);
+  });
+
+  it("leaves the active tools untouched when no competing question tool is loaded", () => {
+    const fake = makeFakePi(["read", "t3_ask_user"]);
+    loadExtension()(fake.pi);
+
+    fake.handlers.get("session_start")?.();
+
+    expect(fake.active).toEqual(["read", "t3_ask_user"]);
+  });
+
   it("materializes stable extension source for stock Pi", async () => {
     const stateDir = makeStateDir();
     const paths = await Promise.all(
