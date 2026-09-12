@@ -10,6 +10,7 @@ import { HostProcessEnvironment, HostProcessWorkingDirectory } from "@t3tools/sh
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Hash from "effect/Hash";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -83,6 +84,18 @@ const MODE_ARGS = {
   "dev:server": ["run", "--filter=t3", "dev"],
   "dev:web": ["run", "--filter=@t3tools/web", "dev"],
   "dev:desktop": ["run", "--filter=@t3tools/desktop", "--filter=@t3tools/web", "dev"],
+  // Desktop `dev` depends on `t3#build`, which rebuilds `@t3tools/web` from
+  // scratch (~40s) on every launch. `--ignore-depends-on` reuses the last
+  // server bundle, embedded web client included, so only Vite and the desktop
+  // pack run. That bundle is not rebuilt from source here — server-side edits
+  // need a plain `dev:desktop` run.
+  "dev:desktop:lean": [
+    "run",
+    "--filter=@t3tools/desktop",
+    "--filter=@t3tools/web",
+    "--ignore-depends-on",
+    "dev",
+  ],
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
 type DevMode = keyof typeof MODE_ARGS;
@@ -151,7 +164,7 @@ export class DevRunnerProcessError extends Schema.TaggedError<DevRunnerProcessEr
   "DevRunnerProcessError",
   {
     operation: Schema.Literals(["spawn", "wait-for-exit"]),
-    mode: Schema.Literals(["dev", "dev:server", "dev:web", "dev:desktop"]),
+    mode: Schema.Literals(["dev", "dev:server", "dev:web", "dev:desktop", "dev:desktop:lean"]),
     executable: Schema.Literal("vp"),
     argumentCount: Schema.Number,
     shell: Schema.Boolean,
@@ -166,7 +179,7 @@ export class DevRunnerProcessError extends Schema.TaggedError<DevRunnerProcessEr
 export class DevRunnerProcessExitError extends Schema.TaggedError<DevRunnerProcessExitError>()(
   "DevRunnerProcessExitError",
   {
-    mode: Schema.Literals(["dev", "dev:server", "dev:web", "dev:desktop"]),
+    mode: Schema.Literals(["dev", "dev:server", "dev:web", "dev:desktop", "dev:desktop:lean"]),
     executable: Schema.Literal("vp"),
     argumentCount: Schema.Number,
     shell: Schema.Boolean,
@@ -175,6 +188,17 @@ export class DevRunnerProcessExitError extends Schema.TaggedError<DevRunnerProce
 ) {
   override get message(): string {
     return `Dev-runner process exited with code ${this.exitCode} in mode "${this.mode}".`;
+  }
+}
+
+export class DevRunnerLeanBuildMissingError extends Schema.TaggedError<DevRunnerLeanBuildMissingError>()(
+  "DevRunnerLeanBuildMissingError",
+  {
+    path: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `dev:desktop:lean reuses the last server build, but ${this.path} is missing. Run \`vp run dev:desktop\` once to produce it, then retry lean.`;
   }
 }
 
@@ -324,7 +348,7 @@ export function createDevRunnerEnv({
     // by the caller; an unset t3Home here genuinely means "use the default".
     const configuredBaseDir = t3Home?.trim() || undefined;
     const resolvedBaseDir = yield* resolveBaseDir(configuredBaseDir);
-    const isDesktopMode = mode === "dev:desktop";
+    const isDesktopMode = mode === "dev:desktop" || mode === "dev:desktop:lean";
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
@@ -727,11 +751,24 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       return;
     }
 
+    // `--ignore-depends-on` means nothing compiled the server this run. Fail
+    // with a fixable message here instead of letting dev-electron's
+    // waitForResources sit on a missing bundle for its full two-minute timeout.
+    if (input.mode === "dev:desktop:lean") {
+      const leanPath = yield* Path.Path;
+      const leanFs = yield* FileSystem.FileSystem;
+      const cwd = yield* HostProcessWorkingDirectory;
+      const serverBundle = leanPath.resolve(cwd, "apps/server/dist/bin.mjs");
+      if (!(yield* leanFs.exists(serverBundle))) {
+        return yield* new DevRunnerLeanBuildMissingError({ path: serverBundle });
+      }
+    }
+
     const sharedWebPort = BASE_WEB_PORT + webOffset;
     if (input.share) {
       if (input.mode === "dev:server") {
         yield* Effect.logInfo("[dev-runner] --share has no effect for dev:server (no web server).");
-      } else if (input.mode === "dev:desktop") {
+      } else if (input.mode === "dev:desktop" || input.mode === "dev:desktop:lean") {
         // Desktop is not single-origin: the renderer gets VITE_HTTP_URL and
         // VITE_WS_URL baked to loopback, so a tailnet visitor would load the UI
         // and then watch it dial its own 127.0.0.1 for the backend. Worse,

@@ -50,8 +50,8 @@ const forcedShutdownTimeoutMs = 1_500;
 const restartDebounceMs = 120;
 const childTreeGracePeriodMs = 1_200;
 const remoteDebuggingPort = process.env.T3CODE_DESKTOP_REMOTE_DEBUGGING_PORT?.trim();
-// Supervisors that manage their own lifecycle (fork `t3-pi-desktop`) set this so a
-// closed window ends the dev tree instead of parking it.
+// Opt-in escape hatch from the parked default below: with this set, closing the
+// window ends the dev tree instead of leaving it running to relaunch Electron.
 const exitOnClose = process.env.T3CODE_DESKTOP_EXIT_ON_CLOSE?.trim() === "1";
 // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone dev script has no Effect runtime.
 const hostPlatform = NodeOS.platform();

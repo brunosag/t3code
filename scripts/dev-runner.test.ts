@@ -100,6 +100,18 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       }),
     );
 
+    it.effect("skips the desktop task graph's server build in lean mode", () =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(getDevRunnerModeArgs("dev:desktop:lean"), [
+          "run",
+          "--filter=@t3tools/desktop",
+          "--filter=@t3tools/web",
+          "--ignore-depends-on",
+          "dev",
+        ]);
+      }),
+    );
+
     it.effect("places Vite+ run flags before the task name", () =>
       Effect.sync(() => {
         assert.deepStrictEqual(getDevRunnerModeArgs("dev"), [
@@ -563,6 +575,32 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.VITE_WS_URL, "ws://127.0.0.1:13773");
       }),
     );
+
+    // Lean mode still runs the desktop stack, so it must inherit the same
+    // loopback pinning and build marker as a full desktop run.
+    it.effect("builds the same environment for lean and full desktop runs", () =>
+      Effect.gen(function* () {
+        const input = {
+          baseEnv: { HOST: "0.0.0.0" },
+          serverOffset: 0,
+          webOffset: 0,
+          t3Home: undefined,
+          browser: undefined,
+          autoBootstrapProjectFromCwd: undefined,
+          logWebSocketEvents: undefined,
+          host: undefined,
+          port: undefined,
+          devUrl: undefined,
+        } as const;
+
+        const desktopEnv = yield* createDevRunnerEnv({ ...input, mode: "dev:desktop" });
+        const leanEnv = yield* createDevRunnerEnv({ ...input, mode: "dev:desktop:lean" });
+
+        assert.deepStrictEqual(leanEnv, desktopEnv);
+        assert.equal(leanEnv.HOST, "127.0.0.1");
+        assert.equal(leanEnv.T3CODE_DEV_SERVER_ONLY_ORIGIN, "1");
+      }),
+    );
   });
 
   describe("findFirstAvailableOffset", () => {
@@ -856,6 +894,33 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.deepStrictEqual(error.configKeys, ["T3CODE_PORT_OFFSET", "T3CODE_DEV_INSTANCE"]);
         assert.ok(error.cause !== undefined);
         assert.ok(!error.message.includes(String((error.cause as Error).message)));
+      }),
+    );
+
+    it.effect("refuses lean mode when the reused server build is missing", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() => Effect.succeed(mockProcess(0))),
+        );
+
+        const error = yield* runDevRunnerWithInput({
+          ...devServerInput,
+          mode: "dev:desktop:lean",
+          port: undefined,
+        }).pipe(
+          Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
+          Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.provideService(HostProcessWorkingDirectory, NodeOS.tmpdir()),
+          Effect.provideService(HostProcessEnvironment, {}),
+          Effect.flip,
+        );
+
+        if (error._tag !== "DevRunnerLeanBuildMissingError") {
+          assert.fail(`Unexpected error: ${error._tag}`);
+        }
+        assert.equal(error.path, path.resolve(NodeOS.tmpdir(), "apps/server/dist/bin.mjs"));
       }),
     );
 

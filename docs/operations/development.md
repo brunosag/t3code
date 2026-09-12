@@ -21,6 +21,13 @@ Use `vp run dev` for server and web, or `vp run dev:desktop` for the Electron cl
 `dev:server` and `dev:web` start those processes separately.
 See the [mobile README](../../apps/mobile/README.md) for native builds and Metro.
 
+`dev:desktop` builds the server and the web client before Electron can start, so a cold start
+includes a full web build. `vp run dev:desktop:lean` skips that dependency and reuses the
+already-built server bundle (embedded web client included) — reach for it when only the renderer
+changed, and plain `dev:desktop` when server code did. Closing the window parks the dev runner
+rather than ending it: the window comes back when a watched build output changes, without paying
+for the web build again. Stop the runner to free the ports.
+
 Flags go directly after the task name, for example `vp run dev --home-dir /tmp/t3code-dev`.
 Add `--browser` to open a browser automatically.
 
