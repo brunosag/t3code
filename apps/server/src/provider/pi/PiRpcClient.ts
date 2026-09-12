@@ -2,7 +2,7 @@
 /**
  * PiRpcClient — JSONL transport for `pi --mode rpc`.
  *
- * Spawns the binary with `["--mode", "rpc"]` (plus `--session` when given),
+ * Spawns the binary with `["--mode", "rpc"]` (plus T3's extension and `--session` when given),
  * correlates `request()` calls with `response` envelopes by id, and forwards
  * other envelopes to `onEvent`. Any transport failure rejects pending work
  * and reports via `onExit` once; `close()` stops the owned child and never
@@ -29,6 +29,11 @@ export interface PiRpcClientOptions {
   readonly onExit: (error: Error) => void;
   /** Per-request timeout in milliseconds. Defaults to 60 seconds. */
   readonly requestTimeoutMs?: number;
+  /** Optional T3 extension loaded into Pi with a dedicated fd-3 JSONL channel. */
+  readonly sideChannel?: {
+    readonly extensionPath: string;
+    readonly onMessage: (message: unknown) => void;
+  };
 }
 
 interface PendingRequest {
@@ -66,11 +71,14 @@ export class PiRpcClient {
   private readonly onEventCallback: (event: Record<string, unknown>) => void;
   private readonly onExitCallback: (error: Error) => void;
   private readonly decoder = new NodeStringDecoder.StringDecoder("utf8");
+  private readonly sideChannelDecoder = new NodeStringDecoder.StringDecoder("utf8");
   private readonly pending = new Map<string, PendingRequest>();
 
   private child: NodeChildProcess.ChildProcess | null = null;
+  private sideChannel: (NodeJS.ReadWriteStream & { destroy(): void }) | null = null;
   private nextRequestId = 0;
   private stdoutBuffer = "";
+  private sideChannelBuffer = "";
   private stderrTail = "";
   private failed: Error | null = null;
   private closing = false;
@@ -87,17 +95,23 @@ export class PiRpcClient {
     }
     this.requestTimeoutMs = timeout;
 
-    const args =
-      options.sessionPath !== undefined
-        ? ["--mode", "rpc", "--session", options.sessionPath]
-        : ["--mode", "rpc"];
+    const args = ["--mode", "rpc"];
+    if (options.sideChannel !== undefined) {
+      args.push("--extension", options.sideChannel.extensionPath);
+    }
+    if (options.sessionPath !== undefined) {
+      args.push("--session", options.sessionPath);
+    }
     let child: NodeChildProcess.ChildProcess | null = null;
     try {
       child = NodeChildProcess.spawn(options.binaryPath, args, {
         cwd: options.cwd,
         env: options.environment,
         shell: false,
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio:
+          options.sideChannel === undefined
+            ? ["pipe", "pipe", "pipe"]
+            : ["pipe", "pipe", "pipe", "pipe"],
         windowsHide: true,
       });
     } catch (error) {
@@ -113,6 +127,32 @@ export class PiRpcClient {
       return;
     }
     this.child = child;
+    if (options.sideChannel !== undefined) {
+      const channel = child.stdio[3] as (NodeJS.ReadWriteStream & { destroy(): void }) | null;
+      if (channel === null || typeof channel.write !== "function") {
+        const failure = new Error("pi rpc: failed to create extension side channel");
+        this.failed = failure;
+        this.notifyExit(failure);
+        void this.ensureTeardown();
+        return;
+      }
+      this.sideChannel = channel;
+      channel.on("data", (chunk: Buffer | string) => {
+        this.handleSideChannelData(chunk, options.sideChannel!.onMessage);
+      });
+      channel.on("error", (error) => {
+        if (this.closing || this.failed !== null) return;
+        this.failTransport(
+          new Error("pi rpc: extension side channel error", {
+            cause: toError(error, "unknown side channel error"),
+          }),
+        );
+      });
+      channel.on("close", () => {
+        if (this.closing || this.failed !== null || this.hasExited()) return;
+        this.failTransport(new Error("pi rpc: extension side channel closed unexpectedly"));
+      });
+    }
     child.on("error", (error) => {
       if (this.closing) return;
       const tail = this.stderrTail;
@@ -214,6 +254,37 @@ export class PiRpcClient {
     }
   }
 
+  /** Write one JSONL message to the T3-owned extension channel, never Pi RPC. */
+  sendSideChannel(message: Record<string, unknown>): void {
+    const before = this.failed;
+    if (before !== null) {
+      throw new Error(
+        `pi rpc: cannot send side-channel message, transport is failed: ${before.message}`,
+      );
+    }
+    const channel = this.sideChannel;
+    if (channel === null) {
+      throw new Error("pi rpc: extension side channel is unavailable");
+    }
+    let line: string;
+    try {
+      line = `${encodeRpcMessage(message)}\n`;
+    } catch (error) {
+      throw new Error("pi rpc: failed to serialize side-channel message", {
+        cause: toError(error, "unknown error"),
+      });
+    }
+    try {
+      channel.write(line, "utf8");
+    } catch (error) {
+      const failure = new Error("pi rpc: failed to write extension side-channel message", {
+        cause: toError(error, "unknown error"),
+      });
+      this.failTransport(failure);
+      throw failure;
+    }
+  }
+
   /**
    * Stop the owned child (SIGTERM, then bounded SIGKILL) and resolve once it
    * exits. Idempotent; never reports via `onExit`.
@@ -233,6 +304,7 @@ export class PiRpcClient {
     }
     this.pending.clear();
     this.child?.stdout?.removeAllListeners("data");
+    this.sideChannel?.removeAllListeners("data");
     return this.ensureTeardown();
   }
 
@@ -296,6 +368,50 @@ export class PiRpcClient {
     if (this.stdoutBuffer.length > MAX_LINE_CHARS) {
       this.failTransport(
         new Error(`pi rpc: stdout line exceeds ${MAX_LINE_CHARS} characters, failing transport`),
+      );
+    }
+  }
+
+  private handleSideChannelData(
+    chunk: Buffer | string,
+    onMessage: (message: unknown) => void,
+  ): void {
+    if (this.failed !== null || this.sideChannel === null) return;
+    this.sideChannelBuffer +=
+      typeof chunk === "string" ? chunk : this.sideChannelDecoder.write(chunk);
+    let newlineIndex = this.sideChannelBuffer.indexOf("\n");
+    while (newlineIndex !== -1) {
+      let line = this.sideChannelBuffer.slice(0, newlineIndex);
+      this.sideChannelBuffer = this.sideChannelBuffer.slice(newlineIndex + 1);
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      if (line.length > MAX_LINE_CHARS) {
+        this.failTransport(
+          new Error(`pi rpc: extension side-channel line exceeds ${MAX_LINE_CHARS} characters`),
+        );
+        return;
+      }
+      if (line.length > 0) {
+        const message = decodeJsonUnknown(line);
+        if (Option.isNone(message)) {
+          this.failTransport(new Error("pi rpc: invalid JSON from extension side channel"));
+          return;
+        }
+        try {
+          onMessage(message.value);
+        } catch (error) {
+          this.failTransport(
+            new Error("pi rpc: extension side-channel handler threw", {
+              cause: toError(error, "unknown error"),
+            }),
+          );
+          return;
+        }
+      }
+      newlineIndex = this.sideChannelBuffer.indexOf("\n");
+    }
+    if (this.sideChannelBuffer.length > MAX_LINE_CHARS) {
+      this.failTransport(
+        new Error(`pi rpc: extension side-channel line exceeds ${MAX_LINE_CHARS} characters`),
       );
     }
   }
@@ -390,6 +506,7 @@ export class PiRpcClient {
     }
     this.pending.clear();
     this.child?.stdout?.removeAllListeners("data");
+    this.sideChannel?.removeAllListeners("data");
     this.notifyExit(error);
     void this.ensureTeardown();
   }
@@ -485,9 +602,16 @@ export class PiRpcClient {
     } catch {
       // Already destroyed.
     }
+    try {
+      this.sideChannel?.destroy();
+    } catch {
+      // Already destroyed.
+    }
     child.stdout?.removeAllListeners();
     child.stderr?.removeAllListeners();
     child.stdin?.removeAllListeners();
+    this.sideChannel?.removeAllListeners();
+    this.sideChannel = null;
     child.removeAllListeners("close");
     child.removeAllListeners("error");
   }

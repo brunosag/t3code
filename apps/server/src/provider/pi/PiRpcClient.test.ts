@@ -20,14 +20,39 @@ const CHUNKED_TEXT = "hello 🌍 rooftop U+2028:\u2028 U+2029:\u2029 end";
 
 const FIXTURE_SCRIPT = `#!/usr/bin/env node
 "use strict";
+const fs = require("node:fs");
 let buffer = "";
+let sideBuffer = "";
 const received = [];
+const sideReceived = [];
+const sideWaiters = [];
 const writeLine = (text) => { process.stdout.write(text + "\\n"); };
 const respondTo = (message, body) => {
   const response = { type: "response", command: message.type, ...body };
   if (message.id !== undefined) response.id = message.id;
   writeLine(JSON.stringify(response));
 };
+const writeSideLine = (message) => { fs.writeSync(3, JSON.stringify(message) + "\\n"); };
+const flushSideWaiters = () => {
+  while (sideReceived.length > 0 && sideWaiters.length > 0) {
+    respondTo(sideWaiters.shift(), { success: true, data: { message: sideReceived.shift() } });
+  }
+};
+if (process.argv.includes("--extension")) {
+  const sideInput = fs.createReadStream(null, { fd: 3, autoClose: false });
+  sideInput.setEncoding("utf8");
+  sideInput.on("data", (chunk) => {
+    sideBuffer += chunk;
+    let index = sideBuffer.indexOf("\\n");
+    while (index !== -1) {
+      const line = sideBuffer.slice(0, index);
+      sideBuffer = sideBuffer.slice(index + 1);
+      if (line.length > 0) sideReceived.push(JSON.parse(line));
+      flushSideWaiters();
+      index = sideBuffer.indexOf("\\n");
+    }
+  });
+}
 const writeChunked = (text) => {
   const bytes = Buffer.from(text, "utf8");
   let offset = 0;
@@ -132,6 +157,14 @@ const handle = (message) => {
         data: { received: received.filter((entry) => entry !== message) },
       });
       break;
+    case "emit_side":
+      writeSideLine({ type: "fixture.side", value: message.value });
+      respondTo(message, { success: true, data: {} });
+      break;
+    case "wait_side_received":
+      sideWaiters.push(message);
+      flushSideWaiters();
+      break;
     default:
       if (message.id !== undefined) {
         respondTo(message, { success: false, error: "unknown command: " + String(message.type) });
@@ -160,6 +193,7 @@ interface ClientHarness {
   readonly client: PiRpcClient;
   readonly events: Record<string, unknown>[];
   readonly exits: Error[];
+  readonly sideMessages: unknown[];
 }
 
 const openClients: PiRpcClient[] = [];
@@ -168,6 +202,7 @@ const fixtureDirectories: string[] = [];
 function createClient(input?: {
   readonly sessionPath?: string;
   readonly requestTimeoutMs?: number;
+  readonly sideChannel?: boolean;
 }): ClientHarness {
   const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pi-rpc-"));
   fixtureDirectories.push(directory);
@@ -175,6 +210,7 @@ function createClient(input?: {
   NodeFS.writeFileSync(binaryPath, FIXTURE_SCRIPT, { mode: 0o755 });
   const events: Record<string, unknown>[] = [];
   const exits: Error[] = [];
+  const sideMessages: unknown[] = [];
   const client = new PiRpcClient({
     binaryPath,
     cwd: directory,
@@ -184,6 +220,14 @@ function createClient(input?: {
     },
     ...(input?.sessionPath !== undefined ? { sessionPath: input.sessionPath } : {}),
     ...(input?.requestTimeoutMs !== undefined ? { requestTimeoutMs: input.requestTimeoutMs } : {}),
+    ...(input?.sideChannel
+      ? {
+          sideChannel: {
+            extensionPath: NodePath.join(directory, "t3-user-input.mjs"),
+            onMessage: (message: unknown) => sideMessages.push(message),
+          },
+        }
+      : {}),
     onEvent: (event) => {
       events.push(event);
     },
@@ -192,7 +236,7 @@ function createClient(input?: {
     },
   });
   openClients.push(client);
-  return { client, events, exits };
+  return { client, events, exits, sideMessages };
 }
 
 function flattenCause(error: unknown): string {
@@ -259,6 +303,30 @@ describe("PiRpcClient", () => {
     expect(argv.argv).toEqual(["--mode", "rpc", "--session", "/tmp/t3-pi-test-session.jsonl"]);
     const env = (await client.request("get_env")) as { sentinel: unknown };
     expect(env).toEqual({ sentinel: FIXTURE_SENTINEL });
+  });
+
+  it("loads an extension and exchanges JSONL on the dedicated side channel", async () => {
+    const { client, sideMessages } = createClient({ sideChannel: true });
+    const argv = (await client.request("get_argv")) as { argv: string[] };
+    expect(argv.argv).toEqual([
+      "--mode",
+      "rpc",
+      "--extension",
+      expect.stringMatching(/t3-user-input\.mjs$/),
+    ]);
+
+    await client.request("emit_side", { value: "question" });
+    await waitFor(() => sideMessages.length === 1);
+    expect(sideMessages).toEqual([{ type: "fixture.side", value: "question" }]);
+
+    client.sendSideChannel({ type: "user-input.response", requestId: "q-1", answers: { q: "A" } });
+    await expect(client.request("wait_side_received")).resolves.toEqual({
+      message: {
+        type: "user-input.response",
+        requestId: "q-1",
+        answers: { q: "A" },
+      },
+    });
   });
 
   it("correlates concurrent requests and routes events to onEvent", async () => {
