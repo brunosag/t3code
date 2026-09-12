@@ -1,3 +1,4 @@
+import { UserInputQuestion } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 // Only the public RPC fields used by T3 are decoded here. Pi owns everything else.
@@ -72,6 +73,19 @@ export const PiUiRequest = Schema.Struct({
   prefill: Schema.optional(Schema.String),
   timeout: Schema.optional(Schema.Number),
 });
+
+export const PiSideChannelMessage = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("user-input.request"),
+    requestId: Schema.String.check(Schema.isMinLength(1)),
+    questions: Schema.Array(UserInputQuestion).check(Schema.isMinLength(1)),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("user-input.cancel"),
+    requestId: Schema.String.check(Schema.isMinLength(1)),
+  }),
+]);
+export type PiSideChannelMessage = typeof PiSideChannelMessage.Type;
 
 export function piModelSelection(model: string): { provider: string; modelId: string } | undefined {
   if (model === "default") return undefined;

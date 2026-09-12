@@ -31,7 +31,7 @@ import type { PiRpcClient } from "./PiRpcClient.ts";
 
 type PiAdapter = Effect.Success<ReturnType<typeof makePiAdapter>>;
 type ClientInit = ConstructorParameters<typeof PiRpcClient>[0];
-type Client = Pick<PiRpcClient, "request" | "send" | "close">;
+type Client = Pick<PiRpcClient, "request" | "send" | "sendSideChannel" | "close">;
 
 interface RecordedRequest {
   readonly type: string;
@@ -42,6 +42,7 @@ interface RecordedRequest {
 class FakePiClient implements Client {
   readonly requests: Array<RecordedRequest> = [];
   readonly sends: Array<Record<string, unknown>> = [];
+  readonly sideChannelSends: Array<Record<string, unknown>> = [];
   closed = false;
   state: Record<string, unknown> = {
     sessionFile: "/tmp/t3-pi-adapter-session.jsonl",
@@ -94,6 +95,10 @@ class FakePiClient implements Client {
     this.sends.push(message);
   }
 
+  sendSideChannel(message: Record<string, unknown>): void {
+    this.sideChannelSends.push(message);
+  }
+
   close(): Promise<void> {
     this.closed = true;
     return Promise.resolve();
@@ -101,6 +106,10 @@ class FakePiClient implements Client {
 
   emit(event: Record<string, unknown>): void {
     this.init.onEvent(event);
+  }
+
+  emitSideChannel(message: unknown): void {
+    this.init.sideChannel?.onMessage(message);
   }
 
   crash(error: Error): void {
@@ -136,6 +145,7 @@ function makeHarness(): Harness {
       environment,
       cwd: "/default-cwd",
       attachmentsDir: "/attachments",
+      userInputExtensionPath: "/t3/pi-user-input.mjs",
       instanceId: piInstance,
       createClient: (init) => {
         inits.push(init);
@@ -200,6 +210,7 @@ describe("PiAdapter", () => {
       expect(harness.inits[0]?.binaryPath).toBe("/bin/pi");
       expect(harness.inits[0]?.environment).toBe(harness.environment);
       expect(harness.inits[0]?.sessionPath).toBeUndefined();
+      expect(harness.inits[0]?.sideChannel?.extensionPath).toBe("/t3/pi-user-input.mjs");
       expect(first.cwd).toBe("/custom-cwd");
 
       const events = Array.from(yield* Fiber.join(receipts));
@@ -924,6 +935,128 @@ describe("PiAdapter", () => {
     }),
   );
 
+  it.effect("round-trips batched rich questions over the T3 side channel", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-rich-user-input");
+      yield* startSession(adapter, threadId);
+      const receipts = yield* subscribe(adapter, 2);
+      const client = harness.clients[0]!;
+
+      client.emitSideChannel({
+        type: "user-input.request",
+        requestId: "ask-user-1",
+        questions: [
+          {
+            id: "surfaces",
+            header: "Surfaces",
+            question: "Which clients should change?",
+            options: [
+              { label: "Web", value: "web", description: "Browser and desktop shell" },
+              { label: "Mobile", value: "mobile", description: "iOS and Android" },
+            ],
+            allowCustomAnswer: false,
+            multiSelect: true,
+          },
+          {
+            id: "notes",
+            header: "Notes",
+            question: "Anything else?",
+            options: [],
+            multiSelect: false,
+          },
+        ],
+      });
+
+      const surfaces = ["web", "mobile", 'Attached file "context.txt": "/tmp/context.txt"'];
+      yield* adapter.respondToUserInput(threadId, ApprovalRequestId.make("ask-user-1"), {
+        surfaces,
+        notes: "Keep the existing UI",
+      });
+
+      expect(client.sideChannelSends).toEqual([
+        {
+          type: "user-input.response",
+          requestId: "ask-user-1",
+          answers: {
+            surfaces,
+            notes: "Keep the existing UI",
+          },
+        },
+      ]);
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events[0]).toMatchObject({
+        type: "user-input.requested",
+        requestId: "ask-user-1",
+        payload: {
+          questions: [
+            {
+              id: "surfaces",
+              multiSelect: true,
+              options: [
+                { value: "web", description: "Browser and desktop shell" },
+                { value: "mobile", description: "iOS and Android" },
+              ],
+            },
+            { id: "notes", options: [] },
+          ],
+        },
+      });
+      expect(events[1]).toMatchObject({
+        type: "user-input.resolved",
+        requestId: "ask-user-1",
+        payload: {
+          answers: {
+            surfaces,
+            notes: "Keep the existing UI",
+          },
+        },
+      });
+    }),
+  );
+
+  it.effect("rejects invalid rich answers and resolves side-channel cancellation", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-rich-user-input-validation");
+      yield* startSession(adapter, threadId);
+      const receipts = yield* subscribe(adapter, 2);
+      const client = harness.clients[0]!;
+
+      client.emitSideChannel({
+        type: "user-input.request",
+        requestId: "ask-user-invalid",
+        questions: [
+          {
+            id: "scope",
+            header: "Scope",
+            question: "Pick one",
+            options: [{ label: "Server", value: "server", description: "Backend only" }],
+            allowCustomAnswer: false,
+            multiSelect: false,
+          },
+        ],
+      });
+      const invalid = yield* Effect.flip(
+        adapter.respondToUserInput(threadId, ApprovalRequestId.make("ask-user-invalid"), {
+          scope: ["server"],
+        }),
+      );
+      expect(String(invalid.detail)).toContain("does not allow multiple answers");
+      expect(client.sideChannelSends).toEqual([]);
+
+      client.emitSideChannel({ type: "user-input.cancel", requestId: "ask-user-invalid" });
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events.map((event) => event.type)).toEqual([
+        "user-input.requested",
+        "user-input.resolved",
+      ]);
+      expect(client.sideChannelSends).toEqual([]);
+    }),
+  );
+
   it.effect("interrupts blocked model preflight before accepting a prompt", () =>
     Effect.gen(function* () {
       const harness = makeHarness();
@@ -1049,6 +1182,51 @@ describe("PiAdapter", () => {
         "turn.completed",
         "session.state.changed",
       ]);
+    }),
+  );
+
+  it.effect("clears a pending rich question when Pi crashes", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-question-crash");
+      yield* startSession(adapter, threadId);
+      harness.clients[0]!.state.isStreaming = true;
+      const requestedReceipt = yield* subscribe(adapter, 3);
+      yield* adapter.sendTurn({ threadId, input: "ask me" });
+      const client = harness.clients[0]!;
+
+      client.emitSideChannel({
+        type: "user-input.request",
+        requestId: "ask-before-crash",
+        questions: [
+          {
+            id: "answer",
+            header: "Answer",
+            question: "Continue?",
+            options: [{ label: "Yes", description: "" }],
+            allowCustomAnswer: false,
+            multiSelect: false,
+          },
+        ],
+      });
+      expect(Array.from(yield* Fiber.join(requestedReceipt)).map((event) => event.type)).toEqual([
+        "turn.started",
+        "session.state.changed",
+        "user-input.requested",
+      ]);
+
+      const crashReceipts = yield* subscribe(adapter, 3);
+      client.crash(new Error("boom"));
+
+      const events = Array.from(yield* Fiber.join(crashReceipts));
+      expect(events.map((event) => event.type)).toEqual([
+        "user-input.resolved",
+        "turn.completed",
+        "session.exited",
+      ]);
+      expect(client.sideChannelSends).toEqual([]);
+      expect(yield* adapter.hasSession(threadId)).toBe(false);
     }),
   );
 

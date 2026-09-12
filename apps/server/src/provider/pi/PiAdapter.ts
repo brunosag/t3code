@@ -13,6 +13,7 @@ import {
   type ProviderRuntimeEventBase,
   type ProviderSession,
   type ThreadId,
+  type UserInputQuestion,
 } from "@t3tools/contracts";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import * as Effect from "effect/Effect";
@@ -28,6 +29,7 @@ import {
   PiDelta,
   PiMessage,
   PiResumeCursor,
+  PiSideChannelMessage,
   PiState,
   PiThinkingLevel,
   PiThinkingLevels,
@@ -40,6 +42,7 @@ const decodePiMessage = Schema.decodeUnknownSync(PiMessage);
 const decodePiDelta = Schema.decodeUnknownSync(PiDelta);
 const decodePiUiRequest = Schema.decodeUnknownSync(PiUiRequest);
 const decodePiResumeCursor = Schema.decodeUnknownSync(PiResumeCursor);
+const decodePiSideChannelMessage = Schema.decodeUnknownSync(PiSideChannelMessage);
 const decodePiState = Schema.decodeUnknownSync(PiState);
 const decodePiThinkingLevel = Schema.decodeUnknownOption(PiThinkingLevel);
 const decodePiThinkingLevels = Schema.decodeUnknownSync(PiThinkingLevels);
@@ -78,15 +81,25 @@ type EventBody = ProviderRuntimeEvent extends infer E
     ? Pick<E, "type" | "payload">
     : never
   : never;
-type Client = Pick<PiRpcClient, "request" | "send" | "close">;
+type Client = Pick<PiRpcClient, "request" | "send" | "sendSideChannel" | "close">;
 export interface PiAdapterOptions {
   binaryPath: string;
   environment: NodeJS.ProcessEnv;
   cwd: string;
   attachmentsDir: string;
+  userInputExtensionPath?: string;
   instanceId: ProviderInstanceId;
   createClient?: (options: ConstructorParameters<typeof PiRpcClient>[0]) => Client;
 }
+type PendingInput =
+  | {
+      kind: "rpc-ui";
+      method: string;
+      options?: readonly string[];
+      timer?: ReturnType<typeof setTimeout>;
+    }
+  | { kind: "side-channel"; questions: ReadonlyArray<UserInputQuestion> };
+
 interface Session {
   client: Client;
   session: ProviderSession;
@@ -102,10 +115,7 @@ interface Session {
   /** Levels Pi reported for the current model; cleared whenever the model changes. */
   thinkingLevels?: readonly PiThinkingLevel[] | undefined;
   interruptEpoch: number;
-  pending: Map<
-    string,
-    { method: string; options?: readonly string[]; timer?: ReturnType<typeof setTimeout> }
-  >;
+  pending: Map<string, PendingInput>;
   operations: Promise<unknown>;
 }
 
@@ -179,22 +189,42 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     await ctx.client.request("set_thinking_level", { level: level.value });
     ctx.thinkingLevel = level.value;
   };
-  const resolveUi = (ctx: Session, id: string, response: Record<string, unknown>, send = true) => {
+  const resolveInput = (
+    ctx: Session,
+    id: string,
+    response: Record<string, unknown>,
+    resolvedAnswers: Record<string, unknown> = response,
+    send = true,
+  ) => {
     const pending = ctx.pending.get(id);
     if (!pending) throw new Error(`Pi input request ${id} is no longer pending.`);
-    if (send) ctx.client.send({ type: "extension_ui_response", id, ...response });
-    clearTimeout(pending.timer);
+    if (send) {
+      if (pending.kind === "side-channel") {
+        ctx.client.sendSideChannel({ type: "user-input.response", requestId: id, ...response });
+      } else {
+        ctx.client.send({ type: "extension_ui_response", id, ...response });
+      }
+    }
+    if (pending.kind === "rpc-ui") clearTimeout(pending.timer);
     ctx.pending.delete(id);
     emit(
       ctx,
-      { type: "user-input.resolved", payload: { answers: response } },
+      { type: "user-input.resolved", payload: { answers: resolvedAnswers } },
       { requestId: RuntimeRequestId.make(id) },
     );
   };
-  const finish = (ctx: Session) => {
+  const finish = (ctx: Session, sendSideChannelCancellation = true) => {
     if (!ctx.session.activeTurnId) return;
-    // Settlement/exit means Pi no longer awaits these dialogs. Resolve only the T3 UI.
-    for (const id of ctx.pending.keys()) resolveUi(ctx, id, { cancelled: true }, false);
+    // Pi RPC dialogs are already gone at settlement. A side-channel tool may
+    // still be awaiting its explicit cancellation response.
+    for (const [id, pending] of ctx.pending)
+      resolveInput(
+        ctx,
+        id,
+        { cancelled: true },
+        undefined,
+        sendSideChannelCancellation && pending.kind === "side-channel",
+      );
     emit(ctx, {
       type: "turn.completed",
       payload: {
@@ -206,6 +236,39 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     ctx.session = { ...rest, status: "ready", updatedAt: new Date().toISOString() };
     // A ready event would clear the failed turn's visible error in orchestration.
     if (!ctx.failure) emit(ctx, { type: "session.state.changed", payload: { state: "ready" } });
+  };
+  const handleSideChannelMessage = (ctx: Session, value: unknown) => {
+    const message = decodePiSideChannelMessage(value);
+    if (message.type === "user-input.cancel") {
+      const pending = ctx.pending.get(message.requestId);
+      if (pending?.kind === "side-channel") {
+        resolveInput(ctx, message.requestId, { cancelled: true }, undefined, false);
+      }
+      return;
+    }
+    if (ctx.pending.has(message.requestId)) {
+      throw new Error(`Pi input request ${message.requestId} is already pending.`);
+    }
+    const ids = new Set(message.questions.map((question) => question.id));
+    if (ids.size !== message.questions.length) {
+      throw new Error("Pi ask_user question IDs must be unique.");
+    }
+    if (
+      message.questions.some(
+        (question) => question.options.length === 0 && question.allowCustomAnswer === false,
+      )
+    ) {
+      throw new Error("Pi ask_user questions without options must allow a custom answer.");
+    }
+    ctx.pending.set(message.requestId, {
+      kind: "side-channel",
+      questions: message.questions,
+    });
+    emit(
+      ctx,
+      { type: "user-input.requested", payload: { questions: message.questions } },
+      { requestId: RuntimeRequestId.make(message.requestId) },
+    );
   };
   const handleEvent = (ctx: Session, event: Record<string, unknown>) => {
     if (ctx.stopped) return;
@@ -347,7 +410,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           const req = decodePiUiRequest(event);
           if (["confirm", "select", "input", "editor"].includes(req.method)) {
             const choices = req.method === "confirm" ? ["Yes", "No"] : (req.options ?? []);
-            const pending: Session["pending"] extends Map<string, infer P> ? P : never = {
+            const pending: Extract<PendingInput, { kind: "rpc-ui" }> = {
+              kind: "rpc-ui",
               method: req.method,
               options: choices,
             };
@@ -407,7 +471,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
   };
   const stop = async (ctx: Session) => {
     if (ctx.stopped) return;
-    for (const id of ctx.pending.keys()) resolveUi(ctx, id, { cancelled: true }, false);
+    for (const id of ctx.pending.keys())
+      resolveInput(ctx, id, { cancelled: true }, undefined, false);
     emit(ctx, { type: "session.exited", payload: { exitKind: "graceful", recoverable: true } });
     ctx.stopped = true;
     sessions.delete(ctx.session.threadId);
@@ -470,15 +535,25 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             environment: options.environment,
             ...(cursor ? { sessionPath: cursor.sessionPath } : {}),
             onEvent: (event) => handleEvent(ctx, event),
+            ...(options.userInputExtensionPath
+              ? {
+                  sideChannel: {
+                    extensionPath: options.userInputExtensionPath,
+                    onMessage: (message: unknown) => handleSideChannelMessage(ctx, message),
+                  },
+                }
+              : {}),
             onExit: (error) => {
               if (ctx.stopped) return;
               ctx.failure = error.message;
-              finish(ctx);
+              finish(ctx, false);
               emit(ctx, {
                 type: "session.exited",
                 payload: { exitKind: "error", reason: error.message, recoverable: true },
               });
-              for (const pending of ctx.pending.values()) clearTimeout(pending.timer);
+              for (const pending of ctx.pending.values()) {
+                if (pending.kind === "rpc-ui") clearTimeout(pending.timer);
+              }
               ctx.stopped = true;
               sessions.delete(input.threadId);
             },
@@ -634,7 +709,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         if (turnId && ctx.session.activeTurnId !== turnId) return;
         ctx.interrupted = true;
         ctx.interruptEpoch += 1;
-        for (const requestId of ctx.pending.keys()) resolveUi(ctx, requestId, { cancelled: true });
+        for (const requestId of ctx.pending.keys())
+          resolveInput(ctx, requestId, { cancelled: true });
         const previous = ctx.operations;
         const abort = (async () => {
           await ctx.client.request("clear_queue");
@@ -649,19 +725,37 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       call("respondToRequest", async () => {
         if (decision !== "cancel" && decision !== "decline")
           throw new Error("Pi dialogs use structured user input, not T3 permission policy.");
-        resolveUi(get(id), requestId, { cancelled: true });
+        resolveInput(get(id), requestId, { cancelled: true });
       }),
     respondToUserInput: (id, requestId, answers) =>
       call("respondToUserInput", async () => {
         const ctx = get(id);
         const pending = ctx.pending.get(requestId);
         if (!pending) throw new Error("Pi request is no longer pending.");
+        if (pending.kind === "side-channel") {
+          const resolved: Record<string, string | readonly string[]> = {};
+          for (const question of pending.questions) {
+            const answer = decodeAnswer(answers[question.id]);
+            if (answer === undefined) throw new Error(`Missing Pi answer for '${question.id}'.`);
+            if (typeof answer !== "string" && !question.multiSelect) {
+              throw new Error(`Pi question '${question.id}' does not allow multiple answers.`);
+            }
+            // ProviderService may append validated attachment references to an
+            // answer, so enforce answer cardinality here rather than exact option membership.
+            if (typeof answer !== "string" && answer.length === 0) {
+              throw new Error(`Missing Pi answer for '${question.id}'.`);
+            }
+            resolved[question.id] = answer;
+          }
+          resolveInput(ctx, requestId, { answers: resolved }, resolved);
+          return;
+        }
         const answer = decodeAnswer(answers[requestId]);
         const value = typeof answer === "string" ? answer : answer?.[0];
-        if (value === undefined) return resolveUi(ctx, requestId, { cancelled: true });
+        if (value === undefined) return resolveInput(ctx, requestId, { cancelled: true });
         if (pending.options?.length && !pending.options.includes(value))
           throw new Error("Invalid Pi selection.");
-        resolveUi(
+        resolveInput(
           ctx,
           requestId,
           pending.method === "confirm" ? { confirmed: value === "Yes" } : { value },
