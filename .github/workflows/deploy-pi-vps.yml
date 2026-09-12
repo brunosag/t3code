@@ -158,8 +158,12 @@ jobs:
           scp "${ssh_opts[@]}" "$TGZ" "$VPS_USER@$VPS_HOST:local/t3-pi/releases/"
 
           # Installs into runtime/versions/<version> with the preseed sentinel, then
-          # hands off to the fork CLI: `service update` trial-starts the new version,
-          # backs up the database, and rolls back to the previous version on failure.
+          # hands off to the fork CLI. --allow-downgrade is required here: the
+          # launcher compares versions with a semver-style comparator, and a hex
+          # sha suffix is not chronological, so a newer build can sort below the
+          # installed one. This workflow's whole job is to install the pushed
+          # commit, and the preseed plus .install-complete is what keeps the stock
+          # installer from replacing the fork with the registry package.
           ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "VERSION=$(printf '%q' "$VERSION") bash -s" <<'REMOTE'
           set -euo pipefail
           BASE="$HOME/local/t3-pi"
@@ -175,7 +179,7 @@ jobs:
           node "$RUNTIME/node_modules/t3/dist/bin.mjs" --version
           printf '%s\n' "$VERSION" > "$RUNTIME/.install-complete"
 
-          node "$RUNTIME/node_modules/t3/dist/bin.mjs" service update --base-dir "$BASE" < /dev/null
+          node "$RUNTIME/node_modules/t3/dist/bin.mjs" service update --base-dir "$BASE" --allow-downgrade < /dev/null
 
           port="$(sed -n 's/^Environment=T3CODE_PORT=//p' "$HOME/.config/systemd/user/t3code.service.d/deployment.conf" 2>/dev/null | tail -1)"
           port="${port:-8899}"
