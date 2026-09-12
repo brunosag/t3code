@@ -104,11 +104,21 @@ jobs:
           test -f "$tgz"
           # Guard the trap this pipeline exists to avoid: if the inlined version
           # did not match the version directory, the stock launcher would install
-          # the registry t3 package and silently replace the fork.
-          tar -xzOf "$tgz" package/dist/bin.mjs | grep -q -- "$version"
-          tar -tzf "$tgz" | grep -q '^package/dist/client/index.html$'
+          # the registry t3 package and silently replace the fork. Extract first:
+          # piping into `grep -q` closes the pipe early, and `set -o pipefail`
+          # would then fail the step on tar's SIGPIPE even when the match is good.
+          tar -xzOf "$tgz" package/dist/bin.mjs > "$RUNNER_TEMP/t3-bin.mjs"
+          if ! grep -q -- "$version" "$RUNNER_TEMP/t3-bin.mjs"; then
+            echo "::error::packed bundle does not contain the inlined version $version"
+            exit 1
+          fi
+          tar -tzf "$tgz" > "$RUNNER_TEMP/t3-tar-list.txt"
+          if ! grep -q '^package/dist/client/index.html$' "$RUNNER_TEMP/t3-tar-list.txt"; then
+            echo "::error::packed tarball is missing the bundled web client"
+            exit 1
+          fi
           echo "tgz=$tgz" >> "$GITHUB_OUTPUT"
-          ls -la "$RUNNER_TEMP/t3-release"
+          wc -l < "$RUNNER_TEMP/t3-tar-list.txt" | sed 's/^/entries: /'
 
       - name: Connect to tailnet
         uses: tailscale/github-action@v4
