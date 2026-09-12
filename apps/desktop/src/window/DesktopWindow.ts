@@ -804,7 +804,7 @@ export const make = Effect.gen(function* () {
     });
 
     loadApplication();
-    if (environment.isDevelopment) {
+    if (environment.openDevToolsOnStart) {
       window.webContents.openDevTools({ mode: "detach" });
     }
 

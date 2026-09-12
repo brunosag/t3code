@@ -38,6 +38,9 @@ export class DesktopEnvironment extends Context.Service<
     readonly processArch: string;
     readonly isPackaged: boolean;
     readonly isDevelopment: boolean;
+    // Detached DevTools for the main window. Development only, and opt-in via
+    // T3CODE_DESKTOP_DEVTOOLS so the dev app can be used as a daily driver.
+    readonly openDevToolsOnStart: boolean;
     readonly appVersion: string;
     readonly appPath: string;
     readonly resourcesPath: string;
@@ -149,6 +152,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
   const homeDirectory = input.homeDirectory;
   const devServerUrl = config.devServerUrl;
   const isDevelopment = Option.isSome(devServerUrl);
+  const openDevToolsOnStart = isDevelopment && config.devTools;
   const appDataDirectory =
     input.platform === "win32"
       ? Option.getOrElse(config.appDataDirectory, () =>
@@ -194,6 +198,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     processArch: input.processArch,
     isPackaged: input.isPackaged,
     isDevelopment,
+    openDevToolsOnStart,
     appVersion: input.appVersion,
     appPath: input.appPath,
     resourcesPath,

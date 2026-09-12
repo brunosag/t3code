@@ -56,6 +56,7 @@ describe("DesktopEnvironment", () => {
       );
 
       assert.equal(environment.isDevelopment, true);
+      assert.equal(environment.openDevToolsOnStart, false);
       assert.equal(environment.appDataDirectory, "/Users/alice/Library/Application Support");
       assert.equal(environment.baseDir, "/tmp/t3");
       assert.equal(environment.stateDir, "/tmp/t3/userdata");
@@ -146,6 +147,27 @@ describe("DesktopEnvironment", () => {
 
       assert.equal(development.stateDir, "/Users/alice/.t3/dev");
       assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+    }),
+  );
+
+  it.effect("opens development DevTools only when explicitly requested", () =>
+    Effect.gen(function* () {
+      const requested = yield* makeEnvironment(
+        {},
+        {
+          VITE_DEV_SERVER_URL: "http://localhost:5173",
+          T3CODE_DESKTOP_DEVTOOLS: "1",
+        },
+      );
+      const implicit = yield* makeEnvironment({}, { VITE_DEV_SERVER_URL: "http://localhost:5173" });
+      const packaged = yield* makeEnvironment(
+        { isPackaged: true },
+        { T3CODE_DESKTOP_DEVTOOLS: "1" },
+      );
+
+      assert.equal(requested.openDevToolsOnStart, true);
+      assert.equal(implicit.openDevToolsOnStart, false);
+      assert.equal(packaged.openDevToolsOnStart, false);
     }),
   );
 
