@@ -1,0 +1,196 @@
+name: Deploy Pi fork to tutor-prod
+
+# Fork-only pipeline: push pi-provider -> test, build, and install the server on
+# the tutor-prod VPS through the stock service launcher. The host details live in
+# ~/local/t3-pi/DEPLOYMENT.md on the VPS (base dir, drop-in port, Tailscale Serve,
+# rollback recipe).
+on:
+  push:
+    branches:
+      - pi-provider
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never run two deploys at once: both would install and restart the same service.
+concurrency:
+  group: deploy-pi-tutor-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Test, build, deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # .repos/ is the vendored read-only reference tree; the build never reads it.
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Preflight deploy credentials
+        run: |
+          missing=0
+          if [ -z "${{ secrets.TS_OAUTH_CLIENT_ID }}" ] || [ -z "${{ secrets.TS_OAUTH_SECRET }}" ]; then
+            echo "::error::Set TS_OAUTH_CLIENT_ID and TS_OAUTH_SECRET (Tailscale OAuth client with the auth_keys scope and tag:ci)."
+            missing=1
+          fi
+          if [ -z "${{ secrets.VPS_DEPLOY_KEY }}" ]; then
+            echo "::error::Set VPS_DEPLOY_KEY (private half of the restricted ssh key in tutor-prod:~/.ssh/authorized_keys)."
+            missing=1
+          fi
+          exit "$missing"
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      # The fork's own surface: Pi provider, the provider/registry regression
+      # tests its integration points touch, and the dev-runner/desktop changes.
+      - name: Focused fork tests
+        run: |
+          vp test run \
+            apps/server/src/provider/pi \
+            apps/server/src/provider/Layers/ProviderInstanceRegistryHydration.test.ts \
+            apps/web/src/providerInstances.test.ts \
+            apps/web/src/components/settings/ProviderSettingsForm.test.ts \
+            packages/contracts/src/pi.test.ts \
+            packages/contracts/src/server.test.ts \
+            packages/client-runtime/src/providerPermissions.test.ts \
+            apps/desktop/src/app/DesktopEnvironment.test.ts \
+            apps/desktop/src/window/DesktopWindow.test.ts \
+            scripts/dev-runner.test.ts
+
+      - name: Typecheck fork-affected packages
+        run: vp run --filter t3 --filter @t3tools/web --filter @t3tools/mobile --filter @t3tools/contracts --filter @t3tools/client-runtime typecheck
+
+      # The version has to be set before the build: bin.mjs reports it from a
+      # build-time inline, and the service launcher keys runtime/versions/<version>
+      # off that same value.
+      - name: Set deploy version
+        id: version
+        run: |
+          set -euo pipefail
+          base="$(node -p "require('./apps/server/package.json').version")"
+          version="${base}-pi.$(git rev-parse --short=9 HEAD)"
+          node -e 'const fs = require("node:fs"); const file = "apps/server/package.json"; const pkg = JSON.parse(fs.readFileSync(file, "utf8")); pkg.version = process.argv[1]; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");' "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Deploy version: $version"
+
+      # Builds @t3tools/web first (apps/server/vite.config.ts build task depends on
+      # it), then bundles the server and copies the built client into dist/client.
+      - name: Build server package with web client
+        run: vp run --filter t3 build
+
+      - name: Pack deploy tarball
+        id: pack
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          # The published manifest needs no devDependencies, and their
+          # workspace: specs cannot resolve outside this checkout.
+          node -e 'const fs = require("node:fs"); const file = "apps/server/package.json"; const pkg = JSON.parse(fs.readFileSync(file, "utf8")); delete pkg.devDependencies; delete pkg.scripts; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");'
+          mkdir -p "$RUNNER_TEMP/t3-release"
+          (cd apps/server && vp pm pack --pack-destination "$RUNNER_TEMP/t3-release")
+          tgz="$RUNNER_TEMP/t3-release/t3-$version.tgz"
+          test -f "$tgz"
+          # Guard the trap this pipeline exists to avoid: if the inlined version
+          # did not match the version directory, the stock launcher would install
+          # the registry t3 package and silently replace the fork.
+          tar -xzOf "$tgz" package/dist/bin.mjs | grep -q -- "$version"
+          tar -tzf "$tgz" | grep -q '^package/dist/client/index.html$'
+          echo "tgz=$tgz" >> "$GITHUB_OUTPUT"
+          ls -la "$RUNNER_TEMP/t3-release"
+
+      - name: Connect to tailnet
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Deploy to tutor-prod
+        env:
+          DEPLOY_KEY: ${{ secrets.VPS_DEPLOY_KEY }}
+          VPS_HOST: ${{ vars.VPS_HOST }}
+          VPS_USER: ${{ vars.VPS_USER }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TGZ: ${{ steps.pack.outputs.tgz }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            if timeout 5 bash -c "</dev/tcp/$VPS_HOST/22" 2>/dev/null; then break; fi
+            if [ "$attempt" = 12 ]; then
+              echo "::error::$VPS_HOST:22 is not reachable from the runner"
+              tailscale status || true
+              exit 1
+            fi
+            sleep 5
+          done
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -t ed25519 "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          ssh_opts=(-i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20)
+          scp "${ssh_opts[@]}" "$TGZ" "$VPS_USER@$VPS_HOST:local/t3-pi/releases/"
+
+          # Installs into runtime/versions/<version> with the preseed sentinel, then
+          # hands off to the fork CLI: `service update` trial-starts the new version,
+          # backs up the database, and rolls back to the previous version on failure.
+          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "VERSION=$(printf '%q' "$VERSION") bash -s" <<'REMOTE'
+          set -euo pipefail
+          BASE="$HOME/local/t3-pi"
+          RUNTIME="$BASE/runtime/versions/$VERSION"
+          umask 077
+
+          mkdir -p "$RUNTIME"
+          # Preseeding the runtime plus .install-complete is what stops the stock
+          # pinned-runtime installer from replacing this fork with the registry
+          # package (see DEPLOYMENT.md on the host).
+          printf '%s\n' '{"private":true,"allowScripts":{"node-pty":true,"msgpackr-extract":true}}' > "$RUNTIME/package.json"
+          npm install --prefix "$RUNTIME" --no-fund --no-audit "$BASE/releases/t3-$VERSION.tgz"
+          node "$RUNTIME/node_modules/t3/dist/bin.mjs" --version
+          printf '%s\n' "$VERSION" > "$RUNTIME/.install-complete"
+
+          node "$RUNTIME/node_modules/t3/dist/bin.mjs" service update --base-dir "$BASE" < /dev/null
+
+          port="$(sed -n 's/^Environment=T3CODE_PORT=//p' "$HOME/.config/systemd/user/t3code.service.d/deployment.conf" 2>/dev/null | tail -1)"
+          port="${port:-8899}"
+          for attempt in $(seq 1 30); do
+            if curl -fsS -o /dev/null --max-time 5 "http://127.0.0.1:$port/.well-known/t3/environment"; then
+              echo "healthy on port $port after $attempt checks"
+              break
+            fi
+            if [ "$attempt" = 30 ]; then
+              echo "server did not become healthy on port $port" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          node "$RUNTIME/node_modules/t3/dist/bin.mjs" service status --base-dir "$BASE"
+          REMOTE
+
+      - name: Rollback hint
+        if: failure()
+        run: |
+          cat <<'HINT'
+          A failed run leaves the previous version installed and active.
+
+          To roll back explicitly:
+            ssh tutor-prod
+            BASE="$HOME/local/t3-pi"
+            ls "$BASE/runtime/versions"
+            node "$BASE/runtime/versions/<previous-version>/node_modules/t3/dist/bin.mjs" \
+              service update --base-dir "$BASE" --allow-downgrade
+          HINT
