@@ -116,6 +116,9 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
+          # Waits (up to 3 minutes) for the VPS to become reachable: tailnet peer
+          # propagation is eventually consistent, so an immediate ssh can race it.
+          ping: ${{ vars.VPS_HOST }}
 
       - name: Deploy to tutor-prod
         env:
