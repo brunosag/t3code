@@ -124,12 +124,29 @@ jobs:
       # electron-updater resolves an update from the channel manifest, then
       # verifies the download against the sha512 it records. A release missing
       # nightly-linux.yml leaves installed apps silently pinned to the old build.
+      #
+      # AppImages carry an embedded block map (the build logs "building embedded
+      # block map" and records blockMapSize in the manifest), so there is no
+      # separate *.blockmap file and none must be required. Pin the manifest by
+      # name: a release/*.yml glob would also sweep up builder-debug.yml.
       - name: Verify updater assets
         run: |
           set -euo pipefail
           test -f release/nightly-linux.yml
           ls release/*.AppImage >/dev/null
           grep -q -- "${{ steps.version.outputs.version }}" release/nightly-linux.yml
+
+      # Keep the build retrievable even when publishing fails, so a bad release
+      # step never costs another full Electron build.
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: t3-pi-linux-${{ steps.version.outputs.version }}
+          path: |
+            release/*.AppImage
+            release/nightly-linux.yml
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Publish prerelease
         uses: softprops/action-gh-release@v3
@@ -141,8 +158,7 @@ jobs:
           make_latest: false
           files: |
             release/*.AppImage
-            release/*.blockmap
-            release/*.yml
+            release/nightly-linux.yml
           fail_on_unmatched_files: true
           token: ${{ github.token }}
 
