@@ -1,0 +1,166 @@
+name: Build Pi fork desktop (Linux)
+
+# Fork-only pipeline: push pi-provider -> test, build an unsigned Linux AppImage,
+# publish it as a prerelease on this fork. Installed AppImages update themselves
+# from these releases, so the developer's machine needs no poller or daemon.
+#
+# The build version carries a `-nightly.<date>.<run>` suffix, which is what puts
+# the app on the nightly update channel (apps/desktop/src/updates/updateChannels.ts):
+# prerelease assets, a nightly-linux.yml manifest, and separate branding, product
+# name, and Linux desktop entry from a stock T3 Code install.
+on:
+  push:
+    branches:
+      - pi-provider
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Only the newest push is worth building: each run publishes a release that
+# supersedes the previous one.
+concurrency:
+  group: desktop-pi-linux
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test, build, publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # .repos/ is the vendored read-only reference tree; the build never reads it.
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      # The fork's own surface: Pi provider, the provider/registry regression
+      # tests its integration points touch, and the dev-runner/desktop changes.
+      # Seconds on a warm install, and the alternative is publishing a release
+      # that auto-installs itself onto the developer's machine while broken.
+      - name: Focused fork tests
+        run: |
+          vp test run \
+            apps/server/src/provider/pi \
+            apps/server/src/provider/Layers/ProviderInstanceRegistryHydration.test.ts \
+            apps/web/src/providerInstances.test.ts \
+            apps/web/src/components/settings/ProviderSettingsForm.test.ts \
+            packages/contracts/src/pi.test.ts \
+            packages/contracts/src/server.test.ts \
+            packages/client-runtime/src/providerPermissions.test.ts \
+            apps/desktop/src/app/DesktopEnvironment.test.ts \
+            apps/desktop/src/window/DesktopWindow.test.ts \
+            scripts/dev-runner.test.ts
+
+      # T3 Connect's client identifiers are public (see .env.example) and the
+      # vite configs read them from the repo root .env via loadRepoEnv. Without
+      # this the build works but ships with cloud features disabled.
+      - name: Enable T3 Connect public config
+        run: cp .env.example .env
+
+      - name: Install Linux desktop build libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsecret-1-dev pkg-config imagemagick
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache resource monitor
+        id: resource_monitor_cache
+        uses: actions/cache@v6
+        with:
+          path: native/resource-monitor/target/x86_64-unknown-linux-gnu/release/t3-resource-monitor
+          key: resource-monitor-x86_64-unknown-linux-gnu-${{ hashFiles('native/resource-monitor/Cargo.lock', 'native/resource-monitor/Cargo.toml', 'native/resource-monitor/src/**') }}
+
+      - name: Cache Linux capture helpers
+        id: capture_helper_cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            native/kde-snap-shot/target/x86_64-unknown-linux-gnu/release/t3-kde-snap-shot
+            native/hyprland-snap-shot/target/x86_64-unknown-linux-gnu/release/t3-hyprland-snap-shot
+          key: linux-capture-helpers-x86_64-unknown-linux-gnu-${{ hashFiles('native/kde-snap-shot/Cargo.lock', 'native/kde-snap-shot/Cargo.toml', 'native/kde-snap-shot/src/**', 'native/hyprland-snap-shot/Cargo.lock', 'native/hyprland-snap-shot/Cargo.toml', 'native/hyprland-snap-shot/protocols/**', 'native/hyprland-snap-shot/src/**') }}
+
+      - id: version
+        name: Resolve build version
+        run: |
+          node scripts/resolve-nightly-release.ts \
+            --date "$(date -u +%Y%m%d)" \
+            --run-number "${{ github.run_number }}" \
+            --sha "${{ github.sha }}" \
+            --github-output
+
+      - name: Align package versions to build version
+        run: node scripts/update-release-package-versions.ts "${{ steps.version.outputs.version }}"
+
+      # The update feed baked into the artifact comes from GITHUB_REPOSITORY when
+      # T3CODE_DESKTOP_UPDATE_REPOSITORY is unset, so it points at this fork.
+      - name: Build desktop artifact
+        env:
+          T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: ${{ steps.resource_monitor_cache.outputs.cache-hit == 'true' }}
+          T3CODE_DESKTOP_REUSE_LINUX_CAPTURE_HELPERS: ${{ steps.capture_helper_cache.outputs.cache-hit == 'true' }}
+        run: |
+          vp run dist:desktop:artifact \
+            --platform linux \
+            --target AppImage \
+            --arch x64 \
+            --build-version "${{ steps.version.outputs.version }}" \
+            --verbose
+
+      # electron-updater resolves an update from the channel manifest, then
+      # verifies the download against the sha512 it records. A release missing
+      # nightly-linux.yml leaves installed apps silently pinned to the old build.
+      - name: Verify updater assets
+        run: |
+          set -euo pipefail
+          test -f release/nightly-linux.yml
+          ls release/*.AppImage >/dev/null
+          grep -q -- "${{ steps.version.outputs.version }}" release/nightly-linux.yml
+
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Pi fork ${{ steps.version.outputs.version }} (${{ steps.version.outputs.short_sha }})
+          prerelease: true
+          make_latest: false
+          files: |
+            release/*.AppImage
+            release/*.blockmap
+            release/*.yml
+          fail_on_unmatched_files: true
+          token: ${{ github.token }}
+
+      # Keep the five most recent builds: enough to reinstall a known-good one by
+      # hand, bounded so the fork's releases do not grow without limit. Only this
+      # workflow's own prereleases match the tag pattern.
+      - name: Prune old builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+            --json tagName,isPrerelease,createdAt \
+            --jq '[.[] | select(.isPrerelease and (.tagName | test("-nightly\\.[0-9]{8}\\.[0-9]+$")))]
+                  | sort_by(.createdAt) | reverse | .[5:] | .[].tagName' \
+            > stale-tags.txt
+          while read -r tag; do
+            [ -n "$tag" ] || continue
+            echo "pruning $tag"
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          done < stale-tags.txt
