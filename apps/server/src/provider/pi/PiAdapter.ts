@@ -27,6 +27,8 @@ import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { PiRpcClient } from "./PiRpcClient.ts";
 import {
   PiDelta,
+  PiForkMessages,
+  PiForkResult,
   PiMessage,
   PiResumeCursor,
   PiSideChannelMessage,
@@ -46,6 +48,8 @@ const decodePiSideChannelMessage = Schema.decodeUnknownSync(PiSideChannelMessage
 const decodePiState = Schema.decodeUnknownSync(PiState);
 const decodePiThinkingLevel = Schema.decodeUnknownOption(PiThinkingLevel);
 const decodePiThinkingLevels = Schema.decodeUnknownSync(PiThinkingLevels);
+const decodePiForkMessages = Schema.decodeUnknownSync(PiForkMessages);
+const decodePiForkResult = Schema.decodeUnknownSync(PiForkResult);
 const PROVIDER = ProviderDriverKind.make("pi");
 const decodeAnswer = Schema.decodeUnknownSync(
   Schema.optional(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
@@ -115,6 +119,14 @@ interface Session {
   /** Levels Pi reported for the current model; cleared whenever the model changes. */
   thinkingLevels?: readonly PiThinkingLevel[] | undefined;
   interruptEpoch: number;
+  /**
+   * User prompts each T3 turn appended to Pi's history, oldest turn first.
+   * Steering adds a second prompt to one turn, and an extension that handles a
+   * prompt itself adds none, so turns and Pi's fork targets are not one to one.
+   * Only turns this process ran are known; Pi's events carry no entry ids to
+   * rebuild the rest after a resume.
+   */
+  turnPrompts: number[];
   pending: Map<string, PendingInput>;
   operations: Promise<unknown>;
 }
@@ -188,6 +200,37 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     if (ctx.thinkingLevel === level.value) return;
     await ctx.client.request("set_thinking_level", { level: level.value });
     ctx.thinkingLevel = level.value;
+  };
+  const resumeCursorFor = (ctx: Session, sessionPath: string): typeof PiResumeCursor.Type => ({
+    version: 1,
+    sessionPath,
+    ...(ctx.defaultModel ? { defaultModel: ctx.defaultModel } : {}),
+  });
+  // `fork` tears down and rebuilds Pi's runtime from the branch point, so the
+  // session file, model, and thinking level T3 cached before it no longer hold.
+  const resyncAfterFork = async (ctx: Session): Promise<void> => {
+    const state = decodePiState(await ctx.client.request("get_state"));
+    if (!state.sessionFile)
+      throw new Error("Pi must provide a persistent session file for T3 resume.");
+    ctx.thinkingLevel = state.thinkingLevel;
+    ctx.thinkingLevels = undefined;
+    const selection = piModelSelection(ctx.session.model ?? "default") ?? ctx.defaultModel;
+    const model = state.model ?? undefined;
+    if (
+      selection &&
+      (model === undefined ||
+        model.provider !== selection.provider ||
+        model.id !== selection.modelId)
+    ) {
+      await ctx.client.request("set_model", selection);
+      // Pi derives its own level for the new model, so the previous one no longer holds.
+      ctx.thinkingLevel = undefined;
+    }
+    ctx.session = {
+      ...ctx.session,
+      updatedAt: new Date().toISOString(),
+      resumeCursor: resumeCursorFor(ctx, state.sessionFile),
+    };
   };
   const resolveInput = (
     ctx: Session,
@@ -491,7 +534,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
 
   const adapter: ProviderAdapterShape<ProviderAdapterRequestError> = {
     provider: PROVIDER,
-    capabilities: { sessionModelSwitch: "in-session", supportsConversationRollback: false },
+    capabilities: { sessionModelSwitch: "in-session" },
     startSession: (input) =>
       call("startSession", async () => {
         if (closed) throw new Error("Pi adapter is closed.");
@@ -526,6 +569,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             interrupted: false,
             runStarted: false,
             interruptEpoch: 0,
+            turnPrompts: [],
             pending: new Map(),
             operations: Promise.resolve(),
           };
@@ -588,11 +632,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               ...ctx.session,
               status: "ready",
               model: input.modelSelection?.model ?? "default",
-              resumeCursor: {
-                version: 1,
-                sessionPath: state.sessionFile,
-                ...(ctx.defaultModel ? { defaultModel: ctx.defaultModel } : {}),
-              },
+              resumeCursor: resumeCursorFor(ctx, state.sessionFile),
             };
             if (ctx.stopped) throw new Error("Pi exited during initialization.");
             sessions.set(input.threadId, ctx);
@@ -682,14 +722,15 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             });
             // Extension commands may be handled without ever starting an agent run.
             const state = decodePiState(await ctx.client.request("get_state"));
+            const appended = ctx.runStarted || state.isStreaming;
+            const openTurnPrompts = ctx.turnPrompts.at(-1);
+            if (!steering) ctx.turnPrompts.push(appended ? 1 : 0);
+            else if (appended && openTurnPrompts !== undefined)
+              ctx.turnPrompts[ctx.turnPrompts.length - 1] = openTurnPrompts + 1;
             if (state.sessionFile)
               ctx.session = {
                 ...ctx.session,
-                resumeCursor: {
-                  version: 1,
-                  sessionPath: state.sessionFile,
-                  ...(ctx.defaultModel ? { defaultModel: ctx.defaultModel } : {}),
-                },
+                resumeCursor: resumeCursorFor(ctx, state.sessionFile),
               };
             if (!ctx.runStarted && !state.isStreaming && ctx.session.activeTurnId === turnId)
               finish(ctx);
@@ -782,11 +823,36 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         get(id);
         return { threadId: id, turns: [] };
       }),
-    rollbackThread: () =>
+    rollbackThread: (id, numTurns) =>
       call("rollbackThread", async () => {
-        throw new Error(
-          "Pi RPC does not support in-place conversation rollback. Use a new thread; Git diff and worktrees remain managed by T3.",
-        );
+        const ctx = get(id);
+        if (!Number.isInteger(numTurns) || numTurns < 1)
+          throw new Error("Pi rollback requires an integer turn count of at least 1.");
+        return serialize(ctx, async () => {
+          if (ctx.stopped) throw new Error("Pi session is closed.");
+          if (ctx.session.activeTurnId)
+            throw new Error("Interrupt the active Pi turn before rewinding the conversation.");
+          const { messages } = decodePiForkMessages(await ctx.client.request("get_fork_messages"));
+          const known = ctx.turnPrompts.slice(-numTurns);
+          // Turns that predate this process are assumed to hold one prompt each.
+          const prompts =
+            known.reduce((total, count) => total + count, 0) + (numTurns - known.length);
+          if (prompts === 0) return { threadId: id, turns: [] };
+          const target = messages[messages.length - prompts];
+          if (!target)
+            throw new Error(
+              `Pi cannot roll back ${prompts} message(s); the session has ${messages.length}.`,
+            );
+          // Forking a user message rewinds to its parent, carrying the retained
+          // prefix into a fresh session file that Pi then reports as its own.
+          const result = decodePiForkResult(
+            await ctx.client.request("fork", { entryId: target.entryId }),
+          );
+          if (result.cancelled === true) throw new Error("Pi declined to rewind the conversation.");
+          ctx.turnPrompts.length = Math.max(0, ctx.turnPrompts.length - numTurns);
+          await resyncAfterFork(ctx);
+          return { threadId: id, turns: [] };
+        });
       }),
     streamEvents: Stream.fromPubSub(events),
   };

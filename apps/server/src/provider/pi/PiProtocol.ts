@@ -28,6 +28,20 @@ export const PiState = Schema.Struct({
   thinkingLevel: Schema.optional(PiThinkingLevel),
 });
 export const PiModels = Schema.Struct({ models: Schema.Array(PiModel) });
+// `get_fork_messages` lists the user prompts Pi can rewind to, oldest first.
+// Tool results carry their own role, so only real prompts appear here.
+export const PiForkMessages = Schema.Struct({
+  messages: Schema.Array(
+    Schema.Struct({
+      entryId: Schema.String.check(Schema.isMinLength(1)),
+      text: Schema.String,
+    }),
+  ),
+});
+// An extension's `before_fork` hook may veto the rewind, leaving Pi's history untouched.
+export const PiForkResult = Schema.Struct({
+  cancelled: Schema.optional(Schema.Boolean),
+});
 export const PiCommands = Schema.Struct({
   commands: Schema.Array(
     Schema.Struct({

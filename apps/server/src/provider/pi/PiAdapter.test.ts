@@ -52,6 +52,10 @@ class FakePiClient implements Client {
   };
   /** Levels Pi reports for the current model; scenarios override this per model. */
   thinkingLevels: Array<string> = ["off", "low", "high"];
+  /** User prompts Pi offers as fork targets, oldest first. */
+  forkMessages: Array<{ entryId: string; text: string }> = [];
+  /** Set when a `before_fork` extension hook vetoes the rewind. */
+  forkCancelled = false;
   private readonly failures = new Map<string, Error>();
 
   private readonly init: ClientInit;
@@ -80,7 +84,25 @@ class FakePiClient implements Client {
       case "set_thinking_level":
         this.state = { ...this.state, thinkingLevel: fields.level };
         return Promise.resolve({});
+      case "get_fork_messages":
+        return Promise.resolve({ messages: this.forkMessages.map((message) => ({ ...message })) });
+      case "fork": {
+        if (this.forkCancelled) return Promise.resolve({ cancelled: true });
+        const index = this.forkMessages.findIndex((message) => message.entryId === fields.entryId);
+        if (index === -1) return Promise.reject(new Error("Invalid entry ID for forking"));
+        const dropped = this.forkMessages.splice(index);
+        // Pi branches the tree into a new file and rebuilds its runtime, which
+        // restores whatever model the retained prefix ended on.
+        this.state = {
+          ...this.state,
+          sessionFile: "/tmp/t3-pi-adapter-session-branch.jsonl",
+          model: null,
+        };
+        return Promise.resolve({ cancelled: false, text: dropped[0]?.text });
+      }
       case "set_model":
+        this.state = { ...this.state, model: { provider: fields.provider, id: fields.modelId } };
+        return Promise.resolve({});
       case "prompt":
       case "clear_queue":
       case "abort":
@@ -1269,6 +1291,147 @@ describe("PiAdapter", () => {
       }
       yield* adapter.compaction.start(threadId);
       expect(harness.clients[0]?.requestTypes()).toContain("compact");
+    }),
+  );
+
+  it.effect("rewinds N turns by forking before the matching user message", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-rollback");
+      yield* startSession(adapter, threadId, {
+        modelSelection: createModelSelection(piInstance, "anthropic/claude-opus-4-7"),
+      });
+      const client = harness.clients[0];
+      if (!client) throw new Error("Expected a Pi client");
+      client.forkMessages = [
+        { entryId: "entry-1", text: "first" },
+        { entryId: "entry-2", text: "second" },
+        { entryId: "entry-3", text: "third" },
+      ];
+
+      const snapshot = yield* adapter.rollbackThread(threadId, 2);
+
+      expect(snapshot.threadId).toBe(threadId);
+      expect(client.requests.find((request) => request.type === "fork")?.fields).toEqual({
+        entryId: "entry-2",
+      });
+      expect(client.forkMessages).toEqual([{ entryId: "entry-1", text: "first" }]);
+      // The branch lands in a new file, and the model T3 selected survives the
+      // runtime rebuild rather than silently reverting to Pi's.
+      const session = (yield* adapter.listSessions())[0];
+      expect(session?.resumeCursor).toMatchObject({
+        sessionPath: "/tmp/t3-pi-adapter-session-branch.jsonl",
+      });
+      expect(client.state.model).toEqual({ provider: "anthropic", id: "claude-opus-4-7" });
+    }),
+  );
+
+  it.effect("drops a steered prompt together with the turn that carried it", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-rollback-steer");
+      yield* startSession(adapter, threadId);
+      const client = harness.clients[0];
+      if (!client) throw new Error("Expected a Pi client");
+      client.state = { ...client.state, isStreaming: true };
+      const first = yield* adapter.sendTurn({ threadId, input: "first" });
+      client.emit({ type: "agent_settled" });
+      const second = yield* adapter.sendTurn({ threadId, input: "second" });
+      // Steering rides along on the open turn instead of opening a new one.
+      yield* adapter.sendTurn({ threadId, input: "steered" });
+      expect(second.turnId).not.toBe(first.turnId);
+      client.emit({ type: "agent_settled" });
+      client.forkMessages = [
+        { entryId: "entry-first", text: "first" },
+        { entryId: "entry-second", text: "second" },
+        { entryId: "entry-steered", text: "steered" },
+      ];
+
+      yield* adapter.rollbackThread(threadId, 1);
+
+      expect(client.requests.findLast((request) => request.type === "fork")?.fields).toEqual({
+        entryId: "entry-second",
+      });
+      expect(client.forkMessages).toEqual([{ entryId: "entry-first", text: "first" }]);
+    }),
+  );
+
+  it.effect("leaves Pi untouched when the rolled back turns appended no prompt", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-rollback-handled");
+      yield* startSession(adapter, threadId);
+      const client = harness.clients[0];
+      if (!client) throw new Error("Expected a Pi client");
+      client.forkMessages = [{ entryId: "entry-1", text: "first" }];
+      // An extension that handles the prompt itself never starts a run.
+      yield* adapter.sendTurn({ threadId, input: "/handled-by-extension" });
+
+      yield* adapter.rollbackThread(threadId, 1);
+
+      expect(client.requestTypes()).not.toContain("fork");
+      expect(client.forkMessages).toEqual([{ entryId: "entry-1", text: "first" }]);
+    }),
+  );
+
+  it.effect("rejects a rewind deeper than Pi's history without forking", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-rollback-deep");
+      yield* startSession(adapter, threadId);
+      const client = harness.clients[0];
+      if (!client) throw new Error("Expected a Pi client");
+      client.forkMessages = [{ entryId: "entry-1", text: "first" }];
+
+      const error = yield* Effect.flip(adapter.rollbackThread(threadId, 2));
+
+      expect(error._tag).toBe("ProviderAdapterRequestError");
+      expect(client.requestTypes()).not.toContain("fork");
+    }),
+  );
+
+  it.effect("fails the rewind when Pi vetoes the fork", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-rollback-vetoed");
+      yield* startSession(adapter, threadId);
+      const client = harness.clients[0];
+      if (!client) throw new Error("Expected a Pi client");
+      client.forkMessages = [{ entryId: "entry-1", text: "first" }];
+      client.forkCancelled = true;
+
+      const error = yield* Effect.flip(adapter.rollbackThread(threadId, 1));
+
+      expect(error._tag).toBe("ProviderAdapterRequestError");
+      // A vetoed fork leaves Pi's history in place, so T3 must not adopt a new cursor.
+      const session = (yield* adapter.listSessions())[0];
+      expect(session?.resumeCursor).toMatchObject({
+        sessionPath: "/tmp/t3-pi-adapter-session.jsonl",
+      });
+    }),
+  );
+
+  it.effect("refuses to rewind while a turn is still running", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-rollback-active");
+      yield* startSession(adapter, threadId);
+      const client = harness.clients[0];
+      if (!client) throw new Error("Expected a Pi client");
+      client.forkMessages = [{ entryId: "entry-1", text: "first" }];
+      client.state = { ...client.state, isStreaming: true };
+      yield* adapter.sendTurn({ threadId, input: "first" });
+
+      const error = yield* Effect.flip(adapter.rollbackThread(threadId, 1));
+
+      expect(error._tag).toBe("ProviderAdapterRequestError");
+      expect(client.requestTypes()).not.toContain("fork");
     }),
   );
 });

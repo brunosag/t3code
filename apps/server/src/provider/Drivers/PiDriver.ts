@@ -108,7 +108,6 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
         managesRuntimePermissions: true,
         showInteractionModeToggle: false,
         requiresNewThreadForModelChange: false,
-        supportsConversationRollback: false,
         supportsTextGeneration: true,
         setup: { canAuthenticate: false, canInstall: false },
         models: [
