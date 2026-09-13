@@ -109,19 +109,22 @@ export function addProjectRemoteSourceProvider(
 const GITHUB_REPOSITORY_SHORTHAND =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]+(?:\.git)?$/;
 
-/** Treat the common owner/repository shorthand as a public GitHub HTTPS URL. */
+/** Treat the common owner/repository shorthand as a GitHub SSH URL. */
 export function normalizePastedCloneUrl(input: string): string {
   const trimmed = input.trim();
   if (!GITHUB_REPOSITORY_SHORTHAND.test(trimmed)) return trimmed;
   const repository = trimmed.endsWith(".git") ? trimmed : `${trimmed}.git`;
-  return `https://github.com/${repository}`;
+  return `git@github.com:${repository}`;
 }
 
-/** GitHub defaults to HTTPS; other providers retain their existing SSH default. */
+/**
+ * Provider-selected repositories clone over SSH on every host. Pasting an explicit
+ * clone URL still wins, so an HTTPS URL remains the way to opt into that transport.
+ */
 export function getDefaultCloneUrl(
   repository: Pick<SourceControlRepositoryInfo, "provider" | "url" | "sshUrl">,
 ): string {
-  return repository.provider === "github" ? repository.url : repository.sshUrl;
+  return repository.sshUrl;
 }
 
 export function sortAddProjectProviderSources(

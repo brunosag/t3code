@@ -48,12 +48,10 @@ describe("add project shared logic", () => {
     expect(getCloneDirectoryName(null)).toBe("");
   });
 
-  it("routes owner/repository shorthand to GitHub over HTTPS", () => {
-    expect(normalizePastedCloneUrl("imputnet/helium")).toBe(
-      "https://github.com/imputnet/helium.git",
-    );
+  it("routes owner/repository shorthand to GitHub over SSH", () => {
+    expect(normalizePastedCloneUrl("imputnet/helium")).toBe("git@github.com:imputnet/helium.git");
     expect(normalizePastedCloneUrl("  pingdotgg/t3code  ")).toBe(
-      "https://github.com/pingdotgg/t3code.git",
+      "git@github.com:pingdotgg/t3code.git",
     );
   });
 
@@ -68,17 +66,14 @@ describe("add project shared logic", () => {
     expect(normalizePastedCloneUrl("/srv/git/repo.git")).toBe("/srv/git/repo.git");
   });
 
-  it("uses HTTPS for repositories selected through a provider", () => {
+  it("clones provider-selected repositories over SSH", () => {
     expect(
       getDefaultCloneUrl({
         provider: "github",
         url: "https://github.com/imputnet/helium",
         sshUrl: "git@github.com:imputnet/helium.git",
       }),
-    ).toBe("https://github.com/imputnet/helium");
-  });
-
-  it("preserves existing clone transport behavior for other providers", () => {
+    ).toBe("git@github.com:imputnet/helium.git");
     expect(
       getDefaultCloneUrl({
         provider: "gitlab",
