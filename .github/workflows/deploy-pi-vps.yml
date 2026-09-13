@@ -75,11 +75,23 @@ jobs:
       # The version has to be set before the build: bin.mjs reports it from a
       # build-time inline, and the service launcher keys runtime/versions/<version>
       # off that same value.
+      #
+      # The core is the rule the fork's desktop AppImage already uses
+      # (scripts/resolve-nightly-release.ts): one patch above the release package,
+      # so a build sorts above the stable release it is based on. Both artifact
+      # lines have to carry it. On the unbumped core this server reads as older
+      # than every client connected to it, and a fork client that sees a behind
+      # server offers an npm self-update that cannot exist — and that would
+      # install stock upstream t3 over the Pi runtime if it did.
       - name: Set deploy version
         id: version
         run: |
           set -euo pipefail
-          base="$(node -p "require('./apps/server/package.json').version")"
+          base="$(node scripts/resolve-nightly-release.ts \
+            --date "$(date -u +%Y%m%d)" \
+            --run-number "$GITHUB_RUN_NUMBER" \
+            --sha "$GITHUB_SHA" | sed -n 's/^base_version=//p')"
+          test -n "$base"
           version="${base}-pi.$(git rev-parse --short=9 HEAD)"
           node -e 'const fs = require("node:fs"); const file = "apps/server/package.json"; const pkg = JSON.parse(fs.readFileSync(file, "utf8")); pkg.version = process.argv[1]; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");' "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"

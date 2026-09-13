@@ -109,6 +109,16 @@ describe("versionSkew", () => {
     expect(resolveVersionMismatch("0.0.35-nightly.20260818.1124")).toBeNull();
   });
 
+  it("does not warn when a fork server carries the desktop release core", () => {
+    branding.APP_VERSION = "0.0.41-nightly.20260913.2";
+
+    // The fork's server runtime never reaches npm, so its version has to carry
+    // the same core as the fork's desktop builds. On the release core the client
+    // reads it as older and offers an update the fork can never honor.
+    expect(resolveVersionMismatch("0.0.41-pi.3843f07b5")).toBeNull();
+    expect(resolveVersionMismatch("0.0.40-pi.3843f07b5")).not.toBeNull();
+  });
+
   it("still warns when a nightly client outruns the server by a release", () => {
     branding.APP_VERSION = "0.0.35-nightly.20260818.1124";
 
