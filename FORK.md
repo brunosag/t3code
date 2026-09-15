@@ -24,7 +24,7 @@ For an explicitly configured instance, the server's existing `providerInstances`
 
 “Pi default” uses the model Pi reported before T3's first override. Switching back from an explicit model restores that choice; T3 retains it in the opaque resume cursor across server restarts. Older cursors without that baseline adopt the model reported on their next resume. If Pi reports no initial model, a later attempt to restore default fails rather than running the explicit model under a misleading label. Explicit choices use `provider/modelId`, discovered through RPC. Pi's reasoning levels appear as the normal model trait picker, listing exactly the levels Pi reports for the selected model; a model that cannot reason shows no picker. T3 validates a level against Pi's own report before prompting, so a stale choice from another model fails the turn instead of being silently clamped. Leaving the picker untouched leaves Pi's configured level alone.
 
-“Pi managed” means T3's permission modes are not enforced: permission and tool behavior come from the external runtime. Pi advertises the generic `managesRuntimePermissions` snapshot capability; clients derive the label and tooltip from the provider display name. Older snapshots without this capability retain the normal T3 selector.
+Pi advertises the generic `managesRuntimePermissions` snapshot capability. Clients show no runtime-mode control for such a provider rather than offering T3 permission modes that are not enforced; permission and tool behavior come from the external runtime. Older snapshots without this capability retain the normal T3 selector.
 
 ## Boundaries and intentional differences
 
@@ -38,9 +38,9 @@ For an explicitly configured instance, the server's existing `providerInstances`
 
 ## Verification
 
-The focused Pi and provider-regression suite passes 191 tests across 14 files, on both `pi-provider` and the upstream review branch described below. Server, web, mobile, contracts, and client-runtime typechecks pass on both branches. Local Chromium checks exercised provider discovery, enable/disable, model selection, the compact and expanded permission UI, and a real Pi turn in a T3-created worktree with a resulting Git diff. An active FIFO-gated tool call survived a full browser disconnect; after restarting the server, Pi resumed and recalled the prior result without tools.
+The focused Pi and provider-regression suite passes 191 tests across 14 files, on both `pi-provider` and the upstream review branch described below. Server, web, mobile, contracts, and client-runtime typechecks pass on both branches. Local Chromium checks exercised provider discovery, enable/disable, model selection, the composer permission surfaces, and a real Pi turn in a T3-created worktree with a resulting Git diff. An active FIFO-gated tool call survived a full browser disconnect; after restarting the server, Pi resumed and recalled the prior result without tools.
 
-Browser layout was checked at 375, 768, and 1280 pixels. The generic permission label and tooltip were rechecked on the merged upstream review at desktop and compact-phone sizes. Native Electron/React Native clients and relay/tunnel deployments have not been exercised. No deployment was performed.
+Browser layout was checked at 375, 768, and 1280 pixels. Native Electron/React Native clients and relay/tunnel deployments have not been exercised. No deployment was performed.
 
 ## Compatibility and maintenance
 

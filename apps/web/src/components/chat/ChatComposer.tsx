@@ -36,7 +36,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
-import { getProviderManagedPermissions } from "@t3tools/client-runtime/providerPermissions";
+import { providerManagesRuntimePermissions } from "@t3tools/client-runtime/providerPermissions";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
@@ -1023,7 +1023,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   runtimeMode: RuntimeMode;
   size?: "sm" | "xs";
   hidden?: boolean;
-  managedPermissions?: ReturnType<typeof getProviderManagedPermissions>;
+  managesRuntimePermissions?: boolean;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
@@ -1082,71 +1082,55 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 
   return (
     <>
-      <ComposerControlSeparator size={size} />
-
-      {props.managedPermissions ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap",
-                  size === "xs"
-                    ? "px-1 text-muted-foreground/70 text-xs"
-                    : "px-2.5 text-secondary-label text-[13px] font-medium",
-                )}
-                aria-label="Runtime permissions"
-              >
-                {props.managedPermissions.label}
-              </span>
-            }
-          />
-          <TooltipPopup side="top">{props.managedPermissions.description}</TooltipPopup>
-        </Tooltip>
-      ) : (
-        <Tooltip>
-          <Select
-            open={open}
-            onOpenChange={setOpen}
-            value={props.runtimeMode}
-            onValueChange={(value) => props.onRuntimeModeChange(value!)}
-          >
-            <TooltipTrigger
-              render={
-                <ComposerSelectControl
-                  size={size}
-                  className={size === "xs" ? undefined : "font-medium"}
-                  aria-label="Runtime mode"
-                />
-              }
+      {/* A runtime which owns permission policy gets no runtime-mode control: T3's
+          modes are not enforced there, and an inert label only adds noise. */}
+      {props.managesRuntimePermissions ? null : (
+        <>
+          <ComposerControlSeparator size={size} />
+          <Tooltip>
+            <Select
+              open={open}
+              onOpenChange={setOpen}
+              value={props.runtimeMode}
+              onValueChange={(value) => props.onRuntimeModeChange(value!)}
             >
-              <ComposerControlIcon icon={RuntimeModeIcon} size={size} />
-              <SelectValue>{runtimeModeOption.label}</SelectValue>
-            </TooltipTrigger>
-            <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
-              {runtimeModeOptions.map((mode) => {
-                const option = runtimeModeConfig[mode];
-                const OptionIcon = option.icon;
-                return (
-                  <SelectItem key={mode} value={mode} hideIndicator className="min-w-64 py-2">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="grid min-w-0 flex-1 gap-0.5">
-                        <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                          <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                          {option.label}
-                        </span>
-                        <span className="text-muted-foreground text-xs leading-4">
-                          {option.description}
-                        </span>
+              <TooltipTrigger
+                render={
+                  <ComposerSelectControl
+                    size={size}
+                    className={size === "xs" ? undefined : "font-medium"}
+                    aria-label="Runtime mode"
+                  />
+                }
+              >
+                <ComposerControlIcon icon={RuntimeModeIcon} size={size} />
+                <SelectValue>{runtimeModeOption.label}</SelectValue>
+              </TooltipTrigger>
+              <SelectPopup alignItemWithTrigger={false} {...composerFloatingLayerProps}>
+                {runtimeModeOptions.map((mode) => {
+                  const option = runtimeModeConfig[mode];
+                  const OptionIcon = option.icon;
+                  return (
+                    <SelectItem key={mode} value={mode} hideIndicator className="min-w-64 py-2">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="grid min-w-0 flex-1 gap-0.5">
+                          <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                            <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                            {option.label}
+                          </span>
+                          <span className="text-muted-foreground text-xs leading-4">
+                            {option.description}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  </SelectItem>
-                );
-              })}
-            </SelectPopup>
-          </Select>
-          <TooltipPopup side="top">{runtimeModeOption.description}</TooltipPopup>
-        </Tooltip>
+                    </SelectItem>
+                  );
+                })}
+              </SelectPopup>
+            </Select>
+            <TooltipPopup side="top">{runtimeModeOption.description}</TooltipPopup>
+          </Tooltip>
+        </>
       )}
 
       {interactionModeToggle}
@@ -1867,9 +1851,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // disabled.
   const selectedProvider: ProviderDriverKind =
     selectedProviderEntry?.driverKind ?? requestedDriverKind;
-  const managedPermissions = useMemo(
-    () => getProviderManagedPermissions(selectedProviderEntry?.snapshot),
-    [selectedProviderEntry?.snapshot],
+  const managesRuntimePermissions = providerManagesRuntimePermissions(
+    selectedProviderEntry?.snapshot,
   );
 
   const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
@@ -4806,21 +4789,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           },
         ]
       : []),
-    {
-      id: "mode",
-      content: (
-        <ComposerFooterModeControls
-          showInteractionModeToggle={planModeUiEnabled}
-          interactionMode={interactionMode}
-          runtimeMode={runtimeMode}
-          size={composerControlsInStrip ? "xs" : "sm"}
-          hidden={composerControlsHidden || restingHiddenBlockCount > 0}
-          managedPermissions={managedPermissions}
-          onToggleInteractionMode={toggleInteractionMode}
-          onRuntimeModeChange={handleRuntimeModeChange}
-        />
-      ),
-    },
+    ...(planModeUiEnabled || !managesRuntimePermissions
+      ? [
+          {
+            id: "mode",
+            content: (
+              <ComposerFooterModeControls
+                showInteractionModeToggle={planModeUiEnabled}
+                interactionMode={interactionMode}
+                runtimeMode={runtimeMode}
+                size={composerControlsInStrip ? "xs" : "sm"}
+                hidden={composerControlsHidden || restingHiddenBlockCount > 0}
+                managesRuntimePermissions={managesRuntimePermissions}
+                onToggleInteractionMode={toggleInteractionMode}
+                onRuntimeModeChange={handleRuntimeModeChange}
+              />
+            ),
+          },
+        ]
+      : []),
   ];
   const hiddenRestingBlockIds = restingBlockDefs
     .slice(restingBlockDefs.length - restingHiddenBlockCount)
@@ -4903,7 +4890,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           runtimeMode={runtimeMode}
           showInteractionModeToggle={planModeUiEnabled}
           traitsMenuContent={providerTraitsMenuContent}
-          managedPermissions={managedPermissions}
+          managesRuntimePermissions={managesRuntimePermissions}
           onToggleInteractionMode={toggleInteractionMode}
           onRuntimeModeChange={handleRuntimeModeChange}
         />
@@ -4944,7 +4931,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 runtimeMode={runtimeMode}
                 size="xs"
                 hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
-                managedPermissions={managedPermissions}
+                managesRuntimePermissions={managesRuntimePermissions}
                 showInteractionModeToggle={
                   planModeUiEnabled && hiddenRestingBlockIds.includes("mode")
                 }

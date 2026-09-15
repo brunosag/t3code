@@ -14,7 +14,7 @@ import {
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
-import { getProviderManagedPermissions } from "@t3tools/client-runtime/providerPermissions";
+import { providerManagesRuntimePermissions } from "@t3tools/client-runtime/providerPermissions";
 import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import {
   createNativeStackNavigator,
@@ -327,7 +327,8 @@ type ThreadSettingsSessionProps = {
   readonly onUpdateOptionSelections: (selections: ReadonlyArray<ProviderOptionSelection>) => void;
   readonly runtimeMode: RuntimeMode;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
-  readonly managedPermissions?: ReturnType<typeof getProviderManagedPermissions>;
+  /** Runtimes that own permission policy get no T3 runtime-mode row. */
+  readonly managesRuntimePermissions?: boolean;
 };
 
 export type ExistingThreadSettingsRouteSession = ThreadSettingsSessionProps & {
@@ -377,7 +378,7 @@ type ThreadSettingsSessionValue = {
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
   readonly runtimeMode: RuntimeMode;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
-  readonly managedPermissions: ReturnType<typeof getProviderManagedPermissions>;
+  readonly managesRuntimePermissions: boolean;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly providerExpansionOverrides: ReadonlySet<string>;
   readonly hasLegacyModels: boolean;
@@ -506,7 +507,7 @@ function ThreadSettingsSessionProvider(
       providerGroups: props.providerGroups,
       runtimeMode: props.runtimeMode,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
-      managedPermissions: props.managedPermissions,
+      managesRuntimePermissions: props.managesRuntimePermissions ?? false,
       displayedDescriptors,
       providerExpansionOverrides,
       hasLegacyModels,
@@ -537,7 +538,7 @@ function ThreadSettingsSessionProvider(
       pendingModel,
       pressModel,
       providerFilter,
-      props.managedPermissions,
+      props.managesRuntimePermissions,
       props.onUpdateRuntimeMode,
       props.providerGroups,
       props.runtimeMode,
@@ -760,20 +761,8 @@ function ThreadSettingsOptionsItem(props: {
             </Animated.View>
           );
         })}
-        <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
-          {session.managedPermissions ? (
-            <View
-              accessibilityLabel={`Runtime. ${session.managedPermissions.label}. ${session.managedPermissions.description}`}
-              accessibilityRole="text"
-              className="min-h-11 flex-row items-center gap-2 bg-card px-4 py-2"
-            >
-              <Text className="text-sm font-t3-medium text-foreground">Runtime</Text>
-              <View className="flex-1" />
-              <Text className="text-sm text-foreground-muted" numberOfLines={1}>
-                {session.managedPermissions.label}
-              </Text>
-            </View>
-          ) : (
+        {session.managesRuntimePermissions ? null : (
+          <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
             <DisclosureRow
               isLast
               label="Runtime"
@@ -782,8 +771,8 @@ function ThreadSettingsOptionsItem(props: {
               }
               onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
             />
-          )}
-        </Animated.View>
+          </Animated.View>
+        )}
       </Animated.View>
 
       {Platform.OS !== "ios" && session.hasLegacyModels ? (
@@ -927,49 +916,35 @@ function ThreadSettingsChoiceContent(props: {
       : undefined;
 
   const submenuContent =
-    props.submenu.kind === "runtime" && session.managedPermissions
+    props.submenu.kind === "runtime"
       ? {
-          rows: [
-            {
-              id: "managed",
-              label: session.managedPermissions.label,
-              description: session.managedPermissions.description,
-              selected: true,
-              onPress: () => {
-                props.onSelected();
-              },
+          rows: RUNTIME_MODE_CHOICES.map((choice) => ({
+            id: choice.mode,
+            label: choice.label,
+            description: choice.description,
+            selected: choice.mode === session.runtimeMode,
+            onPress: () => {
+              void Haptics.selectionAsync();
+              session.onUpdateRuntimeMode(choice.mode);
+              props.onSelected();
             },
-          ],
+          })),
         }
-      : props.submenu.kind === "runtime"
+      : activeDescriptor?.type === "select"
         ? {
-            rows: RUNTIME_MODE_CHOICES.map((choice) => ({
-              id: choice.mode,
+            rows: selectableChoices(activeDescriptor).map((choice) => ({
+              id: choice.id,
               label: choice.label,
-              description: choice.description,
-              selected: choice.mode === session.runtimeMode,
+              description: undefined,
+              selected: choice.id === getProviderOptionCurrentValue(activeDescriptor),
               onPress: () => {
                 void Haptics.selectionAsync();
-                session.onUpdateRuntimeMode(choice.mode);
+                session.applyOptionChange(activeDescriptor.id, choice.id);
                 props.onSelected();
               },
             })),
           }
-        : activeDescriptor?.type === "select"
-          ? {
-              rows: selectableChoices(activeDescriptor).map((choice) => ({
-                id: choice.id,
-                label: choice.label,
-                description: undefined,
-                selected: choice.id === getProviderOptionCurrentValue(activeDescriptor),
-                onPress: () => {
-                  void Haptics.selectionAsync();
-                  session.applyOptionChange(activeDescriptor.id, choice.id);
-                  props.onSelected();
-                },
-              })),
-            }
-          : null;
+        : null;
 
   if (!submenuContent) {
     return <View className="flex-1 bg-sheet" />;
@@ -1149,7 +1124,6 @@ function ThreadSettingsModelsScreen() {
       />
       <ThreadSettingsMainContent
         onOpenSubmenu={(submenu) => {
-          if (submenu.kind === "runtime" && session.managedPermissions) return;
           const title =
             submenu.kind === "runtime"
               ? "Runtime"
@@ -1331,9 +1305,8 @@ export function NewTaskThreadSettingsRouteScreen() {
       }),
     [flow.selectedModel?.options, flow.selectedModelOption?.capabilities],
   );
-  const managedPermissions = useMemo(
-    () => getProviderManagedPermissions(flow.selectedProviderStatus ?? undefined),
-    [flow.selectedProviderStatus],
+  const managesRuntimePermissions = providerManagesRuntimePermissions(
+    flow.selectedProviderStatus ?? undefined,
   );
 
   return (
@@ -1346,7 +1319,7 @@ export function NewTaskThreadSettingsRouteScreen() {
       onUpdateOptionSelections={flow.setSelectedModelOptions}
       runtimeMode={flow.runtimeMode}
       onUpdateRuntimeMode={flow.setRuntimeMode}
-      managedPermissions={managedPermissions}
+      managesRuntimePermissions={managesRuntimePermissions}
     >
       <ThreadSettingsPickerNavigator onClose={() => navigation.goBack()} />
     </ThreadSettingsSessionProvider>

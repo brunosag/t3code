@@ -1,5 +1,5 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
-import { getProviderManagedPermissions } from "@t3tools/client-runtime/providerPermissions";
+import { providerManagesRuntimePermissions } from "@t3tools/client-runtime/providerPermissions";
 import { memo, type ReactNode } from "react";
 import { EllipsisIcon } from "lucide-react";
 import {
@@ -20,7 +20,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
   size?: "sm" | "xs";
-  managedPermissions?: ReturnType<typeof getProviderManagedPermissions>;
+  managesRuntimePermissions?: boolean;
   /**
    * The resting strip keeps this menu mounted out of flow while every block
    * fits inline. Its portaled popup would outlive that transition, so an
@@ -32,6 +32,13 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
 }) {
   const size = props.size ?? "sm";
   const [open, setOpen] = useComposerMenuState(props.hidden);
+  // A runtime that owns permission policy has no access section, and T3's
+  // plan-mode UI may be off, so traits can be the only thing this menu holds.
+  const hasMenuContent =
+    props.traitsMenuContent != null ||
+    props.showInteractionModeToggle ||
+    !props.managesRuntimePermissions;
+  if (!hasMenuContent) return null;
 
   return (
     <Menu open={open} onOpenChange={setOpen}>
@@ -51,7 +58,9 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         {props.traitsMenuContent ? (
           <>
             {props.traitsMenuContent}
-            <MenuDivider />
+            {props.showInteractionModeToggle || !props.managesRuntimePermissions ? (
+              <MenuDivider />
+            ) : null}
           </>
         ) : null}
         {props.showInteractionModeToggle ? (
@@ -67,32 +76,25 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
               <MenuRadioItem value="default">Chat</MenuRadioItem>
               <MenuRadioItem value="plan">Plan</MenuRadioItem>
             </MenuRadioGroup>
-            <MenuDivider />
+            {props.managesRuntimePermissions ? null : <MenuDivider />}
           </>
         ) : null}
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
-        {props.managedPermissions ? (
-          <div className="px-2 pb-1.5">
-            <div className="text-sm font-medium text-foreground">
-              {props.managedPermissions.label}
-            </div>
-            <div className="text-muted-foreground text-xs leading-4">
-              {props.managedPermissions.description}
-            </div>
-          </div>
-        ) : (
-          <MenuRadioGroup
-            value={props.runtimeMode}
-            onValueChange={(value) => {
-              if (!value || value === props.runtimeMode) return;
-              props.onRuntimeModeChange(value as RuntimeMode);
-            }}
-          >
-            <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
-            <MenuRadioItem value="auto-accept-edits">Auto-accept edits</MenuRadioItem>
-            <MenuRadioItem value="auto">Auto</MenuRadioItem>
-            <MenuRadioItem value="full-access">Full access</MenuRadioItem>
-          </MenuRadioGroup>
+        {props.managesRuntimePermissions ? null : (
+          <>
+            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
+            <MenuRadioGroup
+              value={props.runtimeMode}
+              onValueChange={(value) => {
+                if (!value || value === props.runtimeMode) return;
+                props.onRuntimeModeChange(value as RuntimeMode);
+              }}
+            >
+              <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
+              <MenuRadioItem value="auto-accept-edits">Auto-accept edits</MenuRadioItem>
+              <MenuRadioItem value="auto">Auto</MenuRadioItem>
+              <MenuRadioItem value="full-access">Full access</MenuRadioItem>
+            </MenuRadioGroup>
+          </>
         )}
       </MenuPopup>
     </Menu>

@@ -15,7 +15,7 @@ import {
   hasProviderUsageLimits,
   isUsageLimitsCommand,
 } from "@t3tools/shared/usageLimits";
-import { getProviderManagedPermissions } from "@t3tools/client-runtime/providerPermissions";
+import { providerManagesRuntimePermissions } from "@t3tools/client-runtime/providerPermissions";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
 import {
@@ -551,9 +551,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     [currentModelOption?.capabilities, currentModelSelection.options],
   );
   const settingsOwnerId = composerOwnerKey;
-  const managedPermissions = useMemo(
-    () => getProviderManagedPermissions(selectedProviderStatus ?? undefined),
-    [selectedProviderStatus],
+  const managesRuntimePermissions = providerManagesRuntimePermissions(
+    selectedProviderStatus ?? undefined,
   );
   const settingsRouteSession = useMemo<ExistingThreadSettingsRouteSession>(
     () => ({
@@ -568,12 +567,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         props.onUpdateModelSelection({ ...currentModelSelection, options }),
       runtimeMode: currentRuntimeMode,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
-      managedPermissions,
+      managesRuntimePermissions,
     }),
     [
       currentModelSelection,
       currentRuntimeMode,
-      managedPermissions,
+      managesRuntimePermissions,
       props.onUpdateModelSelection,
       props.onUpdateRuntimeMode,
       providerOptionDescriptors,
