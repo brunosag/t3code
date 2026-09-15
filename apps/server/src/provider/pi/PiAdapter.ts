@@ -13,6 +13,7 @@ import {
   type ProviderRuntimeEventBase,
   type ProviderSession,
   type ThreadId,
+  type ThreadTokenUsageSnapshot,
   type UserInputQuestion,
 } from "@t3tools/contracts";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
@@ -31,6 +32,7 @@ import {
   PiForkResult,
   PiMessage,
   PiResumeCursor,
+  PiSessionStats,
   PiSideChannelMessage,
   PiState,
   PiThinkingLevel,
@@ -51,6 +53,7 @@ const decodePiThinkingLevels = Schema.decodeUnknownSync(PiThinkingLevels);
 const decodePiForkMessages = Schema.decodeUnknownSync(PiForkMessages);
 const decodePiForkResult = Schema.decodeUnknownSync(PiForkResult);
 const PROVIDER = ProviderDriverKind.make("pi");
+const decodePiSessionStats = Schema.decodeUnknownSync(PiSessionStats);
 const decodeAnswer = Schema.decodeUnknownSync(
   Schema.optional(Schema.Union([Schema.String, Schema.Array(Schema.String)])),
 );
@@ -85,6 +88,45 @@ type EventBody = ProviderRuntimeEvent extends infer E
     ? Pick<E, "type" | "payload">
     : never
   : never;
+
+const finiteNonNegativeInt = (value: number | null | undefined): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined;
+const finitePositiveInt = (value: number | null | undefined): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : undefined;
+
+/**
+ * Maps Pi's session stats onto T3's context-window snapshot. `contextUsage.tokens`
+ * is Pi's estimate of the live window, while `tokens.total` is everything billed
+ * across the session; `tokens: null` (right after compaction) has no snapshot.
+ */
+function piContextWindowUsage(stats: PiSessionStats): ThreadTokenUsageSnapshot | undefined {
+  const contextUsage = stats.contextUsage;
+  if (!contextUsage) return undefined;
+  const maxTokens = finitePositiveInt(contextUsage.contextWindow);
+  const activeTokens = finiteNonNegativeInt(contextUsage.tokens);
+  if (maxTokens === undefined || activeTokens === undefined) return undefined;
+
+  const usedTokens = Math.min(activeTokens, maxTokens);
+  const totalProcessedTokens = finiteNonNegativeInt(stats.tokens.total);
+  // T3's `inputTokens` includes cache reads and writes.
+  const inputTokens = finiteNonNegativeInt(
+    stats.tokens.input + stats.tokens.cacheRead + stats.tokens.cacheWrite,
+  );
+  const outputTokens = finiteNonNegativeInt(stats.tokens.output);
+  const cachedInputTokens = finiteNonNegativeInt(stats.tokens.cacheRead);
+
+  return {
+    usedTokens,
+    lastUsedTokens: usedTokens,
+    maxTokens,
+    ...(totalProcessedTokens !== undefined && totalProcessedTokens > usedTokens
+      ? { totalProcessedTokens }
+      : {}),
+    ...(inputTokens !== undefined && inputTokens > 0 ? { inputTokens } : {}),
+    ...(outputTokens !== undefined && outputTokens > 0 ? { outputTokens } : {}),
+    ...(cachedInputTokens !== undefined && cachedInputTokens > 0 ? { cachedInputTokens } : {}),
+  };
+}
 type Client = Pick<PiRpcClient, "request" | "send" | "sendSideChannel" | "close">;
 export interface PiAdapterOptions {
   binaryPath: string;
@@ -154,6 +196,22 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     const ctx = sessions.get(id);
     if (!ctx || ctx.stopped) throw new Error(`No live Pi session for ${id}.`);
     return ctx;
+  };
+  // Pi reports context usage only on request, so refresh after each assistant
+  // message to keep the composer meter live. Stats are advisory: a failed read
+  // must never fail or delay the turn.
+  const refreshContextWindowUsage = async (ctx: Session): Promise<void> => {
+    if (ctx.stopped) return;
+    let usage: ThreadTokenUsageSnapshot | undefined;
+    try {
+      usage = piContextWindowUsage(
+        decodePiSessionStats(await ctx.client.request("get_session_stats")),
+      );
+    } catch {
+      return;
+    }
+    if (!usage) return;
+    emit(ctx, { type: "thread.token-usage.updated", payload: { usage } });
   };
   const call = <A>(method: string, run: () => Promise<A>) =>
     Effect.tryPromise({
@@ -387,6 +445,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           );
           ctx.itemId = undefined;
           ctx.text = "";
+          void refreshContextWindowUsage(ctx);
           break;
         }
         case "tool_execution_start":

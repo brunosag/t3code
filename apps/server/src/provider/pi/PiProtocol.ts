@@ -28,6 +28,25 @@ export const PiState = Schema.Struct({
   thinkingLevel: Schema.optional(PiThinkingLevel),
 });
 export const PiModels = Schema.Struct({ models: Schema.Array(PiModel) });
+// `get_session_stats` carries the current context estimate plus session-wide token
+// totals. Pi omits `contextUsage` for models it cannot size (no context window) and
+// reports `tokens: null` in it right after a compaction, before the next response.
+export const PiContextUsage = Schema.Struct({
+  tokens: Schema.NullOr(Schema.Finite),
+  contextWindow: Schema.Finite,
+  percent: Schema.NullOr(Schema.Finite),
+});
+export const PiSessionStats = Schema.Struct({
+  tokens: Schema.Struct({
+    input: Schema.Finite,
+    output: Schema.Finite,
+    cacheRead: Schema.Finite,
+    cacheWrite: Schema.Finite,
+    total: Schema.Finite,
+  }),
+  contextUsage: Schema.optional(PiContextUsage),
+});
+export type PiSessionStats = typeof PiSessionStats.Type;
 // `get_fork_messages` lists the user prompts Pi can rewind to, oldest first.
 // Tool results carry their own role, so only real prompts appear here.
 export const PiForkMessages = Schema.Struct({

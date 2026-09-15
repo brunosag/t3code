@@ -52,6 +52,10 @@ class FakePiClient implements Client {
   };
   /** Levels Pi reports for the current model; scenarios override this per model. */
   thinkingLevels: Array<string> = ["off", "low", "high"];
+  /** `get_session_stats` payload; no `contextUsage` by default, so no meter event. */
+  sessionStats: Record<string, unknown> = {
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
   /** User prompts Pi offers as fork targets, oldest first. */
   forkMessages: Array<{ entryId: string; text: string }> = [];
   /** Set when a `before_fork` extension hook vetoes the rewind. */
@@ -103,6 +107,8 @@ class FakePiClient implements Client {
       case "set_model":
         this.state = { ...this.state, model: { provider: fields.provider, id: fields.modelId } };
         return Promise.resolve({});
+      case "get_session_stats":
+        return Promise.resolve({ ...this.sessionStats });
       case "prompt":
       case "clear_queue":
       case "abort":
@@ -727,6 +733,59 @@ describe("PiAdapter", () => {
       expect(events[6]).toMatchObject({
         type: "item.completed",
         payload: { itemType: "assistant_message", detail: "Hello " },
+      });
+    }),
+  );
+
+  it.effect("reports Pi's context usage as a canonical token-usage event", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-context-usage");
+      yield* startSession(adapter, threadId);
+      const receipts = yield* subscribe(adapter, 4);
+
+      const client = harness.clients[0]!;
+      client.sessionStats = {
+        tokens: { input: 10_000, output: 1_500, cacheRead: 400, cacheWrite: 100, total: 12_000 },
+        contextUsage: { tokens: 1_550, contextWindow: 200_000, percent: 0.775 },
+      };
+      client.emit({
+        type: "message_start",
+        message: { role: "assistant", content: [{ type: "text", text: "" }] },
+      });
+      client.emit({
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "hi" },
+      });
+      client.emit({
+        type: "message_end",
+        message: { role: "assistant", content: "hi", stopReason: "stop" },
+      });
+
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events.map((event) => event.type)).toEqual([
+        "item.started",
+        "content.delta",
+        "item.completed",
+        "thread.token-usage.updated",
+      ]);
+      expect(client.requestTypes()).toContain("get_session_stats");
+      const usageEvent = events[3]!;
+      expect(() => assertRuntimeEvent(usageEvent)).not.toThrow();
+      expect(usageEvent).toMatchObject({
+        type: "thread.token-usage.updated",
+        payload: {
+          usage: {
+            usedTokens: 1_550,
+            lastUsedTokens: 1_550,
+            maxTokens: 200_000,
+            totalProcessedTokens: 12_000,
+            inputTokens: 10_500,
+            cachedInputTokens: 400,
+            outputTokens: 1_500,
+          },
+        },
       });
     }),
   );

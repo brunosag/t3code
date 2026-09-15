@@ -107,6 +107,7 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
         checkedAt: new Date().toISOString(),
         managesRuntimePermissions: true,
         showInteractionModeToggle: false,
+        reportsContextWindow: true,
         requiresNewThreadForModelChange: false,
         supportsTextGeneration: true,
         setup: { canAuthenticate: false, canInstall: false },
