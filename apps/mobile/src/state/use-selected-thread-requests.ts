@@ -6,7 +6,11 @@ import {
   questionAttachmentDraftPrefix,
   questionAttachmentPreparationAtom,
 } from "./question-attachments";
-import { composerDraftsAtom, clearComposerDraft } from "./use-composer-drafts";
+import {
+  composerDraftsAtom,
+  clearComposerDraft,
+  setComposerDraftText,
+} from "./use-composer-drafts";
 import {
   composerAttachmentUploadsAtom,
   composerAttachmentUploadBlockReason,
@@ -26,6 +30,7 @@ import { threadEnvironment } from "../state/threads";
 import { scopedRequestKey } from "../lib/scopedEntities";
 import {
   buildPendingUserInputAnswers,
+  restorePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
@@ -150,6 +155,13 @@ export function useSelectedThreadRequests() {
               question.id,
             );
             const attachments = attachmentDrafts[key]?.attachments ?? [];
+            const storedAnswer =
+              userInputDraftsByRequestKey[
+                scopedRequestKey(
+                  selectedThreadShell.environmentId,
+                  activePendingUserInput.requestId,
+                )
+              ]?.[question.id];
             const uploadInput = {
               environmentId: selectedThreadShell.environmentId,
               attachments,
@@ -159,12 +171,10 @@ export function useSelectedThreadRequests() {
             return [
               question.id,
               {
-                ...userInputDraftsByRequestKey[
-                  scopedRequestKey(
-                    selectedThreadShell.environmentId,
-                    activePendingUserInput.requestId,
-                  )
-                ]?.[question.id],
+                // The question's own composer draft is the durable copy of a
+                // typed answer, so an app restart restores it. The in-memory
+                // draft outranks it, which keeps a cleared answer cleared.
+                ...restorePendingUserInputAnswer(storedAnswer, attachmentDrafts[key]?.text),
                 attachmentCount: attachments.length,
                 attachmentsBlocked:
                   (attachments.length > 0 &&
@@ -208,6 +218,17 @@ export function useSelectedThreadRequests() {
 
       const requestKey = scopedRequestKey(selectedThreadShell.environmentId, requestId);
       setUserInputDraftCustomAnswer(requestKey, question, customAnswer);
+      // Mirror the text into the question's own composer draft. The drafts atom
+      // above is memory-only, so this is what survives an app restart.
+      setComposerDraftText(
+        questionAttachmentDraftKey(
+          selectedThreadShell.environmentId,
+          selectedThreadShell.id,
+          requestId,
+          questionId,
+        ),
+        customAnswer,
+      );
     },
     [activePendingUserInputs, selectedThreadShell],
   );

@@ -258,6 +258,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
       >
         {props.pendingUserInput.questions.map((question) => {
           const draft = props.drafts[question.id];
+          const writtenAnswer = (draft?.customAnswer ?? "").trim().length > 0;
           return (
             <View key={question.id} className="gap-2 pt-1">
               <Text className="font-t3-bold text-xs uppercase tracking-[1px] text-foreground-muted">
@@ -267,6 +268,11 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                 {question.question}
               </Text>
               <View className="gap-2">
+                {writtenAnswer && question.options.length > 0 ? (
+                  <Text className="font-sans text-xs leading-4 text-foreground-muted">
+                    Your written answer will be sent. Clear it to choose an option.
+                  </Text>
+                ) : null}
                 {question.options.map((option) => {
                   const optionValue = option.value ?? option.label.trim();
                   const selected = isPendingUserInputOptionSelected(question, draft, optionValue);
@@ -279,13 +285,16 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                         "min-h-12 w-full rounded-2xl border px-3.5 py-3",
                         selected ? "border-primary bg-primary/10" : "border-border bg-input",
                       )}
-                      onPress={() =>
+                      onPress={() => {
+                        // Text and options are mutually exclusive and the text wins
+                        // on submit, so the press is refused until it is cleared.
+                        if (writtenAnswer) return;
                         props.onSelectOption(
                           props.pendingUserInput.requestId,
                           question,
                           optionValue,
-                        )
-                      }
+                        );
+                      }}
                     >
                       <View className="min-w-0 flex-1 gap-0.5">
                         <Text

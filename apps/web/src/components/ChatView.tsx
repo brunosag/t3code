@@ -138,6 +138,7 @@ import {
 import {
   buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
+  restorePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
@@ -2780,10 +2781,12 @@ export default function ChatView(props: ChatViewProps) {
         );
         const draft = questionComposerDrafts[key];
         const attachments = draft ? [...draft.images, ...draft.files] : [];
+        const answerDraft =
+          pendingUserInputAnswersByRequestId[activePendingRequestKey]?.[question.id];
         return [
           question.id,
           {
-            ...pendingUserInputAnswersByRequestId[activePendingRequestKey]?.[question.id],
+            ...restorePendingUserInputAnswer(answerDraft, draft?.prompt),
             attachmentCount: attachments.length,
             attachmentsBlocked:
               (attachments.length > 0 && !supportsQuestionAttachments) ||
@@ -7791,6 +7794,21 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
       promptRef.current = value;
+      // Mirror the text into the question's own composer draft. The answers map
+      // below is memory-only, so this is what survives a reload or a remount.
+      if (activeThreadId) {
+        useComposerDraftStore
+          .getState()
+          .setPrompt(
+            questionAttachmentDraftId(
+              environmentId,
+              activeThreadId,
+              activePendingUserInput.requestId,
+              questionId,
+            ),
+            value,
+          );
+      }
       setPendingUserInputAnswersByRequestId((existing) => ({
         ...existing,
         [activePendingRequestKey]: {
@@ -7810,7 +7828,7 @@ export default function ChatView(props: ChatViewProps) {
         composerRef.current?.focusAt(nextCursor);
       }
     },
-    [activePendingUserInput, activePendingRequestKey, composerRef],
+    [activePendingUserInput, activeThreadId, environmentId, composerRef],
   );
 
   const onAdvanceActivePendingUserInput = useCallback(() => {

@@ -2086,6 +2086,22 @@ function liveToolActivitySummary(activity: ThreadFeedActivity, presentTense: boo
   return activity.detail ?? activity.summary;
 }
 
+/**
+ * Prefer the answer this client holds in memory, falling back to text restored
+ * from the question's persisted composer draft. The fallback is what survives an
+ * app restart; an empty in-memory text stays empty and is not restored.
+ */
+export function restorePendingUserInputAnswer(
+  answer: PendingUserInputDraftAnswer | undefined,
+  persistedCustomAnswer: string | undefined,
+): PendingUserInputDraftAnswer {
+  if (answer?.customAnswer !== undefined || !persistedCustomAnswer) {
+    return answer ?? {};
+  }
+
+  return { ...answer, customAnswer: persistedCustomAnswer };
+}
+
 export function setPendingUserInputCustomAnswer(
   question: UserInputQuestion,
   draft: PendingUserInputDraftAnswer | undefined,
@@ -2128,6 +2144,13 @@ export function togglePendingUserInputOptionSelection(
   draft: PendingUserInputDraftAnswer | undefined,
   optionValue: string,
 ): PendingUserInputDraftAnswer {
+  // A written answer is the answer: text and options are mutually exclusive and
+  // the text wins on submit. Refuse the toggle rather than silently deleting what
+  // the user wrote; clearing the text re-enables option selection.
+  if (question.allowCustomAnswer !== false && normalizeDraftAnswer(draft?.customAnswer)) {
+    return draft ?? {};
+  }
+
   const resolvedOptionValue = resolvePendingUserInputOptionValue(question, optionValue);
   if (resolvedOptionValue === null) {
     return draft ?? {};

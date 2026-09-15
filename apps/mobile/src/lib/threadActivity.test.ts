@@ -19,6 +19,7 @@ import {
   buildThreadFeed,
   deriveThreadFeedPresentation,
   isPendingUserInputOptionSelected,
+  restorePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   workEntryRowLabel,
@@ -154,6 +155,20 @@ describe("pending user input answers", () => {
     expect(
       togglePendingUserInputOptionSelection(multiSelectQuestion, paddedOrders, "  Orders  "),
     ).toEqual({ customAnswer: "" });
+  });
+
+  it("keeps a written answer when an option is pressed", () => {
+    const written = { customAnswer: "Ship the server first" };
+
+    expect(togglePendingUserInputOptionSelection(singleSelectQuestion, written, "Go")).toEqual(
+      written,
+    );
+    expect(togglePendingUserInputOptionSelection(multiSelectQuestion, written, "Orders")).toEqual(
+      written,
+    );
+    expect(buildPendingUserInputAnswers([singleSelectQuestion], { runtime: written })).toEqual({
+      runtime: "Ship the server first",
+    });
   });
 
   it("builds array answers for multi-select questions", () => {
@@ -3399,4 +3414,26 @@ it("makes attachment-only question answers expandable in the mobile feed", () =>
     workEntry: { questionAnswer: answer },
   });
   expect(group.activities[0]?.getFullDetail()).toBeNull();
+});
+
+describe("restorePendingUserInputAnswer", () => {
+  it("restores text from the persisted question draft when memory holds none", () => {
+    expect(restorePendingUserInputAnswer(undefined, "Half-written answer")).toEqual({
+      customAnswer: "Half-written answer",
+    });
+    expect(
+      restorePendingUserInputAnswer({ selectedOptionValues: ["Go"] }, "Half-written answer"),
+    ).toEqual({ selectedOptionValues: ["Go"], customAnswer: "Half-written answer" });
+  });
+
+  it("keeps the in-memory answer, including an emptied one", () => {
+    expect(restorePendingUserInputAnswer({ customAnswer: "Typed here" }, "Stale draft")).toEqual({
+      customAnswer: "Typed here",
+    });
+    expect(restorePendingUserInputAnswer({ customAnswer: "" }, "Stale draft")).toEqual({
+      customAnswer: "",
+    });
+    expect(restorePendingUserInputAnswer(undefined, undefined)).toEqual({});
+    expect(restorePendingUserInputAnswer(undefined, "")).toEqual({});
+  });
 });

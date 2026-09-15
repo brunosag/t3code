@@ -5,6 +5,7 @@ import {
   countAnsweredPendingUserInputQuestions,
   derivePendingUserInputProgress,
   resolvePendingUserInputAnswer,
+  restorePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
 } from "./pendingUserInput";
@@ -128,6 +129,20 @@ describe("togglePendingUserInputOptionSelection", () => {
     ).toEqual({
       customAnswer: "",
       selectedOptionValues: ["Web"],
+    });
+  });
+
+  it("keeps a written answer when an option is clicked", () => {
+    const written = { customAnswer: "Ship the server first" };
+
+    expect(
+      togglePendingUserInputOptionSelection(singleSelectQuestion, written, "Orchestration-first"),
+    ).toEqual(written);
+    expect(togglePendingUserInputOptionSelection(multiSelectQuestion, written, "Server")).toEqual(
+      written,
+    );
+    expect(buildPendingUserInputAnswers([singleSelectQuestion], { scope: written })).toEqual({
+      scope: "Ship the server first",
     });
   });
 
@@ -320,4 +335,26 @@ it("accepts attachment-only answers after every upload finishes", () => {
       spec: { attachmentCount: 1 },
     }),
   ).toBeNull();
+});
+
+describe("restorePendingUserInputAnswer", () => {
+  it("restores text from the persisted question draft when memory holds none", () => {
+    expect(restorePendingUserInputAnswer(undefined, "Half-written answer")).toEqual({
+      customAnswer: "Half-written answer",
+    });
+    expect(
+      restorePendingUserInputAnswer({ selectedOptionValues: ["Server"] }, "Half-written answer"),
+    ).toEqual({ selectedOptionValues: ["Server"], customAnswer: "Half-written answer" });
+  });
+
+  it("keeps the in-memory answer, including an emptied one", () => {
+    expect(restorePendingUserInputAnswer({ customAnswer: "Typed here" }, "Stale draft")).toEqual({
+      customAnswer: "Typed here",
+    });
+    expect(restorePendingUserInputAnswer({ customAnswer: "" }, "Stale draft")).toEqual({
+      customAnswer: "",
+    });
+    expect(restorePendingUserInputAnswer(undefined, undefined)).toEqual({});
+    expect(restorePendingUserInputAnswer(undefined, "")).toEqual({});
+  });
 });

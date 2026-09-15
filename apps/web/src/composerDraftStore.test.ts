@@ -7,6 +7,7 @@ import {
 import * as Schema from "effect/Schema";
 import {
   defaultInstanceIdForDriver,
+  ApprovalRequestId,
   EnvironmentId,
   MessageId,
   ProjectId,
@@ -78,6 +79,7 @@ import {
   DraftId,
 } from "./composerDraftStore";
 import { removeLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
+import { questionAttachmentDraftId } from "./questionAttachments";
 import { insertInlineContextReference } from "./lib/composerContextReferences";
 import { terminalContextReference } from "./lib/composerContextRecords";
 import {
@@ -1184,6 +1186,26 @@ describe("composerDraftStore review comments", () => {
     expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.reviewComments).toEqual([
       comment,
     ]);
+  });
+
+  it("persists a question-scoped answer draft across a reload", () => {
+    const questionDraftId = questionAttachmentDraftId(
+      TEST_ENVIRONMENT_ID,
+      threadId,
+      ApprovalRequestId.make("request-1"),
+      "q8_daily_contract",
+    );
+    useComposerDraftStore.getState().setPrompt(questionDraftId, "Protect a MEXT minimum");
+
+    const merge = useComposerDraftStore.persist.getOptions().merge!;
+    const reloaded = merge(
+      JSON.parse(
+        JSON.stringify(partializeComposerDraftStoreState(useComposerDraftStore.getState())),
+      ),
+      useComposerDraftStore.getInitialState(),
+    );
+
+    expect(reloaded.draftsByThreadKey[questionDraftId]?.prompt).toBe("Protect a MEXT minimum");
   });
 });
 
