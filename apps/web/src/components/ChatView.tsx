@@ -434,6 +434,7 @@ import {
   observeProactivePanelUserChoice,
   resolveProactiveTurnDiffAction,
   resolveThreadMetadataUpdateForNextTurn,
+  resolveThreadVisitTimestamp,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
@@ -2017,19 +2018,21 @@ export default function ChatView(props: ChatViewProps) {
   // stamped at the turn's completion time — not now/updatedAt — so it clears
   // exactly the completion the user is looking at: a wake or completion that
   // lands later still gets its signal (markThreadVisited never moves the
-  // timestamp backwards).
+  // timestamp backwards). A thread with no completion yet stamps its creation
+  // time instead, so a turn that finishes after the user leaves still reads as
+  // unread rather than as a never-visited thread.
   useEffect(() => {
-    const completedAt = serverThread?.latestTurn?.completedAt;
-    if (!serverThread?.id || !completedAt) return;
+    if (!serverThread?.id) return;
     markThreadVisited(
       scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id)),
-      completedAt,
+      resolveThreadVisitTimestamp(serverThread),
     );
   }, [
     markThreadVisited,
     serverThread?.environmentId,
     serverThread?.id,
     serverThread?.latestTurn?.completedAt,
+    serverThread?.createdAt,
   ]);
   useEffect(() => {
     setMountedTerminalThreadKeys((currentThreadIds) => {

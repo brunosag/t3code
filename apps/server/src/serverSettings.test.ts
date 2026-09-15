@@ -394,6 +394,26 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("preserves text generation selections on driver-only providers", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const selection = {
+        instanceId: ProviderInstanceId.make("pi"),
+        model: "opencode-go/muse-spark-1.3-contributor",
+      };
+
+      const next = yield* serverSettings.updateSettings({
+        textGenerationModelSelection: selection,
+      });
+
+      // `pi` has no legacy `providers` field, so only an explicit
+      // `providerInstances` entry can disable it. The fallback provider must
+      // not replace the selection merely because settings hold no record.
+      assert.deepEqual(next.textGenerationModelSelection, selection);
+      assert.deepEqual((yield* serverSettings.getSettings).textGenerationModelSelection, selection);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect(
     "uses explicit provider instance enabled state over legacy provider enabled state",
     () =>

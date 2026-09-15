@@ -62,6 +62,7 @@ import {
   observeProactivePanelUserChoice,
   resolveProactiveTurnDiffAction,
   resolveThreadMetadataUpdateForNextTurn,
+  resolveThreadVisitTimestamp,
   resolveSendEnvMode,
   threadShellHasStarted,
   resolveDraftHeroState,
@@ -2147,6 +2148,35 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
         latestTurnStartFailureId: "turn-start-failure-new",
       }),
     ).toBe(true);
+  });
+});
+
+describe("resolveThreadVisitTimestamp", () => {
+  it("stamps the completion being read so the Done badge clears", () => {
+    expect(
+      resolveThreadVisitTimestamp(
+        makeThread({ latestTurn: completedTurn, createdAt: "2026-03-29T00:00:00.000Z" }),
+      ),
+    ).toBe("2026-03-29T00:00:10.000Z");
+  });
+
+  it("stamps creation time while no turn has completed", () => {
+    expect(
+      resolveThreadVisitTimestamp(
+        makeThread({ latestTurn: null, createdAt: "2026-03-29T00:00:00.000Z" }),
+      ),
+    ).toBe("2026-03-29T00:00:00.000Z");
+  });
+
+  it("stamps creation time while the latest turn is still running", () => {
+    expect(
+      resolveThreadVisitTimestamp(
+        makeThread({
+          latestTurn: { ...completedTurn, state: "running", completedAt: null },
+          createdAt: "2026-03-29T00:00:00.000Z",
+        }),
+      ),
+    ).toBe("2026-03-29T00:00:00.000Z");
   });
 });
 

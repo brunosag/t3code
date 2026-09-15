@@ -150,6 +150,35 @@ const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 const PI_DRIVER_KIND = ProviderDriverKind.make("pi");
 
+/**
+ * Driver kinds this build ships a driver for.
+ *
+ * `ProviderInstanceRegistryHydration` materializes a default-enabled instance
+ * for every kind listed here even when `ServerSettings` carries no
+ * `providerInstances` entry, so a model selection naming one of them is
+ * routable. Guards that ask whether a selection's provider is enabled must
+ * therefore read "no settings record" as "enabled", not as "disabled":
+ * a fork-only driver such as `pi` has no legacy `providers` field to hold a
+ * disable flag, and answering `false` rewrote its selections to the fallback
+ * provider on every settings change.
+ *
+ * Keep in sync with `BUILT_IN_DRIVERS` in
+ * `apps/server/src/provider/builtInDrivers.ts`.
+ */
+export const BUILT_IN_PROVIDER_DRIVER_KINDS: ReadonlyArray<ProviderDriverKind> = [
+  ProviderDriverKind.make("antigravity"),
+  CODEX_DRIVER_KIND,
+  CLAUDE_DRIVER_KIND,
+  CURSOR_DRIVER_KIND,
+  GROK_DRIVER_KIND,
+  OPENCODE_DRIVER_KIND,
+  PI_DRIVER_KIND,
+];
+
+/** Whether this build ships a driver for `value`, rather than it naming a configured instance. */
+export const isBuiltInProviderDriverKind = (value: unknown): value is ProviderDriverKind =>
+  typeof value === "string" && BUILT_IN_PROVIDER_DRIVER_KINDS.some((kind) => kind === value);
+
 export const DEFAULT_MODEL = "gpt-6-astra";
 
 /**

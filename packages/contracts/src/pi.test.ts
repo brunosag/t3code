@@ -2,8 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
 import {
+  BUILT_IN_PROVIDER_DRIVER_KINDS,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  isBuiltInProviderDriverKind,
   PROVIDER_DISPLAY_NAMES,
 } from "./model.ts";
 import { ProviderDriverKind } from "./providerInstance.ts";
@@ -39,6 +41,14 @@ describe("Pi UI integration", () => {
     expect(PROVIDER_DISPLAY_NAMES[piDriver]).toBe("Pi");
     expect(DEFAULT_MODEL_BY_PROVIDER[piDriver]).toBe("default");
     expect(DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[piDriver]).toBe("default");
+  });
+
+  it("declares Pi as a built-in driver kind that guards must not read as disabled", () => {
+    expect(BUILT_IN_PROVIDER_DRIVER_KINDS).toContain(piDriver);
+    expect(isBuiltInProviderDriverKind("pi")).toBe(true);
+    // A configured instance id is not a driver kind, so guards still require
+    // an explicit `providerInstances` record for it.
+    expect(isBuiltInProviderDriverKind("pi_personal")).toBe(false);
   });
 
   it("resolves Pi enabled state generically from the instance envelope", () => {

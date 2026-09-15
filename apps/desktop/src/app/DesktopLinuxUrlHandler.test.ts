@@ -106,11 +106,13 @@ const emptyRecording = (): RecordedRegistration => ({
 });
 
 describe("DesktopLinuxUrlHandler", () => {
-  it("renders a scheme-handler desktop entry with freedesktop Exec quoting", () => {
-    const entry = DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+  it("renders the launcher entry with freedesktop Exec quoting", () => {
+    const entry = DesktopLinuxUrlHandler.renderLinuxDesktopEntry({
       displayName: "T3 Code (Nightly)",
       execTarget: '/home/al ice/Apps/T3 "100%" $HOME\\x.AppImage',
       scheme: "t3code",
+      isDevelopment: false,
+      isPackaged: true,
     });
 
     assert.include(entry, "[Desktop Entry]");
@@ -122,10 +124,34 @@ describe("DesktopLinuxUrlHandler", () => {
       entry,
       'Exec="/home/al ice/Apps/T3 \\\\"100%%\\\\" \\\\$HOME\\\\\\\\x.AppImage" %U',
     );
-    assert.include(entry, "NoDisplay=true");
-    assert.notInclude(entry, "StartupWMClass=");
+    // The window reports this entry's name as its app id, so this entry — not an
+    // integration copy — is the launcher users pin.
+    assert.include(entry, "Icon=t3code");
+    assert.include(entry, "Categories=Development;");
+    assert.notInclude(entry, "NoDisplay=true");
     assert.include(entry, "MimeType=x-scheme-handler/t3code;");
   });
+
+  for (const scenario of [
+    { name: "development", isDevelopment: true, isPackaged: false },
+    { name: "unpackaged", isDevelopment: false, isPackaged: false },
+    { name: "dev-server packaged", isDevelopment: true, isPackaged: true },
+  ]) {
+    it(`keeps ${scenario.name} runs as hidden URL handlers`, () => {
+      const entry = DesktopLinuxUrlHandler.renderLinuxDesktopEntry({
+        displayName: "T3 Code (Dev)",
+        execTarget: "/repo/node_modules/electron/dist/electron",
+        scheme: "t3code-dev",
+        isDevelopment: scenario.isDevelopment,
+        isPackaged: scenario.isPackaged,
+      });
+
+      assert.include(entry, "NoDisplay=true");
+      assert.notInclude(entry, "Icon=");
+      assert.notInclude(entry, "Categories=");
+      assert.include(entry, "MimeType=x-scheme-handler/t3code-dev;");
+    });
+  }
 
   it("carries structured context on registration errors", () => {
     const writeError = new DesktopLinuxUrlHandler.DesktopLinuxUrlHandlerRegistrationError({
@@ -198,10 +224,12 @@ describe("DesktopLinuxUrlHandler", () => {
 
     return Effect.gen(function* () {
       yield* runRegister(recorded, {
-        existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
+        existingEntry: DesktopLinuxUrlHandler.renderLinuxDesktopEntry({
           displayName: "T3 Code (Alpha)",
           execTarget: "/home/alice/Applications/T3-Code.AppImage",
           scheme: "t3code",
+          isDevelopment: false,
+          isPackaged: true,
         }),
       });
 

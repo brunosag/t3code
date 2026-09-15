@@ -105,6 +105,7 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
           checkpoint_status AS "status",
           checkpoint_files_json AS "files",
           assistant_message_id AS "assistantMessageId",
+          pending_message_id AS "pendingMessageId",
           completed_at AS "completedAt"
         FROM projection_turns
         WHERE thread_id = ${threadId}
@@ -126,6 +127,7 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
           checkpoint_status AS "status",
           checkpoint_files_json AS "files",
           assistant_message_id AS "assistantMessageId",
+          pending_message_id AS "pendingMessageId",
           completed_at AS "completedAt"
         FROM projection_turns
         WHERE thread_id = ${threadId}

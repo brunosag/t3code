@@ -383,6 +383,50 @@ describe("serverSettings helpers", () => {
     ).toBeNull();
   });
 
+  it("enables a built-in driver kind that has no settings record", () => {
+    // Pi is shipped by this build without a legacy `providers` field, so no
+    // settings key can disable it by omission; the provider registry
+    // materializes its default-enabled instance from the driver itself.
+    expect(
+      isModelSelectionProviderEnabled(
+        DEFAULT_SERVER_SETTINGS,
+        createModelSelection(
+          ProviderInstanceId.make("pi"),
+          "opencode-go/muse-spark-1.3-contributor",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps an explicit disable, a configured instance id, and an opted-out kind disabled", () => {
+    const pi = ProviderInstanceId.make("pi");
+    const piDisabled = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: {
+        [pi]: { driver: ProviderDriverKind.make("pi"), enabled: false, config: {} },
+      },
+    };
+
+    expect(isModelSelectionProviderEnabled(piDisabled, createModelSelection(pi, "default"))).toBe(
+      false,
+    );
+    // A configured instance id is not a driver kind: it is only routable when
+    // settings carry its record.
+    expect(
+      isModelSelectionProviderEnabled(
+        DEFAULT_SERVER_SETTINGS,
+        createModelSelection(ProviderInstanceId.make("pi_personal"), "default"),
+      ),
+    ).toBe(false);
+    // Legacy-backed kinds keep their schema default; Cursor is opt-in.
+    expect(
+      isModelSelectionProviderEnabled(
+        DEFAULT_SERVER_SETTINGS,
+        createModelSelection(ProviderInstanceId.make("cursor"), "composer-2"),
+      ),
+    ).toBe(false);
+  });
+
   it("falls back from a disabled source control writer provider without clearing its selection", () => {
     const instanceId = ProviderInstanceId.make("codex_writer");
     const sourceControlWriterModelSelection = createModelSelection(instanceId, "gpt-5.4-mini");

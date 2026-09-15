@@ -2772,7 +2772,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       ],
       desktop: {
         entry: {
-          StartupWMClass: "t3code",
+          // The window reports its desktop entry name (com.t3tools.T3Code.desktop,
+          // written by the app itself) as its app id, so an integration tool's
+          // copy of this entry has to declare that class to be grouped with it.
+          StartupWMClass: "com.t3tools.T3Code",
         },
       },
     };

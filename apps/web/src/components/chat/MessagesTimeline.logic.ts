@@ -805,18 +805,52 @@ function attachTrailingToolGroupsToAssistant(
   return result;
 }
 
-/** Match each user message to the next assistant checkpoint. */
+/**
+ * Match each user message to the checkpoint its turn produced.
+ *
+ * Checkpoints carry the user message that started their turn
+ * (`pendingMessageId`), which is the only link that survives a turn with no
+ * assistant message. The assistant-message walk below stays as a fallback for
+ * snapshots captured before that field existed.
+ */
 function buildRevertTurnCountByUserMessageId(input: {
   supportsConversationRollback: boolean;
   timelineEntries: ReadonlyArray<TimelineEntry>;
+  turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   inferredCheckpointTurnCountByTurnId: Readonly<Record<string, number | undefined>>;
 }): Map<MessageId, number> {
   const byUserMessageId = new Map<MessageId, number>();
-  const entryCount = input.supportsConversationRollback ? input.timelineEntries.length : 0;
+  if (!input.supportsConversationRollback) {
+    return byUserMessageId;
+  }
+
+  const userMessageIds = new Set<MessageId>();
+  for (const entry of input.timelineEntries) {
+    if (entry.kind === "message" && entry.message.role === "user") {
+      userMessageIds.add(entry.message.id);
+    }
+  }
+
+  for (const summary of input.turnDiffSummaries) {
+    const pendingMessageId = summary.pendingMessageId;
+    if (!pendingMessageId || !userMessageIds.has(pendingMessageId)) {
+      continue;
+    }
+    const turnCount =
+      summary.checkpointTurnCount ?? input.inferredCheckpointTurnCountByTurnId[summary.turnId];
+    if (typeof turnCount === "number") {
+      byUserMessageId.set(pendingMessageId, Math.max(0, turnCount - 1));
+    }
+  }
+
+  const entryCount = input.timelineEntries.length;
   for (let index = 0; index < entryCount; index += 1) {
     const entry = input.timelineEntries[index];
     if (!entry || entry.kind !== "message" || entry.message.role !== "user") {
+      continue;
+    }
+    if (byUserMessageId.has(entry.message.id)) {
       continue;
     }
 
@@ -864,6 +898,7 @@ export function deriveMessagesTimelineRows(input: {
   const revertTurnCountByUserMessageId = buildRevertTurnCountByUserMessageId({
     supportsConversationRollback: input.supportsConversationRollback,
     timelineEntries: input.timelineEntries,
+    turnDiffSummaries: input.turnDiffSummaries,
     turnDiffSummaryByAssistantMessageId,
     inferredCheckpointTurnCountByTurnId: input.supportsConversationRollback
       ? inferCheckpointTurnCountByTurnId(input.turnDiffSummaries)

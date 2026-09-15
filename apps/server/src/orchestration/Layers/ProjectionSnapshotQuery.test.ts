@@ -528,6 +528,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               status: "ready",
               files: [{ path: "README.md", kind: "modified", additions: 2, deletions: 1 }],
               assistantMessageId: asMessageId("message-1"),
+              pendingMessageId: null,
               completedAt: "2026-02-24T00:00:08.000Z",
             },
           ],
@@ -1492,6 +1493,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               status: "ready",
               files: [],
               assistantMessageId: null,
+              pendingMessageId: null,
               completedAt: "2026-03-02T00:00:04.000Z",
             },
             {
@@ -1501,6 +1503,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               status: "ready",
               files: [],
               assistantMessageId: null,
+              pendingMessageId: null,
               completedAt: "2026-03-02T00:00:05.000Z",
             },
           ],

@@ -565,6 +565,7 @@ export function applyThreadDetailEvent(
         status: event.payload.status,
         files: event.payload.files,
         assistantMessageId: event.payload.assistantMessageId,
+        pendingMessageId: event.payload.pendingMessageId ?? null,
         completedAt: event.payload.completedAt,
       };
 

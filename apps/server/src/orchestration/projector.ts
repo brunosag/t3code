@@ -918,6 +918,7 @@ export function projectEvent(
             status: payload.status,
             files: payload.files,
             assistantMessageId: payload.assistantMessageId,
+            pendingMessageId: payload.pendingMessageId ?? null,
             completedAt: payload.completedAt,
           },
           event.type,

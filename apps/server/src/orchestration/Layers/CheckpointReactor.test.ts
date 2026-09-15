@@ -673,6 +673,92 @@ describe("CheckpointReactor", () => {
     }),
   );
 
+  effectIt.effect(
+    "records the pending user message on a stopped turn with no assistant message",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() =>
+          createHarness({
+            hasSession: false,
+            seedFilesystemCheckpoints: false,
+            threadWorktreePath: null,
+          }),
+        );
+        const threadId = ThreadId.make("thread-1");
+        const turnId = asTurnId("turn-1");
+        const userMessageId = MessageId.make("message-user-stopped");
+        const createdAt = "2026-01-01T00:00:00.000Z";
+
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-stopped-turn-start"),
+          threadId,
+          message: {
+            messageId: userMessageId,
+            role: "user",
+            text: "stop me",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt,
+        });
+        expect(yield* harness.nextReceipt).toMatchObject({
+          type: "checkpoint.baseline.captured",
+          checkpointTurnCount: 0,
+        });
+
+        yield* harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-stopped-turn-running"),
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: createdAt,
+          },
+          createdAt,
+        });
+        harness.provider.emit({
+          type: "turn.started",
+          eventId: EventId.make("evt-stopped-turn-start"),
+          provider: ProviderDriverKind.make("codex"),
+          createdAt,
+          threadId,
+          turnId,
+        });
+        harness.provider.emit({
+          type: "turn.aborted",
+          eventId: EventId.make("evt-stopped-turn-abort"),
+          provider: ProviderDriverKind.make("codex"),
+          createdAt,
+          threadId,
+          turnId,
+          payload: { reason: "Interrupted by user." },
+        });
+
+        expect(yield* harness.nextReceipt).toMatchObject({
+          type: "checkpoint.diff.finalized",
+          turnId,
+          checkpointTurnCount: 1,
+        });
+        yield* Effect.promise(harness.drain);
+
+        const thread = (yield* Effect.promise(harness.readModel)).threads.find(
+          (entry) => entry.id === threadId,
+        );
+        expect(thread?.messages.map((message) => message.id)).toEqual([userMessageId]);
+        expect(thread?.checkpoints[0]).toMatchObject({
+          status: "ready",
+          pendingMessageId: userMessageId,
+        });
+      }),
+  );
+
   effectIt.effect.each(["turn.completed", "turn.aborted"] as const)(
     "captures every edit after a mid-turn diff update on %s",
     (terminalEventType) =>

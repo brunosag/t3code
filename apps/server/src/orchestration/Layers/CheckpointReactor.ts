@@ -91,6 +91,13 @@ const make = Effect.gen(function* () {
   const pullRequests = yield* PullRequestService.PullRequestService;
   const startedTurns = new Map<ThreadId, TurnId>();
   const pending = new Set<ThreadId>();
+  // The user message that started each in-flight turn. `thread.turn-start-requested`
+  // carries it, `turn.started` binds it to the provider's turn id, and capture
+  // copies it onto the checkpoint so clients can anchor "edit from here" even
+  // when a turn produced no assistant message (e.g. a stopped first turn).
+  const pendingUserMessageIdByThread = new Map<ThreadId, MessageId>();
+  const userMessageIdByTurnKey = new Map<string, MessageId>();
+  const turnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 
   const appendRevertFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -231,6 +238,7 @@ const make = Effect.gen(function* () {
     readonly turnCount: number;
     readonly status: "ready" | "missing" | "error";
     readonly assistantMessageId: MessageId | undefined;
+    readonly pendingMessageId: MessageId | null;
     readonly createdAt: string;
   }) {
     const fromTurnCount = Math.max(0, input.turnCount - 1);
@@ -316,6 +324,7 @@ const make = Effect.gen(function* () {
       status: input.status,
       files,
       assistantMessageId,
+      ...(input.pendingMessageId !== null ? { pendingMessageId: input.pendingMessageId } : {}),
       checkpointTurnCount: input.turnCount,
       createdAt: input.createdAt,
     });
@@ -420,6 +429,7 @@ const make = Effect.gen(function* () {
             ? "ready"
             : checkpointStatusFromRuntime(event.payload.state),
         assistantMessageId: existingPlaceholder?.assistantMessageId ?? undefined,
+        pendingMessageId: userMessageIdByTurnKey.get(turnKey(thread.id, turnId)) ?? null,
         createdAt: event.createdAt,
       });
     },
@@ -820,7 +830,10 @@ const make = Effect.gen(function* () {
 
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (event: OrchestrationEvent) {
     if (event.type === "thread.turn-start-requested" || event.type === "thread.message-sent") {
-      if (event.type === "thread.turn-start-requested") pending.add(event.payload.threadId);
+      if (event.type === "thread.turn-start-requested") {
+        pending.add(event.payload.threadId);
+        pendingUserMessageIdByThread.set(event.payload.threadId, event.payload.messageId);
+      }
       yield* ensurePreTurnBaselineFromDomainTurnStart(event);
       return;
     }
@@ -848,6 +861,7 @@ const make = Effect.gen(function* () {
     if (event.type === "session.exited") {
       startedTurns.delete(event.threadId);
       pending.delete(event.threadId);
+      pendingUserMessageIdByThread.delete(event.threadId);
       return;
     }
 
@@ -860,6 +874,11 @@ const make = Effect.gen(function* () {
       if (turnId !== null && (!startedTurns.has(event.threadId) || mayReplace)) {
         startedTurns.set(event.threadId, turnId);
         pending.delete(event.threadId);
+        const pendingUserMessageId = pendingUserMessageIdByThread.get(event.threadId);
+        if (pendingUserMessageId !== undefined) {
+          userMessageIdByTurnKey.set(turnKey(event.threadId, turnId), pendingUserMessageId);
+          pendingUserMessageIdByThread.delete(event.threadId);
+        }
       }
       yield* ensurePreTurnBaselineFromTurnStart(event);
       return;
@@ -903,6 +922,9 @@ const make = Effect.gen(function* () {
           ),
         ),
       );
+      if (turnId !== null) {
+        userMessageIdByTurnKey.delete(turnKey(event.threadId, turnId));
+      }
       return;
     }
   });

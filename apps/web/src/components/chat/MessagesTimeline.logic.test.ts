@@ -1298,6 +1298,49 @@ describe("deriveMessagesTimelineRows", () => {
     expect(assistantRow?.assistantTurnDiffSummary).toBe(assistantTurnDiffSummary);
   });
 
+  it("anchors edit-from-here on a stopped turn that never produced an assistant message", () => {
+    const stoppedTurnDiffSummary = {
+      turnId: "turn-1" as never,
+      completedAt: "2026-01-01T00:00:30Z",
+      assistantMessageId: "assistant:turn-1" as never,
+      pendingMessageId: "user-1" as never,
+      checkpointTurnCount: 1,
+      checkpointRef: "checkpoint-1" as never,
+      status: "ready" as const,
+      files: [],
+    };
+
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "user-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: "user-1" as never,
+            role: "user",
+            text: "Do the thing",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+      ],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaries: [stoppedTurnDiffSummary],
+      supportsConversationRollback: true,
+    });
+
+    const userRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
+        row.kind === "message" && row.message.role === "user",
+    );
+
+    expect(userRow?.revertTurnCount).toBe(0);
+  });
+
   it("folds the first assistant message and settled work before the terminal response", () => {
     const timelineEntries = [
       {

@@ -1242,6 +1242,21 @@ export function latestTurnStartFailureId(
   );
 }
 
+/**
+ * The timestamp a thread visit should record. A finished thread stores the
+ * completion being read, so the visit clears exactly that completion. A thread
+ * with no completion stores its creation time, so a turn that finishes after
+ * the reader leaves still counts as unread: a missing visit marker is treated
+ * as read, and a brand-new thread otherwise never earns its first Done badge.
+ * Both are server timestamps — a client clock ahead of the server would put
+ * the visit in the future and suppress every later badge.
+ */
+export function resolveThreadVisitTimestamp(
+  thread: Pick<Thread, "latestTurn" | "createdAt">,
+): string {
+  return thread.latestTurn?.completedAt ?? thread.createdAt;
+}
+
 export function createLocalDispatchSnapshot(
   activeThread: Thread | undefined,
   options?: {

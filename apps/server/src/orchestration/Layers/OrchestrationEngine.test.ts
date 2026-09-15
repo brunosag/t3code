@@ -1458,6 +1458,7 @@ describe("OrchestrationEngine", () => {
         status: "ready",
         files: [],
         assistantMessageId: null,
+        pendingMessageId: null,
         completedAt: createdAt,
       },
     ]);

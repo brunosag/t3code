@@ -1,5 +1,5 @@
 import {
-  isProviderDriverKind,
+  isBuiltInProviderDriverKind,
   isProviderAvailable,
   resolveProviderInstanceEnabled,
   type ModelSelection,
@@ -7,6 +7,7 @@ import {
   type ProjectScopedServerSettingKey,
   type ProjectSettingsOverrides,
   type ProviderDriverKind,
+  type ProviderInstanceId,
   type ServerProvider,
   ServerSettings,
   type ServerSettingsPatch,
@@ -62,7 +63,8 @@ type LegacyProviderSettings = ServerSettings["providers"][keyof ServerSettings["
 
 const getLegacyProviderSettings = (
   settings: ServerSettings,
-  provider: ProviderDriverKind,
+  // Legacy single-instance-per-driver settings: the instance id IS the driver kind.
+  provider: ProviderDriverKind | ProviderInstanceId,
 ): LegacyProviderSettings | undefined =>
   (settings.providers as Record<string, LegacyProviderSettings | undefined>)[provider];
 
@@ -75,10 +77,17 @@ export function isModelSelectionProviderEnabled(
     return resolveProviderInstanceEnabled(instanceConfig);
   }
 
-  return (
-    isProviderDriverKind(selection.instanceId) &&
-    getLegacyProviderSettings(settings, selection.instanceId)?.enabled === true
-  );
+  const legacy = getLegacyProviderSettings(settings, selection.instanceId);
+  if (legacy !== undefined) {
+    return legacy.enabled === true;
+  }
+
+  // A built-in driver kind with no settings record is materialized by the
+  // provider registry from the driver's own defaults, enabled by default.
+  // Returns false for ids that name an explicitly configured instance
+  // (which the caller would have found above) or a provider this build
+  // cannot materialize at all.
+  return isBuiltInProviderDriverKind(selection.instanceId);
 }
 
 export function resolveSourceControlWriterModelSelection(

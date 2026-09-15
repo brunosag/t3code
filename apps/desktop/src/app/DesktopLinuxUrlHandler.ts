@@ -17,9 +17,17 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 // Electron's app.setAsDefaultProtocolClient resolves the desktop id from
 // setDesktopName, which cannot match those files — so the browser keeps
 // prompting "Choose an application" for every OAuth callback. Instead, write
-// our own handler entry pointing at the current AppImage and claim the
+// our own entry pointing at the current AppImage and claim the
 // scheme default via xdg-mime, exactly what the file manager's "set as
 // default" checkbox would record in mimeapps.list.
+//
+// That entry is also the app's identity: the window reaches the compositor with
+// this desktop entry name as its app id, and desktops associate a window with a
+// launcher by that id alone (Plasma resolves it through the window's desktop
+// file name, GNOME through the app id). An integration copy or a hand-written
+// launcher can therefore never claim the window, which leaves the entry we write
+// as the only one users can pin — so packaged builds write a full launcher
+// entry, and a StartupWMClass in packaging cannot substitute for one.
 const { logInfo, logWarning } = makeComponentLogger("desktop-linux-url-handler");
 
 export class DesktopLinuxUrlHandlerRegistrationError extends Schema.TaggedError<DesktopLinuxUrlHandlerRegistrationError>()(
@@ -63,21 +71,33 @@ export function escapeDesktopEntryExecArgument(value: string): string {
   return escapeDesktopEntryString(`"${quoted}"`);
 }
 
-// The AppImage integration entry owns the window identity and icon. This
-// hidden URL-only entry must not compete with it for StartupWMClass matching.
-export function renderUrlHandlerDesktopEntry(input: {
+// Named after the executable, which is what packaging installs into hicolor.
+const LAUNCHER_ICON_NAME = "t3code";
+
+/**
+ * Renders the app's Linux desktop entry. A packaged app is the only one whose
+ * Exec can point at itself, so everyone else writes a hidden URL handler: a
+ * development Exec target is the dev Electron binary, which is not a launcher
+ * worth offering in the app menu.
+ */
+export function renderLinuxDesktopEntry(input: {
   readonly displayName: string;
   readonly execTarget: string;
   readonly scheme: string;
+  readonly isDevelopment: boolean;
+  readonly isPackaged: boolean;
 }): string {
+  const isLauncher = input.isPackaged && !input.isDevelopment;
   return [
     "[Desktop Entry]",
     "Type=Application",
     `Name=${escapeDesktopEntryString(input.displayName)}`,
     `Exec=${escapeDesktopEntryExecArgument(input.execTarget)} %U`,
     "Terminal=false",
-    "NoDisplay=true",
     "StartupNotify=false",
+    ...(isLauncher
+      ? [`Icon=${LAUNCHER_ICON_NAME}`, "Categories=Development;"]
+      : ["NoDisplay=true"]),
     `MimeType=x-scheme-handler/${input.scheme};`,
     "",
   ].join("\n");
@@ -106,10 +126,12 @@ export const make = Effect.gen(function* () {
     // Inside the mounted AppImage, process.execPath points at a transient
     // /tmp/.mount_* path — the handler must launch the AppImage itself.
     const execTarget = Option.getOrElse(environment.appImagePath, () => process.execPath);
-    const content = renderUrlHandlerDesktopEntry({
+    const content = renderLinuxDesktopEntry({
       displayName: environment.displayName,
       execTarget,
       scheme,
+      isDevelopment: environment.isDevelopment,
+      isPackaged: environment.isPackaged,
     });
     // Pre-ready setup normally wrote this already. Avoid truncating a valid
     // entry while the portal may be reading it during startup.

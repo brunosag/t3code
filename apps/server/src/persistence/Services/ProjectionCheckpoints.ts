@@ -31,6 +31,9 @@ export const ProjectionCheckpoint = Schema.Struct({
   status: OrchestrationCheckpointStatus,
   files: Schema.Array(OrchestrationCheckpointFile),
   assistantMessageId: Schema.NullOr(MessageId),
+  // The user message that started the turn. Optional for rows written before
+  // the column was read back; see OrchestrationCheckpointSummary.pendingMessageId.
+  pendingMessageId: Schema.optional(Schema.NullOr(MessageId)),
   completedAt: IsoDateTime,
 });
 export type ProjectionCheckpoint = typeof ProjectionCheckpoint.Type;

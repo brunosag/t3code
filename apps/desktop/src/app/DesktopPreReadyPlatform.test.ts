@@ -25,6 +25,7 @@ const {
 
 vi.mock("electron", () => ({
   app: {
+    isPackaged: true,
     setDesktopName: setDesktopNameMock,
     getVersion: () => "0.0.37",
     commandLine: {
@@ -104,6 +105,10 @@ describe("DesktopPreReadyPlatform", () => {
             assert.equal(identity.desktopName, "com.t3tools.T3Code.desktop");
             assert.include(identity.desktopEntry ?? "", 'Exec="/Applications/current.AppImage" %U');
             assert.include(identity.desktopEntry ?? "", "Name=T3 Code (Alpha)");
+            // Packaged runs pre-write the launcher entry users pin, not just a
+            // hidden URL handler.
+            assert.include(identity.desktopEntry ?? "", "Icon=t3code");
+            assert.notInclude(identity.desktopEntry ?? "", "NoDisplay=true");
             assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/t3code;");
           }),
         ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));

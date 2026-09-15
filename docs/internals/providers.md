@@ -9,6 +9,20 @@ A driver kind identifies an integration; an instance identifies one configuratio
 lifecycle. Route work by instance, so two accounts using the same driver do not share mutable
 session or catalog state.
 
+## Driver kinds without a legacy settings field
+
+Adding a driver that has no `providers.<kind>` field in `ServerSettings` requires declaring its
+kind in
+[`BUILT_IN_PROVIDER_DRIVER_KINDS`](../../packages/contracts/src/model.ts) alongside
+[`BUILT_IN_DRIVERS`](../../apps/server/src/provider/builtInDrivers.ts).
+[ProviderInstanceRegistryHydration](../../apps/server/src/provider/Layers/ProviderInstanceRegistryHydration.ts)
+materializes a default-enabled instance for every kind the build ships, so settings-level guards
+(`isModelSelectionProviderEnabled`) must read "no `providerInstances` record" for those kinds as
+enabled. A kind that is missing from the declaration is read as disabled instead, and every read
+of the environment's settings silently rewrites the user's model selection to the fallback
+provider — the selection is persisted but never served, so the UI snaps back and the model looks
+unchangeable. Only an explicit `providerInstances.<id>.enabled` disables such a driver.
+
 ## Process and account isolation
 
 T3-managed OpenCode chat uses one server per thread. Its MCP registrations are directory-scoped, while
