@@ -79,10 +79,21 @@ export const make = Effect.gen(function* () {
             }).displayName,
             execTarget: process.env.APPIMAGE?.trim() || process.execPath,
             scheme: ElectronProtocol.getDesktopScheme(linux.isDevelopment),
+            wmClass: linux.linuxWmClass,
             isDevelopment: linux.isDevelopment,
             isPackaged: Electron.app.isPackaged,
           }),
           "utf8",
+        );
+        // Builds before the identity moved to the window class left a
+        // reverse-DNS entry behind. It cannot claim the window any more, and
+        // leaving it adds a second, dead T3 Code launcher to the app menu.
+        NodeFS.rmSync(
+          NodePath.posix.join(
+            applicationsDir,
+            DesktopEarlyElectronStartup.resolveLegacyLinuxDesktopEntryName(linux.isDevelopment),
+          ),
+          { force: true },
         );
       } catch {
         // The URL handler retries with the full environment and logs failures.

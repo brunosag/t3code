@@ -95,9 +95,9 @@ Source in `apps/desktop/gnome-extension`, UUID `snap-shot@t3.codes`. GNOME only 
 installed extension at login, so setup distinguishes "installed, needs logout" from "discovered but
 disabled" and compares loaded and installed versions.
 
-The extension trusts callers that own `com.t3tools.T3Code.SnapShot` (or the `.Development`
-variant) on the same connection. This is GNOME's trusted-session-client pattern, not authentication
-against a hostile process on the user's bus.
+The extension trusts callers that own `t3code.SnapShot` (or the `t3code-dev` variant) on the same
+connection. This is GNOME's trusted-session-client pattern, not authentication against a hostile
+process on the user's bus.
 
 Electron does not position overlay windows on Wayland, so the flash and flight run as Shell actors
 inside the extension with coordinates relative to T3's content area. Electron 44's restored-session

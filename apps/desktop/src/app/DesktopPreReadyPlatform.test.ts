@@ -13,6 +13,7 @@ const {
   setDesktopNameMock,
   mkdirSyncMock,
   writeFileSyncMock,
+  rmSyncMock,
 } = vi.hoisted(() => ({
   appendSwitchMock: vi.fn(),
   getSwitchValueMock: vi.fn(),
@@ -21,6 +22,7 @@ const {
   setDesktopNameMock: vi.fn(),
   mkdirSyncMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
+  rmSyncMock: vi.fn(),
 }));
 
 vi.mock("electron", () => ({
@@ -43,6 +45,7 @@ vi.mock("node:fs", () => ({
   readFileSync: () => "{}",
   mkdirSync: mkdirSyncMock,
   writeFileSync: writeFileSyncMock,
+  rmSync: rmSyncMock,
 }));
 
 import * as DesktopPreReadyPlatform from "./DesktopPreReadyPlatform.ts";
@@ -56,6 +59,7 @@ describe("DesktopPreReadyPlatform", () => {
     setDesktopNameMock.mockReset();
     mkdirSyncMock.mockReset();
     writeFileSyncMock.mockReset();
+    rmSyncMock.mockReset();
   });
 
   it.effect("preserves an explicit Linux password-store switch", () => {
@@ -90,7 +94,7 @@ describe("DesktopPreReadyPlatform", () => {
           desktopName = name;
         });
         writeFileSyncMock.mockImplementation((path: string, contents: string) => {
-          if (path === "/xdg/applications/com.t3tools.T3Code.desktop") desktopEntry = contents;
+          if (path === "/xdg/applications/t3code.desktop") desktopEntry = contents;
         });
 
         return Effect.scoped(
@@ -102,14 +106,26 @@ describe("DesktopPreReadyPlatform", () => {
               ),
             );
             const identity = yield* Effect.promise(() => portalIdentity);
-            assert.equal(identity.desktopName, "com.t3tools.T3Code.desktop");
+            assert.equal(identity.desktopName, "t3code.desktop");
             assert.include(identity.desktopEntry ?? "", 'Exec="/Applications/current.AppImage" %U');
             assert.include(identity.desktopEntry ?? "", "Name=T3 Code (Alpha)");
             // Packaged runs pre-write the launcher entry users pin, not just a
             // hidden URL handler.
             assert.include(identity.desktopEntry ?? "", "Icon=t3code");
+            // KDE matches StartupWMClass before desktop entry names, and prefers
+            // the entry named after the class, so the app's own entry owns the
+            // window rather than an integration copy of the same AppImage.
+            assert.include(identity.desktopEntry ?? "", "StartupWMClass=t3code");
             assert.notInclude(identity.desktopEntry ?? "", "NoDisplay=true");
             assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/t3code;");
+            assert.deepEqual(rmSyncMock.mock.calls, [
+              [
+                "/xdg/applications/com.t3tools.T3Code.desktop",
+                {
+                  force: true,
+                },
+              ],
+            ]);
           }),
         ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
       },

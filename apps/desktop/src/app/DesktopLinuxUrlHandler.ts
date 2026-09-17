@@ -23,11 +23,11 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 //
 // That entry is also the app's identity: the window reaches the compositor with
 // this desktop entry name as its app id, and desktops associate a window with a
-// launcher by that id alone (Plasma resolves it through the window's desktop
-// file name, GNOME through the app id). An integration copy or a hand-written
-// launcher can therefore never claim the window, which leaves the entry we write
-// as the only one users can pin — so packaged builds write a full launcher
-// entry, and a StartupWMClass in packaging cannot substitute for one.
+// launcher by that id. KDE is stricter still — it matches StartupWMClass against
+// the window's class and app id *before* it looks at desktop entry names — so the
+// entry declares the class the window carries and is named after it. That
+// combination beats integration copies of the AppImage and hand-written
+// launchers, leaving this entry as the only one users should have to pin.
 const { logInfo, logWarning } = makeComponentLogger("desktop-linux-url-handler");
 
 export class DesktopLinuxUrlHandlerRegistrationError extends Schema.TaggedError<DesktopLinuxUrlHandlerRegistrationError>()(
@@ -78,12 +78,15 @@ const LAUNCHER_ICON_NAME = "t3code";
  * Renders the app's Linux desktop entry. A packaged app is the only one whose
  * Exec can point at itself, so everyone else writes a hidden URL handler: a
  * development Exec target is the dev Electron binary, which is not a launcher
- * worth offering in the app menu.
+ * worth offering in the app menu. `wmClass` must match the desktop entry name
+ * minus `.desktop`: KDE compares StartupWMClass against the window's app id,
+ * which is exactly that name, and prefers the entry named after the class.
  */
 export function renderLinuxDesktopEntry(input: {
   readonly displayName: string;
   readonly execTarget: string;
   readonly scheme: string;
+  readonly wmClass: string;
   readonly isDevelopment: boolean;
   readonly isPackaged: boolean;
 }): string {
@@ -95,6 +98,7 @@ export function renderLinuxDesktopEntry(input: {
     `Exec=${escapeDesktopEntryExecArgument(input.execTarget)} %U`,
     "Terminal=false",
     "StartupNotify=false",
+    `StartupWMClass=${escapeDesktopEntryString(input.wmClass)}`,
     ...(isLauncher
       ? [`Icon=${LAUNCHER_ICON_NAME}`, "Categories=Development;"]
       : ["NoDisplay=true"]),
@@ -130,6 +134,7 @@ export const make = Effect.gen(function* () {
       displayName: environment.displayName,
       execTarget,
       scheme,
+      wmClass: environment.linuxWmClass,
       isDevelopment: environment.isDevelopment,
       isPackaged: environment.isPackaged,
     });

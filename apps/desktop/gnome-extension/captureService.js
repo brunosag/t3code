@@ -1,8 +1,5 @@
 // This policy is independent of Shell so lifecycle and authorization can be tested without a desktop.
-export const CLIENT_NAMES = [
-  "com.t3tools.T3Code.SnapShot",
-  "com.t3tools.T3Code.Development.SnapShot",
-];
+export const CLIENT_NAMES = ["t3code.SnapShot", "t3code-dev.SnapShot"];
 
 export function isWaylandSession(meta) {
   // GNOME 50 removed the X11 compositor and this API. GNOME 45–49 still need the check.

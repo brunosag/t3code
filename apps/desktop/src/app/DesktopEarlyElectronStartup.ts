@@ -31,7 +31,23 @@ export interface EarlyLinuxElectronOptions {
   readonly passwordStore: LinuxPasswordStoreSwitch | null;
 }
 
+// The window class toolkits report for the app: Electron passes it as --class,
+// KDE matches StartupWMClass against it before anything else, and packaging
+// names the hicolor icons after it.
+export const resolveLinuxWmClass = (isDevelopment: boolean): string =>
+  isDevelopment ? "t3code-dev" : "t3code";
+
+// The entry is named after the window class because that is the only name KDE
+// and GNOME reliably associate a window with. KDE prefers an entry whose menu id
+// starts with the matched class, so t3code.desktop beats integration copies of
+// the AppImage (appimagekit_<hash>-….desktop) as well as any hand-written
+// launcher declaring the same class.
 export const resolveLinuxDesktopEntryName = (isDevelopment: boolean): string =>
+  `${resolveLinuxWmClass(isDevelopment)}.desktop`;
+
+// Entries written before the identity moved from the reverse-DNS id to the
+// window class. They can no longer claim a window, so the app removes them.
+export const resolveLegacyLinuxDesktopEntryName = (isDevelopment: boolean): string =>
   isDevelopment ? "com.t3tools.T3Code.Development.desktop" : "com.t3tools.T3Code.desktop";
 
 const trimNonEmpty = (value: string | undefined): string | null => {
@@ -88,7 +104,7 @@ export function resolveEarlyLinuxElectronOptions(
   const isDevelopment = isDevelopmentEnvironment(input.env);
   return {
     isDevelopment,
-    linuxWmClass: isDevelopment ? "t3code-dev" : "t3code",
+    linuxWmClass: resolveLinuxWmClass(isDevelopment),
     linuxDesktopEntryName: resolveLinuxDesktopEntryName(isDevelopment),
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,

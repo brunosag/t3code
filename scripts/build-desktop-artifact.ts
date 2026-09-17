@@ -2771,12 +2771,13 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         },
       ],
       desktop: {
-        entry: {
-          // The window reports its desktop entry name (com.t3tools.T3Code.desktop,
-          // written by the app itself) as its app id, so an integration tool's
-          // copy of this entry has to declare that class to be grouped with it.
-          StartupWMClass: "com.t3tools.T3Code",
-        },
+        // Deliberately no StartupWMClass. KDE resolves a window to an entry by
+        // matching StartupWMClass in the window's class and app id before it
+        // falls back to the desktop entry name, so a class claim here would hand
+        // integration copies of this entry the window and leave the entry the app
+        // itself writes (and users pin) unable to claim it. The app's own entry
+        // carries the class and is named after it.
+        entry: {},
       },
     };
   }
