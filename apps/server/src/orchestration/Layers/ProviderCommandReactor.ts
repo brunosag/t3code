@@ -1734,6 +1734,43 @@ const make = Effect.gen(function* () {
       );
   });
 
+  /**
+   * Deliver answers to a question whose provider callback cannot receive them:
+   * the session that was waiting is gone, or the callback died with its process.
+   * The questions and answers are ours, so the answers become a user message and
+   * a new turn instead of a failure the user has to retype.
+   */
+  const deliverUserInputAnswersAsMessage = Effect.fn("deliverUserInputAnswersAsMessage")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.user-input-response-requested" }>,
+  ) {
+    yield* orchestrationEngine
+      .dispatch({
+        type: "thread.user-input.respond",
+        commandId: yield* serverCommandId("user-input-deliver-as-message"),
+        threadId: event.payload.threadId,
+        requestId: event.payload.requestId,
+        answers: event.payload.answers,
+        ...(event.payload.attachmentsByQuestionId
+          ? { attachmentsByQuestionId: event.payload.attachmentsByQuestionId }
+          : {}),
+        deliverAsMessage: true,
+        createdAt: event.payload.createdAt,
+      })
+      .pipe(
+        Effect.catchCause((dispatchCause) =>
+          appendProviderFailureActivity({
+            threadId: event.payload.threadId,
+            kind: "provider.user-input.respond.failed",
+            summary: "Provider user input response failed",
+            detail: Cause.pretty(dispatchCause),
+            turnId: null,
+            createdAt: event.payload.createdAt,
+            requestId: event.payload.requestId,
+          }),
+        ),
+      );
+  });
+
   const processUserInputResponseRequested = Effect.fn("processUserInputResponseRequested")(
     function* (
       event: Extract<ProviderIntentEvent, { type: "thread.user-input-response-requested" }>,
@@ -1744,15 +1781,9 @@ const make = Effect.gen(function* () {
       }
       const hasSession = thread.session && thread.session.status !== "stopped";
       if (!hasSession) {
-        return yield* appendProviderFailureActivity({
-          threadId: event.payload.threadId,
-          kind: "provider.user-input.respond.failed",
-          summary: "Provider user input response failed",
-          detail: "No active provider session is bound to this thread.",
-          turnId: null,
-          createdAt: event.payload.createdAt,
-          requestId: event.payload.requestId,
-        });
+        // Nothing is listening for a callback reply, but the thread still exists
+        // and the user just answered: deliver the answers as a message.
+        return yield* deliverUserInputAnswersAsMessage(event);
       }
 
       yield* providerService
@@ -1780,37 +1811,8 @@ const make = Effect.gen(function* () {
               });
             }
             // The callback died with its provider process, so nobody is waiting
-            // for this reply. Deliver the answers as a message instead of
-            // discarding a question the user just answered; the retry only
-            // records the answer, it never calls the provider again.
-            return Effect.gen(function* () {
-              yield* orchestrationEngine
-                .dispatch({
-                  type: "thread.user-input.respond",
-                  commandId: yield* serverCommandId("user-input-deliver-as-message"),
-                  threadId: event.payload.threadId,
-                  requestId: event.payload.requestId,
-                  answers: event.payload.answers,
-                  ...(event.payload.attachmentsByQuestionId
-                    ? { attachmentsByQuestionId: event.payload.attachmentsByQuestionId }
-                    : {}),
-                  deliverAsMessage: true,
-                  createdAt: event.payload.createdAt,
-                })
-                .pipe(
-                  Effect.catchCause((dispatchCause) =>
-                    appendProviderFailureActivity({
-                      threadId: event.payload.threadId,
-                      kind: "provider.user-input.respond.failed",
-                      summary: "Provider user input response failed",
-                      detail: Cause.pretty(dispatchCause),
-                      turnId: null,
-                      createdAt: event.payload.createdAt,
-                      requestId: event.payload.requestId,
-                    }),
-                  ),
-                );
-            });
+            // for this reply; the answers are still worth keeping.
+            return deliverUserInputAnswersAsMessage(event);
           }),
         );
     },

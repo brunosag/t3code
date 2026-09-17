@@ -131,6 +131,7 @@ describe("DesktopLinuxUrlHandler", () => {
     assert.include(entry, "StartupWMClass=t3code");
     assert.include(entry, "Icon=t3code");
     assert.include(entry, "Categories=Development;");
+    assert.include(entry, "StartupNotify=true");
     assert.notInclude(entry, "NoDisplay=true");
     assert.include(entry, "MimeType=x-scheme-handler/t3code;");
   });
@@ -151,6 +152,7 @@ describe("DesktopLinuxUrlHandler", () => {
       });
 
       assert.include(entry, "NoDisplay=true");
+      assert.include(entry, "StartupNotify=false");
       assert.include(entry, "StartupWMClass=t3code-dev");
       assert.notInclude(entry, "Icon=");
       assert.notInclude(entry, "Categories=");

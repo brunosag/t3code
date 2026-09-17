@@ -883,7 +883,11 @@ export const make = (options?: StartupOptions) =>
       yield* runStartupPhase("provider-sessions.reconcile", reconcileProviderSessions);
 
       yield* Effect.logDebug("startup phase: syncing clean projects");
-      yield* runStartupPhase("projects.auto-pull", syncAutoPullProjects);
+      // Automatic pulls are a background convenience, and `statusDetails` runs a
+      // `git fetch` per project — seconds of network work that nothing after
+      // this point consumes. Park it like the welcome and heartbeat phases so it
+      // cannot hold the listener and the command gate behind it.
+      yield* forkParked(runStartupPhase("projects.auto-pull", syncAutoPullProjects));
 
       const welcomeBase = yield* resolveWelcomeBase;
       const environment = yield* serverEnvironment.getDescriptor;

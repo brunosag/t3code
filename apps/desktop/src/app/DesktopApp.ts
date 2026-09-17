@@ -300,7 +300,9 @@ const startup = Effect.gen(function* () {
   yield* applicationMenu.configure;
   yield* updates.configure;
   yield* DesktopRemoteUpdates.listen;
-  yield* linuxUrlHandler.register;
+  // The pre-ready pass already wrote the entry, so registering the scheme default
+  // only spawns `xdg-mime`. Let it overlap the backend boot rather than delay it.
+  yield* Effect.forkScoped(linuxUrlHandler.register);
   yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
 }).pipe(Effect.withSpan("desktop.startup"));
 

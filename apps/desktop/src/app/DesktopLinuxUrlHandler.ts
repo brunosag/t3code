@@ -97,11 +97,14 @@ export function renderLinuxDesktopEntry(input: {
     `Name=${escapeDesktopEntryString(input.displayName)}`,
     `Exec=${escapeDesktopEntryExecArgument(input.execTarget)} %U`,
     "Terminal=false",
-    "StartupNotify=false",
     `StartupWMClass=${escapeDesktopEntryString(input.wmClass)}`,
     ...(isLauncher
-      ? [`Icon=${LAUNCHER_ICON_NAME}`, "Categories=Development;"]
-      : ["NoDisplay=true"]),
+      ? // A launcher entry asks for the busy state the dock shows while the
+        // backend boots, which is several seconds of otherwise invisible work.
+        ["StartupNotify=true", `Icon=${LAUNCHER_ICON_NAME}`, "Categories=Development;"]
+      : // The hidden handler entry only resolves a scheme; it must never ask a
+        // launcher to show a starting state.
+        ["StartupNotify=false", "NoDisplay=true"]),
     `MimeType=x-scheme-handler/${input.scheme};`,
     "",
   ].join("\n");
