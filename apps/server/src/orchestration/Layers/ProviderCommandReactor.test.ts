@@ -4025,7 +4025,7 @@ describe("ProviderCommandReactor", () => {
     expect(resolvedActivity).toBeUndefined();
   });
 
-  it("surfaces non-resumable provider user-input callbacks as stale failures", async () => {
+  it("delivers a non-resumable provider user-input callback's answers as a message", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
     harness.respondToUserInput.mockImplementation(() =>
@@ -4105,9 +4105,14 @@ describe("ProviderCommandReactor", () => {
     await waitFor(async () => {
       const readModel = await harness.readModel();
       const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      if (!thread) return false;
-      return thread.activities.some(
-        (activity) => activity.kind === "provider.user-input.respond.failed",
+      return (
+        thread?.activities.some(
+          (activity) =>
+            activity.kind === "user-input.resolved" &&
+            typeof activity.payload === "object" &&
+            activity.payload !== null &&
+            (activity.payload as Record<string, unknown>).requestId === "user-input-request-1",
+        ) ?? false
       );
     });
 
@@ -4115,14 +4120,11 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread).toBeDefined();
 
-    const failureActivity = thread?.activities.find(
-      (activity) => activity.kind === "provider.user-input.respond.failed",
-    );
-    expect(failureActivity).toBeDefined();
-    expect(failureActivity?.payload).toMatchObject({
-      requestId: "user-input-request-1",
-      detail: expect.stringContaining("Stale pending user-input request: user-input-request-1"),
-    });
+    // A callback nobody is waiting on no longer surfaces as a failure that drops
+    // the answer: the answers are delivered to the agent as a message instead.
+    expect(
+      thread?.activities.some((activity) => activity.kind === "provider.user-input.respond.failed"),
+    ).toBe(false);
 
     const resolvedActivity = thread?.activities.find(
       (activity) =>
@@ -4131,7 +4133,128 @@ describe("ProviderCommandReactor", () => {
         activity.payload !== null &&
         (activity.payload as Record<string, unknown>).requestId === "user-input-request-1",
     );
-    expect(resolvedActivity).toBeUndefined();
+    expect(resolvedActivity).toBeDefined();
+    expect(
+      thread?.messages.some(
+        (message) => message.role === "user" && message.text.includes("workspace-write"),
+      ),
+    ).toBe(true);
+  });
+
+  it("delivers a dead provider user-input callback's answers as a message", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    // Pi reports a callback that outlived its process in its own words.
+    harness.respondToUserInput.mockImplementation(() =>
+      Effect.fail(
+        new ProviderAdapterRequestError({
+          provider: ProviderDriverKind.make("pi"),
+          method: "respondToUserInput",
+          detail: "Pi request is no longer pending.",
+        }),
+      ),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-for-dead-callback"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "running",
+          providerName: "pi",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("cmd-user-input-requested-dead-callback"),
+        threadId: ThreadId.make("thread-1"),
+        activity: {
+          id: EventId.make("activity-user-input-requested-dead-callback"),
+          tone: "info",
+          kind: "user-input.requested",
+          summary: "User input requested",
+          payload: {
+            requestId: "user-input-request-1",
+            questions: [
+              {
+                id: "sandbox_mode",
+                header: "Sandbox",
+                question: "Which mode should be used?",
+                options: [
+                  {
+                    label: "workspace-write",
+                    description: "Allow workspace writes only",
+                  },
+                ],
+              },
+            ],
+          },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.user-input.respond",
+        commandId: CommandId.make("cmd-user-input-respond-dead-callback"),
+        threadId: ThreadId.make("thread-1"),
+        requestId: asApprovalRequestId("user-input-request-1"),
+        answers: {
+          sandbox_mode: "workspace-write",
+        },
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+      return (
+        thread?.activities.some(
+          (activity) =>
+            activity.kind === "user-input.resolved" &&
+            typeof activity.payload === "object" &&
+            activity.payload !== null &&
+            (activity.payload as Record<string, unknown>).requestId === "user-input-request-1",
+        ) ?? false
+      );
+    });
+
+    const thread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === ThreadId.make("thread-1"),
+    );
+    expect(thread).toBeDefined();
+    // The answer is neither dropped nor turned into a user-visible failure.
+    expect(
+      thread?.activities.some((activity) => activity.kind === "provider.user-input.respond.failed"),
+    ).toBe(false);
+    expect(
+      thread?.activities.find(
+        (activity) =>
+          activity.kind === "user-input.resolved" &&
+          typeof activity.payload === "object" &&
+          activity.payload !== null &&
+          (activity.payload as Record<string, unknown>).requestId === "user-input-request-1",
+      ),
+    ).toBeDefined();
+    expect(
+      thread?.messages.some(
+        (message) => message.role === "user" && message.text.includes("workspace-write"),
+      ),
+    ).toBe(true);
   });
 
   effectIt.effect("stops a provider session without reading unrelated message bodies", () =>

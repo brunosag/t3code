@@ -289,6 +289,22 @@ function isUnknownPendingUserInputRequestError(cause: Cause.Cause<ProviderServic
   );
 }
 
+function isGoneUserInputCallbackError(cause: Cause.Cause<ProviderServiceError>): boolean {
+  if (isUnknownPendingUserInputRequestError(cause)) {
+    return true;
+  }
+  // Pi describes its callback state in its own words, and a callback cannot
+  // outlive the process that was waiting on it.
+  const detail = (
+    findProviderAdapterRequestError(cause)?.detail ?? Cause.pretty(cause)
+  ).toLowerCase();
+  return (
+    detail.includes("pi request is no longer pending") ||
+    (detail.includes("pi input request") && detail.includes("no longer pending")) ||
+    detail.includes("no live pi session for")
+  );
+}
+
 function stalePendingRequestDetail(
   requestKind: "approval" | "user-input",
   requestId: string,
@@ -1749,19 +1765,53 @@ const make = Effect.gen(function* () {
             : {}),
         })
         .pipe(
-          Effect.catchCause((cause) =>
-            appendProviderFailureActivity({
-              threadId: event.payload.threadId,
-              kind: "provider.user-input.respond.failed",
-              summary: "Provider user input response failed",
-              detail: isUnknownPendingUserInputRequestError(cause)
-                ? stalePendingRequestDetail("user-input", event.payload.requestId)
-                : Cause.pretty(cause),
-              turnId: null,
-              createdAt: event.payload.createdAt,
-              requestId: event.payload.requestId,
-            }),
-          ),
+          Effect.catchCause((cause) => {
+            if (!isGoneUserInputCallbackError(cause)) {
+              return appendProviderFailureActivity({
+                threadId: event.payload.threadId,
+                kind: "provider.user-input.respond.failed",
+                summary: "Provider user input response failed",
+                detail: isUnknownPendingUserInputRequestError(cause)
+                  ? stalePendingRequestDetail("user-input", event.payload.requestId)
+                  : Cause.pretty(cause),
+                turnId: null,
+                createdAt: event.payload.createdAt,
+                requestId: event.payload.requestId,
+              });
+            }
+            // The callback died with its provider process, so nobody is waiting
+            // for this reply. Deliver the answers as a message instead of
+            // discarding a question the user just answered; the retry only
+            // records the answer, it never calls the provider again.
+            return Effect.gen(function* () {
+              yield* orchestrationEngine
+                .dispatch({
+                  type: "thread.user-input.respond",
+                  commandId: yield* serverCommandId("user-input-deliver-as-message"),
+                  threadId: event.payload.threadId,
+                  requestId: event.payload.requestId,
+                  answers: event.payload.answers,
+                  ...(event.payload.attachmentsByQuestionId
+                    ? { attachmentsByQuestionId: event.payload.attachmentsByQuestionId }
+                    : {}),
+                  deliverAsMessage: true,
+                  createdAt: event.payload.createdAt,
+                })
+                .pipe(
+                  Effect.catchCause((dispatchCause) =>
+                    appendProviderFailureActivity({
+                      threadId: event.payload.threadId,
+                      kind: "provider.user-input.respond.failed",
+                      summary: "Provider user input response failed",
+                      detail: Cause.pretty(dispatchCause),
+                      turnId: null,
+                      createdAt: event.payload.createdAt,
+                      requestId: event.payload.requestId,
+                    }),
+                  ),
+                );
+            });
+          }),
         );
     },
   );

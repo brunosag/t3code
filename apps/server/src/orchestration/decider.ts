@@ -77,6 +77,16 @@ function isStaleRequestFailureDetail(payload: Record<string, unknown> | null): b
   );
 }
 
+// Message delivery needs text. Single-select questions answer with a string and
+// multi-select ones with a list; anything else is not an answer we can send.
+function formatPendingUserInputAnswer(answer: unknown): string | null {
+  if (typeof answer === "string") return answer;
+  if (Array.isArray(answer) && answer.every((entry) => typeof entry === "string")) {
+    return answer.join(", ");
+  }
+  return null;
+}
+
 // Scans the read model's activities, which the projector caps at the most
 // recent 500 plus pending async questions. Async questions remain actionable
 // while the agent works, so they must not expire with the activity window.
@@ -1444,6 +1454,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       const request = userInputActivity;
+      // Set by the server when the provider callback this request belongs to is
+      // gone: nobody is waiting on a reply, so the answers are delivered to the
+      // agent as a message rather than rejected.
+      const deliversAnswersAsMessage = command.deliverAsMessage === true;
       const attachments = Object.values(command.attachmentsByQuestionId ?? {}).flat();
       let questionTextById: Record<string, string> = {};
       if (attachments.length > 0) {
@@ -1473,23 +1487,39 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           }
         }
       }
-      if (
-        request &&
+      const requestIsMessageQuestion =
+        request !== undefined &&
         Predicate.isObject(request.payload) &&
-        request.payload.responseMode === "message"
-      ) {
+        request.payload.responseMode === "message";
+      if (request && (requestIsMessageQuestion || deliversAnswersAsMessage)) {
         const payload = decodeUserInputRequestedPayload(request.payload);
-        if (request.kind !== "user-input.requested" || Option.isNone(payload)) {
+        if (
+          request.kind !== "user-input.requested" ||
+          (Option.isNone(payload) && !deliversAnswersAsMessage)
+        ) {
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
             detail: "This question has already been answered.",
           });
         }
+        const questions = Option.isSome(payload) ? payload.value.questions : [];
         const replies: string[] = [];
-        for (const question of payload.value.questions) {
-          const answer = command.answers[question.id];
+        // A recovered callback can outlive its question payload; deliver the
+        // answers under their question ids instead of dropping them.
+        if (questions.length === 0 && deliversAnswersAsMessage) {
+          replies.push(
+            Object.entries(command.answers)
+              .map(
+                ([questionId, answer]) =>
+                  `${questionId}: ${formatPendingUserInputAnswer(answer) ?? String(answer)}`,
+              )
+              .join("\n"),
+          );
+        }
+        for (const question of questions) {
+          const answer = formatPendingUserInputAnswer(command.answers[question.id]);
           if (
-            typeof answer !== "string" ||
+            answer === null ||
             (answer.trim().length === 0 && !command.attachmentsByQuestionId?.[question.id]?.length)
           ) {
             return yield* new OrchestrationCommandInvariantError({
@@ -1524,7 +1554,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                 createdAt: command.createdAt,
                 payload: {
                   requestId: command.requestId,
-                  responseMode: "message",
+                  ...(requestIsMessageQuestion ? { responseMode: "message" as const } : {}),
                   answers: command.answers,
                   ...(command.attachmentsByQuestionId
                     ? { attachmentsByQuestionId: command.attachmentsByQuestionId }

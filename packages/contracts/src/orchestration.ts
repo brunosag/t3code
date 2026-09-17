@@ -1276,6 +1276,13 @@ const ThreadUserInputRespondCommand = Schema.Struct({
   requestId: ApprovalRequestId,
   answers: ProviderUserInputAnswers,
   attachmentsByQuestionId: Schema.optional(UserInputAttachments),
+  /**
+   * Delivers the answers to the agent as a user message instead of replying to
+   * the provider callback. The server sets this when the callback no longer
+   * exists (the app restarted, or the session was recovered without it), so an
+   * answer the user just gave is never dropped on the floor.
+   */
+  deliverAsMessage: Schema.optional(Schema.Boolean),
   createdAt: IsoDateTime,
 });
 
