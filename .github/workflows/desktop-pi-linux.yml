@@ -148,12 +148,19 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish prerelease
+      # Stage the release as a draft and publish it only after every asset is
+      # uploaded. electron-updater reads the manifest without checking that the
+      # AppImage it names exists, so a release that publishes the manifest and
+      # then loses its upload (a 188 MB asset upload that stalls until the HTTP
+      # client times out) leaves every client on the fork failing to download a
+      # version the feed still advertises.
+      - name: Stage prerelease draft
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: Pi fork ${{ steps.version.outputs.version }} (${{ steps.version.outputs.short_sha }})
+          draft: true
           prerelease: true
           make_latest: false
           files: |
@@ -161,6 +168,14 @@ jobs:
             release/nightly-linux.yml
           fail_on_unmatched_files: true
           token: ${{ github.token }}
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release edit "${{ steps.version.outputs.tag }}" \
+            --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
 
       # Keep the five most recent builds: enough to reinstall a known-good one by
       # hand, bounded so the fork's releases do not grow without limit. Only this
