@@ -884,6 +884,80 @@ describe("requiresDefaultBranchConfirmation", () => {
     assert.isFalse(requiresDefaultBranchConfirmation("commit_push", false));
     assert.isFalse(requiresDefaultBranchConfirmation("push", false));
   });
+
+  it("skips the prompt when the user disabled it", () => {
+    assert.isFalse(
+      requiresDefaultBranchConfirmation("commit_push", true, {
+        confirmPushToDefaultBranch: false,
+      }),
+    );
+    assert.isTrue(
+      requiresDefaultBranchConfirmation("commit_push", true, {
+        confirmPushToDefaultBranch: true,
+      }),
+    );
+  });
+});
+
+describe("changeRequestActionMode", () => {
+  it("manual leaves change request creation to the menu", () => {
+    const quick = resolveQuickAction(status({ hasWorkingTreeChanges: true }), false, false, true, {
+      changeRequestActionMode: "manual",
+    });
+    assert.deepInclude(quick, { kind: "run_action", action: "commit_push" });
+
+    const items = buildMenuItems(status({ hasWorkingTreeChanges: true }), false, true, {
+      changeRequestActionMode: "manual",
+    });
+    assert.deepInclude(
+      items.find((item) => item.id === "pr"),
+      {
+        kind: "open_dialog",
+        dialogAction: "create_pr",
+      },
+    );
+  });
+
+  it("off removes creation from the primary action and the menu", () => {
+    const quick = resolveQuickAction(status({ aheadCount: 1 }), false, false, true, {
+      changeRequestActionMode: "off",
+    });
+    assert.deepInclude(quick, { kind: "run_action", action: "push" });
+    assert.isFalse(
+      buildMenuItems(status({ aheadCount: 1 }), false, true, {
+        changeRequestActionMode: "off",
+      }).some((item) => item.id === "pr"),
+    );
+  });
+
+  it("off keeps an already-open change request viewable", () => {
+    const items = buildMenuItems(
+      status({
+        pr: {
+          number: 12,
+          title: "Existing PR",
+          url: "https://example.com/pr/12",
+          baseRef: "main",
+          headRef: "feature/test",
+          state: "open",
+        },
+      }),
+      false,
+      true,
+      { changeRequestActionMode: "off" },
+    );
+    assert.deepInclude(
+      items.find((item) => item.id === "pr"),
+      { kind: "open_pr" },
+    );
+  });
+
+  it("auto keeps change request creation in the primary action", () => {
+    const quick = resolveQuickAction(status({ hasWorkingTreeChanges: true }), false, false, true, {
+      changeRequestActionMode: "auto",
+    });
+    assert.deepInclude(quick, { action: "commit_push_pr" });
+  });
 });
 
 describe("resolveDefaultBranchActionDialogCopy", () => {

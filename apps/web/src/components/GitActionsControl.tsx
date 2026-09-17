@@ -1,9 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
-import { type ScopedThreadRef } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, type ScopedThreadRef } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import type { GitActionOptions } from "@t3tools/client-runtime/state/vcs";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import type {
   GitActionProgressEvent,
   GitRunStackedActionResult,
@@ -87,7 +89,7 @@ import {
   useVcsInitAction,
   useVcsPullAction,
 } from "~/lib/sourceControlActions";
-import { useThreadShell } from "~/state/entities";
+import { useServerConfigs, useThreadShell } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { serverEnvironment } from "~/state/server";
 import { sourceControlEnvironment } from "~/state/sourceControl";
@@ -951,6 +953,22 @@ export default function GitActionsControl({
         : null,
   );
   const activeServerThread = useThreadShell(activeThreadRef);
+  // Source-control behavior is a project setting, so this reads the same
+  // resolved value the settings UI writes rather than the environment default.
+  const serverConfigs = useServerConfigs();
+  const gitActionOptions = useMemo<GitActionOptions>(() => {
+    const environmentSettings = activeEnvironmentId
+      ? serverConfigs.get(activeEnvironmentId)?.settings
+      : undefined;
+    const resolved = resolveProjectSettings(
+      environmentSettings ?? DEFAULT_SERVER_SETTINGS,
+      activeServerThread?.projectId ?? null,
+    ).settings;
+    return {
+      changeRequestActionMode: resolved.changeRequestActionMode,
+      confirmPushToDefaultBranch: resolved.confirmPushToDefaultBranch,
+    };
+  }, [activeEnvironmentId, serverConfigs, activeServerThread?.projectId]);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const [isCommitDialogOpen, setIsCommitDialogOpen] = useState(false);
   const [dialogCommitMessage, setDialogCommitMessage] = useState("");
@@ -1105,13 +1123,20 @@ export default function GitActionsControl({
   }, [gitStatusForActions?.isDefaultRef]);
 
   const gitActionMenuItems = useMemo(
-    () => buildMenuItems(gitStatusForActions, isGitActionRunning, hasPrimaryRemote),
-    [gitStatusForActions, hasPrimaryRemote, isGitActionRunning],
+    () =>
+      buildMenuItems(gitStatusForActions, isGitActionRunning, hasPrimaryRemote, gitActionOptions),
+    [gitStatusForActions, hasPrimaryRemote, isGitActionRunning, gitActionOptions],
   );
   const quickAction = useMemo(
     () =>
-      resolveQuickAction(gitStatusForActions, isGitActionRunning, isDefaultRef, hasPrimaryRemote),
-    [gitStatusForActions, hasPrimaryRemote, isDefaultRef, isGitActionRunning],
+      resolveQuickAction(
+        gitStatusForActions,
+        isGitActionRunning,
+        isDefaultRef,
+        hasPrimaryRemote,
+        gitActionOptions,
+      ),
+    [gitStatusForActions, hasPrimaryRemote, isDefaultRef, isGitActionRunning, gitActionOptions],
   );
   const quickActionDisabledReason = quickAction.disabled
     ? (quickAction.hint ?? "This action is currently unavailable.")
@@ -1222,7 +1247,7 @@ export default function GitActionsControl({
         (action === "commit" || !!actionStatus?.hasWorkingTreeChanges || featureBranch);
       if (
         !skipDefaultBranchPrompt &&
-        requiresDefaultBranchConfirmation(action, actionIsDefaultBranch) &&
+        requiresDefaultBranchConfirmation(action, actionIsDefaultBranch, gitActionOptions) &&
         actionBranch
       ) {
         if (

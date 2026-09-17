@@ -1,6 +1,7 @@
 import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
+  type ChangeRequestActionMode,
   type ModelSelection,
   type ProviderInstanceId,
 } from "@t3tools/contracts";
@@ -41,6 +42,12 @@ import {
   useUpdateScopedSettings,
 } from "./useScopedSettings";
 
+const CHANGE_REQUEST_ACTION_MODE_LABELS: Record<ChangeRequestActionMode, string> = {
+  auto: "Automatically",
+  manual: "From the menu only",
+  off: "Never",
+};
+
 /**
  * Rows for the settings a project may override. The same rows edit
  * environment defaults at an environment scope and project overrides at a
@@ -74,6 +81,8 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
   const mixedBrowser = useScopedSettingsMixed(["enableAgentBrowserAccess"]);
   const mixedAutoPull = useScopedSettingsMixed(["defaultAutoPull"]);
   const mixedMergeMethod = useScopedSettingsMixed(["pullRequestMergeMethod"]);
+  const mixedChangeRequestMode = useScopedSettingsMixed(["changeRequestActionMode"]);
+  const mixedConfirmPushToDefaultBranch = useScopedSettingsMixed(["confirmPushToDefaultBranch"]);
   const modelSource = useScopedSettingSource(["defaultModelSelection"]);
   const workspaceSource = useScopedSettingSource(["defaultThreadEnvMode"]);
   const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
@@ -414,6 +423,94 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
                   <SelectItem value="rebase">{PULL_REQUEST_MERGE_METHOD_LABELS.rebase}</SelectItem>
                 </SelectPopup>
               </Select>
+            }
+          />
+          <SettingsRow
+            serverScoped
+            settingKeys={["changeRequestActionMode"]}
+            mixed={mixedChangeRequestMode}
+            {...searchableSetting("change-request-action-mode")}
+            description={
+              isProjectScope
+                ? "Whether this project's commit & push action also opens a pull request."
+                : "Whether the commit & push action also opens a pull request. From the menu only keeps Create pull request available without choosing it for you."
+            }
+            resetAction={
+              settings.changeRequestActionMode !==
+              DEFAULT_SERVER_SETTINGS.changeRequestActionMode ? (
+                <SettingResetButton
+                  label="default pull request behavior"
+                  tooltip="Reset to automatically"
+                  onClick={() =>
+                    updateSettings({
+                      changeRequestActionMode: DEFAULT_SERVER_SETTINGS.changeRequestActionMode,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={mixedChangeRequestMode ? null : settings.changeRequestActionMode}
+                onValueChange={(value) => {
+                  if (value === "auto" || value === "manual" || value === "off") {
+                    updateSettings({ changeRequestActionMode: value });
+                  }
+                }}
+              >
+                <SelectTrigger size="sm" aria-label="Create pull requests">
+                  <SelectValue>
+                    {(value: string | null) =>
+                      value === "auto" || value === "manual" || value === "off"
+                        ? CHANGE_REQUEST_ACTION_MODE_LABELS[value]
+                        : "Mixed"
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem value="auto">{CHANGE_REQUEST_ACTION_MODE_LABELS.auto}</SelectItem>
+                  <SelectItem value="manual">{CHANGE_REQUEST_ACTION_MODE_LABELS.manual}</SelectItem>
+                  <SelectItem value="off">{CHANGE_REQUEST_ACTION_MODE_LABELS.off}</SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+          <SettingsRow
+            serverScoped
+            settingKeys={["confirmPushToDefaultBranch"]}
+            mixed={mixedConfirmPushToDefaultBranch}
+            {...searchableSetting("confirm-push-to-default-branch")}
+            description={
+              isProjectScope
+                ? "Ask before pushing when this project's current branch is the repository default."
+                : "Ask before pushing when the current branch is the repository default. Turn off to push directly."
+            }
+            resetAction={
+              settings.confirmPushToDefaultBranch !==
+              DEFAULT_SERVER_SETTINGS.confirmPushToDefaultBranch ? (
+                <SettingResetButton
+                  label="default branch push confirmation"
+                  tooltip="Reset to asking first"
+                  onClick={() =>
+                    updateSettings({
+                      confirmPushToDefaultBranch:
+                        DEFAULT_SERVER_SETTINGS.confirmPushToDefaultBranch,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                aria-label="Confirm pushes to the default branch"
+                mixed={mixedConfirmPushToDefaultBranch}
+                checked={
+                  mixedConfirmPushToDefaultBranch ? false : settings.confirmPushToDefaultBranch
+                }
+                onCheckedChange={(enabled) =>
+                  updateSettings({ confirmPushToDefaultBranch: enabled })
+                }
+              />
             }
           />
         </>

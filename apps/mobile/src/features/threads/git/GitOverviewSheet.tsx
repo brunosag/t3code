@@ -1,14 +1,17 @@
 import {
+  type GitActionOptions,
   type GitActionRequestInput,
   buildMenuItems,
   getGitActionDisabledReason,
   requiresDefaultBranchConfirmation,
 } from "@t3tools/client-runtime/state/vcs";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   resolveThreadPullRequestChains,
   threadPullRequestKeyOf,
 } from "@t3tools/shared/threadPullRequests";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { DEFAULT_SERVER_SETTINGS, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
   CommonActions,
   StackActions,
@@ -28,6 +31,7 @@ import { AppText as Text } from "../../../components/AppText";
 import { nativeHeaderScrollEdgeEffects } from "../../../native/StackHeader";
 import { tryOpenExternalUrl } from "../../../lib/openExternalUrl";
 import { useEnvironmentQuery } from "../../../state/query";
+import { useEnvironmentServerConfig, useProject, useThreadShell } from "../../../state/entities";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
@@ -88,9 +92,27 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
   const hasPrimaryRemote = gitStatus.data?.hasPrimaryRemote ?? false;
   const isDefaultRef = gitStatus.data?.isDefaultRef ?? false;
 
+  // Source-control behavior is a project setting; mobile only reads it.
+  const serverConfig = useEnvironmentServerConfig(environmentId);
+  const threadShell = useThreadShell(scopeThreadRef(environmentId, threadId));
+  const threadProject = useProject(
+    threadShell === null ? null : scopeProjectRef(environmentId, threadShell.projectId),
+  );
+  const gitActionOptions = useMemo<GitActionOptions>(() => {
+    const resolved = resolveProjectSettings(
+      serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
+      threadProject?.id ?? null,
+      threadProject ?? undefined,
+    ).settings;
+    return {
+      changeRequestActionMode: resolved.changeRequestActionMode,
+      confirmPushToDefaultBranch: resolved.confirmPushToDefaultBranch,
+    };
+  }, [serverConfig, threadProject]);
+
   const menuItems = useMemo(
-    () => (isRepo ? buildMenuItems(gitStatus.data, busy, hasPrimaryRemote) : []),
-    [busy, gitStatus.data, hasPrimaryRemote, isRepo],
+    () => (isRepo ? buildMenuItems(gitStatus.data, busy, hasPrimaryRemote, gitActionOptions) : []),
+    [busy, gitStatus.data, hasPrimaryRemote, isRepo, gitActionOptions],
   );
 
   const sheetMenuItems = useMemo(
@@ -136,7 +158,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
         branchName &&
         confirmableAction &&
         !input.featureBranch &&
-        requiresDefaultBranchConfirmation(input.action, isDefaultRef)
+        requiresDefaultBranchConfirmation(input.action, isDefaultRef, gitActionOptions)
       ) {
         navigation.navigate("GitConfirm", {
           environmentId: String(environmentId),
@@ -155,7 +177,16 @@ export function GitOverviewSheet(props: GitOverviewSheetProps) {
       }
       await gitActions.onRunSelectedThreadGitAction(input);
     },
-    [environmentId, gitActions, gitStatus.data, isDefaultRef, isInspector, navigation, threadId],
+    [
+      environmentId,
+      gitActionOptions,
+      gitActions,
+      gitStatus.data,
+      isDefaultRef,
+      isInspector,
+      navigation,
+      threadId,
+    ],
   );
 
   const onPressMenuItem = useCallback(

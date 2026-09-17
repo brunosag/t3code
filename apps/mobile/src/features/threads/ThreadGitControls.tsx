@@ -1,4 +1,5 @@
 import {
+  DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   type GitRunStackedActionResult,
   type ProjectScript,
@@ -6,15 +7,19 @@ import {
   type VcsStatusResult,
 } from "@t3tools/contracts";
 import {
+  type GitActionOptions,
   type GitActionRequestInput,
   requiresDefaultBranchConfirmation,
   resolveQuickAction,
 } from "@t3tools/client-runtime/state/vcs";
+import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigation } from "@react-navigation/native";
 import { NativeHeaderToolbar } from "../../native/StackHeader";
 import { useCallback, useMemo } from "react";
 import { Alert } from "react-native";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
+import { useEnvironmentServerConfig, useProject, useThreadShell } from "../../state/entities";
 import {
   basename,
   getTerminalStatusLabel,
@@ -118,17 +123,40 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
   const isDefaultRef = gitStatus?.isDefaultRef ?? false;
 
+  // Source-control behavior is a project setting; mobile only reads it.
+  const scopedEnvironmentId = useMemo(
+    () => EnvironmentId.make(String(environmentId)),
+    [environmentId],
+  );
+  const scopedThreadId = useMemo(() => ThreadId.make(String(threadId)), [threadId]);
+  const serverConfig = useEnvironmentServerConfig(scopedEnvironmentId);
+  const threadShell = useThreadShell(scopeThreadRef(scopedEnvironmentId, scopedThreadId));
+  const threadProject = useProject(
+    threadShell === null ? null : scopeProjectRef(scopedEnvironmentId, threadShell.projectId),
+  );
+  const gitActionOptions = useMemo<GitActionOptions>(() => {
+    const resolved = resolveProjectSettings(
+      serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
+      threadProject?.id ?? null,
+      threadProject ?? undefined,
+    ).settings;
+    return {
+      changeRequestActionMode: resolved.changeRequestActionMode,
+      confirmPushToDefaultBranch: resolved.confirmPushToDefaultBranch,
+    };
+  }, [serverConfig, threadProject]);
+
   const quickAction = useMemo(
     () =>
       isRepo
-        ? resolveQuickAction(gitStatus, busy, isDefaultRef, hasPrimaryRemote)
+        ? resolveQuickAction(gitStatus, busy, isDefaultRef, hasPrimaryRemote, gitActionOptions)
         : {
             label: "Git unavailable",
             disabled: true,
             kind: "show_hint" as const,
             hint: "This workspace is not a git repository.",
           },
-    [busy, gitStatus, hasPrimaryRemote, isDefaultRef, isRepo],
+    [busy, gitStatus, hasPrimaryRemote, isDefaultRef, isRepo, gitActionOptions],
   );
 
   const quickActionHint = quickAction.disabled
@@ -171,7 +199,7 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
         branchName &&
         confirmableAction &&
         !input.featureBranch &&
-        requiresDefaultBranchConfirmation(input.action, isDefaultRef)
+        requiresDefaultBranchConfirmation(input.action, isDefaultRef, gitActionOptions)
       ) {
         navigation.navigate("GitConfirm", {
           environmentId: String(environmentId),
@@ -187,7 +215,7 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
 
       await onRunAction(input);
     },
-    [environmentId, gitStatus, isDefaultRef, onRunAction, navigation, threadId],
+    [environmentId, gitActionOptions, gitStatus, isDefaultRef, onRunAction, navigation, threadId],
   );
 
   const runQuickAction = useCallback(async () => {

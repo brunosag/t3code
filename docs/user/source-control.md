@@ -70,6 +70,11 @@ messages, review titles, and descriptions from your changes.
 Choose the writing style and model in **Settings → Source Control**. **Repository conventions**
 uses the project's instructions and recent commit subjects.
 
+The main Git action creates the pull request once a branch is ahead. Set **Create pull requests** to
+**From the menu only** to keep it as an explicit action, or **Never** to leave it out of Git
+actions entirely. Pushing to the repository's default branch asks for confirmation first; turn off
+**Confirm pushes to the default branch** to push directly.
+
 ## Review and merge
 
 Open **Pull requests** to review changes and comments, request reviewers, check out a branch,

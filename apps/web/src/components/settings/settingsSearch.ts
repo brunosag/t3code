@@ -550,6 +550,22 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["pull request merge squash rebase last selected"],
   },
   {
+    id: "change-request-action-mode",
+    title: "Create pull requests",
+    to: "/settings/source-control",
+    scope: "project-defaults",
+    searchTerms: [
+      "change request pull request merge request auto automatic never off menu only commit push",
+    ],
+  },
+  {
+    id: "confirm-push-to-default-branch",
+    title: "Confirm pushes to the default branch",
+    to: "/settings/source-control",
+    scope: "project-defaults",
+    searchTerms: ["default branch main master push prompt direct"],
+  },
+  {
     id: "source-control",
     title: "Source control",
     to: "/settings/source-control",

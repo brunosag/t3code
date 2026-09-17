@@ -3,6 +3,7 @@ import type {
   GitStackedAction,
   VcsStatusResult,
 } from "@t3tools/contracts";
+import type { GitActionOptions } from "@t3tools/client-runtime/state/vcs";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 import {
   DEFAULT_CHANGE_REQUEST_TERMINOLOGY,
@@ -42,6 +43,16 @@ export type DefaultBranchConfirmableAction =
   | "create_pr"
   | "commit_push"
   | "commit_push_pr";
+
+/** Whether the menu may offer an explicit create-change-request action. */
+function showsCreateChangeRequest(options: GitActionOptions): boolean {
+  return options.changeRequestActionMode !== "off";
+}
+
+/** Whether the primary action may pick change-request creation on its own. */
+function quickActionCreatesChangeRequest(options: GitActionOptions): boolean {
+  return (options.changeRequestActionMode ?? "auto") === "auto";
+}
 
 function resolveChangeRequestTerminology(
   gitStatus: VcsStatusResult | null,
@@ -95,6 +106,7 @@ export function buildMenuItems(
   gitStatus: VcsStatusResult | null,
   isBusy: boolean,
   hasPrimaryRemote = true,
+  options: GitActionOptions = {},
 ): GitActionMenuItem[] {
   if (!gitStatus) return [];
   const terminology = resolveChangeRequestTerminology(gitStatus);
@@ -135,7 +147,7 @@ export function buildMenuItems(
     return [commitItem];
   }
 
-  return [
+  const items: GitActionMenuItem[] = [
     commitItem,
     {
       id: "push",
@@ -162,6 +174,10 @@ export function buildMenuItems(
           dialogAction: "create_pr",
         },
   ];
+  // "off" hides creation, but an open change request stays viewable.
+  return items.filter(
+    (item) => !(item.id === "pr" && !hasOpenPr && !showsCreateChangeRequest(options)),
+  );
 }
 
 export function resolveQuickAction(
@@ -169,6 +185,7 @@ export function resolveQuickAction(
   isBusy: boolean,
   isDefaultRef = false,
   hasPrimaryRemote = true,
+  options: GitActionOptions = {},
 ): GitQuickAction {
   if (isBusy) {
     return { label: "Commit", disabled: true, kind: "show_hint", hint: "Git action in progress." };
@@ -206,6 +223,9 @@ export function resolveQuickAction(
       return { label: "Commit", disabled: false, kind: "run_action", action: "commit" };
     }
     if (hasOpenPr || isDefaultRef) {
+      return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
+    }
+    if (!quickActionCreatesChangeRequest(options)) {
       return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
     }
     return {
@@ -246,6 +266,9 @@ export function resolveQuickAction(
         action: isDefaultRef ? "commit_push" : "push",
       };
     }
+    if (!quickActionCreatesChangeRequest(options)) {
+      return { label: "Push", disabled: false, kind: "run_action", action: "push" };
+    }
     return {
       label: `Push & create ${terminology.shortLabel}`,
       disabled: false,
@@ -280,6 +303,9 @@ export function resolveQuickAction(
         action: isDefaultRef ? "commit_push" : "push",
       };
     }
+    if (!quickActionCreatesChangeRequest(options)) {
+      return { label: "Push", disabled: false, kind: "run_action", action: "push" };
+    }
     return {
       label: `Push & create ${terminology.shortLabel}`,
       disabled: false,
@@ -292,7 +318,7 @@ export function resolveQuickAction(
     return { label: `View ${terminology.shortLabel}`, disabled: false, kind: "open_pr" };
   }
 
-  if (hasDefaultBranchDelta && !isDefaultRef) {
+  if (hasDefaultBranchDelta && !isDefaultRef && quickActionCreatesChangeRequest(options)) {
     return {
       label: `Create ${terminology.shortLabel}`,
       disabled: false,
@@ -312,7 +338,9 @@ export function resolveQuickAction(
 export function requiresDefaultBranchConfirmation(
   action: GitStackedAction,
   isDefaultRef: boolean,
+  options: GitActionOptions = {},
 ): boolean {
+  if (options.confirmPushToDefaultBranch === false) return false;
   if (!isDefaultRef) return false;
   return (
     action === "push" ||

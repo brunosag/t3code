@@ -31,6 +31,12 @@ const WRITING_STYLE_LABELS: Record<string, string> = {
   custom: "Custom instructions",
 };
 
+const CHANGE_REQUEST_ACTION_MODE_LABELS: Record<string, string> = {
+  auto: "Automatically",
+  manual: "From the menu only",
+  off: "Never",
+};
+
 /** Human labels for the values the chain can show; falls back to a type summary. */
 function formatValue(key: keyof ServerSettings, value: unknown): string {
   if (value === null || value === undefined) {
@@ -58,6 +64,9 @@ function formatValue(key: keyof ServerSettings, value: unknown): string {
       return PULL_REQUEST_MERGE_METHOD_LABELS[
         value as keyof typeof PULL_REQUEST_MERGE_METHOD_LABELS
       ];
+    }
+    if (key === "changeRequestActionMode" && value in CHANGE_REQUEST_ACTION_MODE_LABELS) {
+      return CHANGE_REQUEST_ACTION_MODE_LABELS[value] ?? value;
     }
     return value === "" ? "Empty" : value;
   }
