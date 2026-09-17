@@ -154,6 +154,12 @@ jobs:
       # then loses its upload (a 188 MB asset upload that stalls until the HTTP
       # client times out) leaves every client on the fork failing to download a
       # version the feed still advertises.
+      #
+      # The action only creates the draft: it uploads each asset exactly once and
+      # fails the step on any error, and GitHub's asset storage does hand back
+      # 5xx. The same AppImage normally uploads in five seconds, but has taken
+      # twelve minutes and has failed outright with GitHub's bare "Error saving
+      # asset" / "Error uploading" body.
       - name: Stage prerelease draft
         uses: softprops/action-gh-release@v3
         with:
@@ -163,11 +169,32 @@ jobs:
           draft: true
           prerelease: true
           make_latest: false
-          files: |
-            release/*.AppImage
-            release/nightly-linux.yml
-          fail_on_unmatched_files: true
           token: ${{ github.token }}
+
+      # gh retries dropped connections and 5xx within a single upload and replays
+      # the body from disk, and --clobber deletes whatever asset GitHub recorded
+      # before its object store rejected the body, so a retry starts clean
+      # instead of failing on 422 already_exists. Nothing here is advertised
+      # until Publish release unsets the draft.
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if gh release upload "${{ steps.version.outputs.tag }}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber \
+              release/*.AppImage release/nightly-linux.yml; then
+              exit 0
+            fi
+            echo "::warning::release asset upload attempt $attempt failed"
+            if [ "$attempt" -lt 5 ]; then
+              sleep $((attempt * 15))
+            fi
+          done
+          echo "::error::release assets could not be uploaded after 5 attempts"
+          exit 1
 
       - name: Publish release
         env:
