@@ -237,6 +237,10 @@ jobs:
           "$RUNTIME/t3" --version
           printf '%s\n' "$VERSION" > "$RUNTIME/.install-complete"
 
+          # Captured before the switch: this is the version the launcher is
+          # running now, and therefore the rollback target retention keeps.
+          previous_active="$(sed -n 's/.*"activeVersion": *"\([^"]*\)".*/\1/p' "$BASE/runtime/service-state.json" | head -1)"
+
           node "$RUNTIME/node_modules/t3/dist/bin.mjs" service update --base-dir "$BASE" --allow-downgrade < /dev/null
 
           port="$(sed -n 's/^Environment=T3CODE_PORT=//p' "$HOME/.config/systemd/user/t3code.service.d/deployment.conf" 2>/dev/null | tail -1)"
@@ -255,32 +259,41 @@ jobs:
 
           node "$RUNTIME/node_modules/t3/dist/bin.mjs" service status --base-dir "$BASE"
 
-          # Retention: the active version plus the two most recently installed
-          # others. The previous versions are the rollback targets (`service
-          # update --allow-downgrade`), and the launcher refuses an update whose
-          # target runtime is missing, so at least one has to stay. Everything
-          # here runs only after the health check, and never touches userdata.
-          active="$(sed -n 's/.*"activeVersion": *"\([^"]*\)".*/\1/p' "$BASE/runtime/service-state.json" | head -1)"
-          active="${active:-$VERSION}"
+          # Retention: this version, the version that was active before the
+          # switch (the `service update --allow-downgrade` rollback target), and
+          # the two most recently installed complete runtimes. "Complete" is the
+          # test the launcher itself applies — the sentinel plus the t3 entry —
+          # so a husk left by an interrupted install is pruned instead of being
+          # kept as a rollback target it could never be. Everything here runs
+          # only after the health check, and never touches userdata.
+          runtime_complete() {
+            [ -x "$1/t3" ] && [ "$(cat "$1/.install-complete" 2>/dev/null)" = "$(basename "$1")" ]
+          }
           kept=("$VERSION")
-          if [ "$active" != "$VERSION" ]; then kept+=("$active"); fi
+          if [ -n "${previous_active:-}" ] && [ "$previous_active" != "$VERSION" ]; then
+            kept+=("$previous_active")
+          fi
 
           others=0
           mapfile -t installed < <(ls -1t "$BASE/runtime/versions")
           for candidate in "${installed[@]}"; do
             [ -n "$candidate" ] || continue
+            dir="$BASE/runtime/versions/$candidate"
             already=0
             for keep in "${kept[@]}"; do
               if [ "$candidate" = "$keep" ]; then already=1; fi
             done
-            if [ "$already" = 1 ]; then continue; fi
-            if [ "$others" -lt 2 ]; then
+            if [ "$already" = 1 ]; then
+              runtime_complete "$dir" || echo "warning: retained $candidate is not a complete runtime" >&2
+              continue
+            fi
+            if [ "$others" -lt 2 ] && runtime_complete "$dir"; then
               kept+=("$candidate")
               others=$((others + 1))
               continue
             fi
-            echo "pruning runtime/versions/$candidate ($(du -sh "$BASE/runtime/versions/$candidate" 2>/dev/null | cut -f1))"
-            rm -rf -- "$BASE/runtime/versions/$candidate"
+            echo "pruning runtime/versions/$candidate ($(du -sh "$dir" 2>/dev/null | cut -f1))"
+            rm -rf -- "$dir"
           done
 
           for tarball in "$BASE"/releases/t3-*.tgz; do
@@ -308,9 +321,11 @@ jobs:
           cat <<'HINT'
           A failed run leaves the previous version installed and active.
 
-          To roll back explicitly:
+          To roll back explicitly, use one of the retained versions that is
+          complete (its `t3` entry and .install-complete are present):
             ssh tutor-prod
             BASE="$HOME/local/t3-pi"
+            cat "$BASE/runtime/service-state.json"
             ls "$BASE/runtime/versions"
             node "$BASE/runtime/versions/<previous-version>/node_modules/t3/dist/bin.mjs" \
               service update --base-dir "$BASE" --allow-downgrade
