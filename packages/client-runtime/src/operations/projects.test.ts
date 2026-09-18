@@ -76,6 +76,13 @@ describe("add project shared logic", () => {
     ).toBe("git@github.com:imputnet/helium.git");
     expect(
       getDefaultCloneUrl({
+        provider: "forgejo",
+        url: "https://forgejo.example.test:8443/owner/repo.git",
+        sshUrl: "ssh://git@forgejo.example.test:2222/owner/repo.git",
+      }),
+    ).toBe("ssh://git@forgejo.example.test:2222/owner/repo.git");
+    expect(
+      getDefaultCloneUrl({
         provider: "gitlab",
         url: "https://gitlab.com/group/project.git",
         sshUrl: "git@gitlab.com:group/project.git",

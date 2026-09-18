@@ -1,12 +1,51 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import type { PullRequestReaction } from "@t3tools/contracts";
 
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import * as GitHubPullRequestCli from "./GitHubPullRequestCli.ts";
 import { gitHubViewerPermissions, loginAvatarUrl, make } from "./GitHubPullRequestProvider.ts";
 import type { GitHubReviewThreadComments } from "./gitHubPullRequestJson.ts";
+
+it.effect("maps credential verification failures without relabeling operation failures", () =>
+  Effect.gen(function* () {
+    let verificationFails = true;
+    let operations = 0;
+    const provider = yield* make.pipe(
+      Effect.provide(
+        Layer.mock(GitHubPullRequestCli.GitHubPullRequestCli)({
+          withVerifiedCredential: (_input, use) =>
+            verificationFails
+              ? Effect.fail(
+                  new GitHubPullRequestCli.GitHubViewerLoginUnavailableError({
+                    command: "gh",
+                    cwd: "/w",
+                  }),
+                )
+              : use({ accountId: "123", viewer: "viewer", credentialFingerprint: "fingerprint" }),
+        }),
+      ),
+    );
+    const verify = provider.withVerifiedCredential;
+    if (verify === undefined)
+      return yield* Effect.die("credential verification was not implemented");
+    const input = { cwd: "/w", host: "github.com" };
+    const operation = () =>
+      Effect.sync(() => {
+        operations++;
+      }).pipe(Effect.andThen(Effect.fail("operation-failed")));
+    expect(yield* verify(input, operation).pipe(Effect.flip)).toMatchObject({
+      _tag: "PullRequestProviderError",
+      operation: "routeIdentity",
+    });
+    expect(operations).toBe(0);
+    verificationFails = false;
+    expect(yield* verify(input, operation).pipe(Effect.flip)).toBe("operation-failed");
+    expect(operations).toBe(1);
+  }),
+);
 
 it.effect("uses one narrow read for a linked pull request summary", () =>
   Effect.gen(function* () {
@@ -215,6 +254,23 @@ describe("gitHubViewerPermissions", () => {
         description: "GitHub could not determine whether workflows are awaiting approval.",
         url: null,
       });
+      for (const fingerprint of ["broad", "restricted", "broad"]) {
+        const scoped = yield* provider
+          .getChangeRequest({
+            cwd: "/w",
+            repository: "acme/web",
+            host: "github.com",
+            number: 7,
+          })
+          .pipe(
+            Effect.provideService(GitHubCli.PinnedGitHubCredential, {
+              host: "github.com",
+              token: Redacted.make("credential"),
+              credentialFingerprint: fingerprint,
+            }),
+          );
+        expect(scoped.mergeCapabilities.squash).toBe(fingerprint !== "restricted");
+      }
     }).pipe(
       Effect.provide(
         Layer.mock(GitHubPullRequestCli.GitHubPullRequestCli)({
@@ -250,10 +306,16 @@ describe("gitHubViewerPermissions", () => {
               commits: [],
             }),
           getRepositoryAccess: () =>
-            Effect.succeed({
-              canWrite: false,
-              mergeCapabilities: { merge: true, squash: true, rebase: true },
-            }),
+            GitHubCli.PinnedGitHubCredential.pipe(
+              Effect.map((credential) => ({
+                canWrite: false,
+                mergeCapabilities: {
+                  merge: true,
+                  squash: credential?.credentialFingerprint !== "restricted",
+                  rebase: true,
+                },
+              })),
+            ),
           getViewerAccess: () =>
             Effect.succeed({
               canWrite: false,
@@ -513,6 +575,36 @@ it.effect("propagates workflow discovery rate limits", () =>
 );
 
 describe("getViewerPermissions", () => {
+  it.effect("checks fresh access without reading branch details for unrelated operations", () => {
+    let accessReads = 0;
+    return Effect.gen(function* () {
+      const provider = yield* make;
+      const permissions = yield* provider.getViewerPermissions({
+        cwd: "/w",
+        repository: "acme/web",
+        host: "github.com",
+        number: 7,
+        includeUpdateBranch: false,
+      });
+
+      expect(accessReads).toBe(1);
+      expect(permissions.actions).toContain("merge");
+      expect(permissions.actions).not.toContain("update-branch");
+    }).pipe(
+      Effect.provide(
+        Layer.mock(GitHubPullRequestCli.GitHubPullRequestCli)({
+          getPullRequestDetail: () => Effect.die("Unexpected detail read"),
+          getPullRequestBaseComparison: () => Effect.die("Unexpected comparison read"),
+          getViewerAccess: () =>
+            Effect.sync(() => {
+              accessReads++;
+              return { canWrite: true, canTriage: true, canUpdate: true, didAuthor: false };
+            }),
+        }),
+      ),
+    );
+  });
+
   const layerWithComparison = (
     comparison: Effect.Effect<{
       readonly behindBy: number | null;
@@ -649,6 +741,7 @@ describe("getChangeRequest commits", () => {
     reactionsById: new Map<string, ReadonlyArray<PullRequestReaction>>(),
     reviewers: [],
     avatarsByLogin: new Map<string, string>(),
+    botLogins: new Set<string>(),
     commitStats: new Map<string, { readonly additions: number; readonly deletions: number }>(),
     viewer: { canUpdate: true, didAuthor: false },
   };
@@ -715,7 +808,7 @@ describe("getChangeRequestActivity dismissed reviews", () => {
   const dismissedReview = (body: string) => ({
     id: "PRR_1",
     kind: "review" as const,
-    author: null,
+    author: { login: "macroscopeapp", name: null, avatarUrl: null },
     body,
     createdAt: "2026-07-03T00:00:00Z",
     url: null,
@@ -732,6 +825,7 @@ describe("getChangeRequestActivity dismissed reviews", () => {
     reactionsById: new Map(),
     reviewers: [],
     avatarsByLogin: new Map(),
+    botLogins: new Set(["macroscopeapp"]),
     commitStats: new Map(),
     commits: [],
     viewer: { canUpdate: true, didAuthor: false },
@@ -758,6 +852,7 @@ describe("getChangeRequestActivity dismissed reviews", () => {
     readActivity.pipe(
       Effect.map((activity) => {
         expect(activity.comments[0]?.body).toBe("Dismissing prior approval to re-evaluate 9b66581");
+        expect(activity.comments[0]?.author?.isBot).toBe(true);
       }),
       Effect.provide(layerFor("<!-- Macroscope (Approvability) review body marker -->")),
     ),
