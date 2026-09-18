@@ -149,7 +149,6 @@ type PendingInput =
 interface Session {
   client: Client;
   session: ProviderSession;
-  defaultModel?: typeof PiResumeCursor.Type.defaultModel;
   stopped: boolean;
   itemId?: RuntimeItemId | undefined;
   text: string;
@@ -235,7 +234,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         .levels;
     } catch (cause) {
       throw new Error(
-        `Pi did not report thinking levels for model '${ctx.session.model ?? "default"}' (${
+        `Pi did not report thinking levels for model '${ctx.session.model ?? "unknown"}' (${
           cause instanceof Error ? cause.message : String(cause)
         }).`,
         { cause },
@@ -251,7 +250,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       ctx.thinkingLevels = await readThinkingLevels(ctx);
     if (!ctx.thinkingLevels.includes(level.value))
       throw new Error(
-        `Pi model '${ctx.session.model ?? "default"}' does not support thinking level '${
+        `Pi model '${ctx.session.model ?? "unknown"}' does not support thinking level '${
           level.value
         }'.`,
       );
@@ -259,10 +258,9 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     await ctx.client.request("set_thinking_level", { level: level.value });
     ctx.thinkingLevel = level.value;
   };
-  const resumeCursorFor = (ctx: Session, sessionPath: string): typeof PiResumeCursor.Type => ({
+  const resumeCursorFor = (sessionPath: string): typeof PiResumeCursor.Type => ({
     version: 1,
     sessionPath,
-    ...(ctx.defaultModel ? { defaultModel: ctx.defaultModel } : {}),
   });
   // `fork` tears down and rebuilds Pi's runtime from the branch point, so the
   // session file, model, and thinking level T3 cached before it no longer hold.
@@ -272,7 +270,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       throw new Error("Pi must provide a persistent session file for T3 resume.");
     ctx.thinkingLevel = state.thinkingLevel;
     ctx.thinkingLevels = undefined;
-    const selection = piModelSelection(ctx.session.model ?? "default") ?? ctx.defaultModel;
+    const selection = ctx.session.model ? piModelSelection(ctx.session.model) : undefined;
     const model = state.model ?? undefined;
     if (
       selection &&
@@ -287,7 +285,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     ctx.session = {
       ...ctx.session,
       updatedAt: new Date().toISOString(),
-      resumeCursor: resumeCursorFor(ctx, state.sessionFile),
+      resumeCursor: resumeCursorFor(state.sessionFile),
     };
   };
   const resolveInput = (
@@ -667,16 +665,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               throw new Error("Pi must provide a persistent session file for T3 resume.");
             if (cursor && state.sessionFile !== cursor.sessionPath)
               throw new Error("Pi resumed a different session than requested.");
-            // Capture Pi's choice before any T3 override, retaining it across process resumes.
-            ctx.defaultModel =
-              cursor?.defaultModel ??
-              (state.model
-                ? { provider: state.model.provider, modelId: state.model.id }
-                : undefined);
             // Pi reports the level for the model it is currently on, before any T3 override.
             ctx.thinkingLevel = state.thinkingLevel;
-            const selection =
-              piModelSelection(input.modelSelection?.model ?? "default") ?? cursor?.defaultModel;
+            const requestedModel = input.modelSelection?.model;
+            const selection = requestedModel ? piModelSelection(requestedModel) : undefined;
             if (selection) {
               await ctx.client.request("set_model", selection);
               // Pi derives its own level for the new model, so the previous one no longer holds.
@@ -690,8 +682,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             ctx.session = {
               ...ctx.session,
               status: "ready",
-              model: input.modelSelection?.model ?? "default",
-              resumeCursor: resumeCursorFor(ctx, state.sessionFile),
+              ...(selection ? { model: requestedModel } : {}),
+              resumeCursor: resumeCursorFor(state.sessionFile),
             };
             if (ctx.stopped) throw new Error("Pi exited during initialization.");
             sessions.set(input.threadId, ctx);
@@ -742,14 +734,14 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             throw new Error("Pi requires a prompt or image.");
           const requestedModel = input.modelSelection?.model;
           if (requestedModel && requestedModel !== ctx.session.model) {
-            const selection = piModelSelection(requestedModel) ?? ctx.defaultModel;
-            if (!selection)
-              throw new Error("Pi did not report an initial model; cannot restore Pi default.");
-            await ctx.client.request("set_model", selection);
-            ctx.session = { ...ctx.session, model: requestedModel };
-            // Pi derives its own level for the new model, so the previous one no longer holds.
-            ctx.thinkingLevel = undefined;
-            ctx.thinkingLevels = undefined;
+            const selection = piModelSelection(requestedModel);
+            if (selection) {
+              await ctx.client.request("set_model", selection);
+              ctx.session = { ...ctx.session, model: requestedModel };
+              // Pi derives its own level for the new model, so the previous one no longer holds.
+              ctx.thinkingLevel = undefined;
+              ctx.thinkingLevels = undefined;
+            }
           }
           const reasoningEffort = getModelSelectionStringOptionValue(
             input.modelSelection,
@@ -789,7 +781,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             if (state.sessionFile)
               ctx.session = {
                 ...ctx.session,
-                resumeCursor: resumeCursorFor(ctx, state.sessionFile),
+                resumeCursor: resumeCursorFor(state.sessionFile),
               };
             if (!ctx.runStarted && !state.isStreaming && ctx.session.activeTurnId === turnId)
               finish(ctx);

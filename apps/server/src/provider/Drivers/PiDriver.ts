@@ -93,7 +93,7 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
         instanceId,
       });
       const changes = yield* PubSub.unbounded<ServerProvider>();
-      const base = (defaultCapabilities: ModelCapabilities | null = null): ServerProvider => ({
+      const base = (): ServerProvider => ({
         instanceId,
         driver: DRIVER,
         displayName: displayName ?? "Pi",
@@ -111,15 +111,7 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
         requiresNewThreadForModelChange: false,
         supportsTextGeneration: true,
         setup: { canAuthenticate: false, canInstall: false },
-        models: [
-          {
-            slug: "default",
-            name: "Pi default",
-            isDefault: true,
-            isCustom: false,
-            capabilities: defaultCapabilities,
-          },
-        ],
+        models: [],
         slashCommands: [],
         skills: [],
         message:
@@ -151,18 +143,14 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
             };
             signal.addEventListener("abort", abort, { once: true });
             try {
-              const state = decodePiState(await client.request("get_state"));
               const models = decodePiModels(await client.request("get_available_models"));
               const commands = decodePiCommands(await client.request("get_commands"));
-              // Pi reports thinking levels per model, so the catalog is built by
-              // asking Pi about each model instead of guessing from its name.
+              // Pi reports thinking levels per model, so the catalog asks Pi about
+              // each model instead of guessing from its name. Pi builds without
+              // thinking levels answer nothing here; the probe then stays off
+              // rather than spending a failed round trip on every model.
               const capabilities = new Map<string, ModelCapabilities | null>();
-              const defaultLevels = await readPiThinkingLevels(client);
-              if (defaultLevels !== null) {
-                capabilities.set(
-                  "default",
-                  mapPiThinkingCapabilities(defaultLevels, state.thinkingLevel),
-                );
+              if ((await readPiThinkingLevels(client)) !== null) {
                 for (const model of models.models) {
                   capabilities.set(
                     `${model.provider}/${model.id}`,
@@ -170,21 +158,17 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
                   );
                 }
               }
-              const defaultCapabilities = capabilities.get("default") ?? null;
               return {
-                ...base(defaultCapabilities),
+                ...base(),
                 installed: true,
                 status: "ready" as const,
-                models: [
-                  ...base(defaultCapabilities).models,
-                  ...models.models.map((model) => ({
-                    slug: `${model.provider}/${model.id}`,
-                    name: model.name || model.id,
-                    subProvider: model.provider,
-                    isCustom: false,
-                    capabilities: capabilities.get(`${model.provider}/${model.id}`) ?? null,
-                  })),
-                ],
+                models: models.models.map((model) => ({
+                  slug: `${model.provider}/${model.id}`,
+                  name: model.name || model.id,
+                  subProvider: model.provider,
+                  isCustom: false,
+                  capabilities: capabilities.get(`${model.provider}/${model.id}`) ?? null,
+                })),
                 slashCommands: commands.commands
                   .filter((command) => command.name.trim())
                   .map((command) => ({

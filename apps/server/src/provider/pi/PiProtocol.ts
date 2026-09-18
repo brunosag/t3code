@@ -72,7 +72,6 @@ export const PiCommands = Schema.Struct({
 export const PiResumeCursor = Schema.Struct({
   version: Schema.Literal(1),
   sessionPath: Schema.String.check(Schema.isMinLength(1)),
-  defaultModel: Schema.optional(Schema.Struct({ provider: Schema.String, modelId: Schema.String })),
 });
 export const PiMessage = Schema.Struct({
   role: Schema.String,
@@ -120,11 +119,14 @@ export const PiSideChannelMessage = Schema.Union([
 ]);
 export type PiSideChannelMessage = typeof PiSideChannelMessage.Type;
 
+// T3 selects Pi models as `provider/modelId`. The removed synthetic `default`
+// selection is tolerated so threads that still carry it keep running whatever
+// model Pi already has instead of failing their next turn.
 export function piModelSelection(model: string): { provider: string; modelId: string } | undefined {
   if (model === "default") return undefined;
   const separator = model.indexOf("/");
   if (separator <= 0 || separator === model.length - 1) {
-    throw new Error("Pi models must be selected as provider/modelId (or default).");
+    throw new Error("Pi models must be selected as provider/modelId.");
   }
   return { provider: model.slice(0, separator), modelId: model.slice(separator + 1) };
 }

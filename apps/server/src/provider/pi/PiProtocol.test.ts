@@ -9,7 +9,7 @@ import {
 } from "./PiProtocol.ts";
 
 describe("Pi protocol translation", () => {
-  it("leaves the runtime default unchanged and preserves slashes in explicit model IDs", () => {
+  it("tolerates the removed default selection and preserves slashes in explicit model IDs", () => {
     expect(piModelSelection("default")).toBeUndefined();
     expect(piModelSelection("custom/vendor/model")).toEqual({
       provider: "custom",
