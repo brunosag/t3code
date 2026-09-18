@@ -955,7 +955,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                         accessibilityLabel="Model and reasoning settings"
                         emphasized
                         iconNode={
-                          <ProviderIcon provider={currentModelOption?.providerDriver} size={16} />
+                          <ProviderIcon
+                            provider={currentModelOption?.providerDriver}
+                            size={16}
+                            vendor={currentModelOption?.vendor}
+                          />
                         }
                         label={currentModelOption?.label ?? currentModelSelection.model}
                         maxWidth="100%"

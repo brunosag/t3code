@@ -265,6 +265,41 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
     }),
   );
 
+  it.effect("tells clients a build with no releases of its own has no update path", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-environment-fork-release-test-",
+      });
+      const serverConfig = yield* makeServerConfig(baseDir);
+      yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });
+
+      const describeWith = (overrides: Partial<ServerConfig.ServerConfig["Service"]>) =>
+        Effect.gen(function* () {
+          const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+          return yield* serverEnvironment.getDescriptor;
+        }).pipe(
+          Effect.provide(
+            ServerEnvironment.layer.pipe(
+              Layer.provide(ServerSecretStore.layer),
+              Layer.provide(ServerConfig.layer({ ...serverConfig, ...overrides })),
+            ),
+          ),
+        );
+
+      // A build that publishes no server releases advertises the flag no
+      // matter which update path the launcher would otherwise offer: a client
+      // action here would fetch archives this build never publishes.
+      const web = yield* describeWith({ mode: "web" });
+      expect(web.capabilities.serverUpdateUnavailable).toBe(true);
+
+      // The desktop app publishes releases, so its server stays updatable.
+      const desktop = yield* describeWith({ mode: "desktop" });
+      expect(desktop.capabilities.serverSelfUpdate).toBe("desktop-managed");
+      expect(desktop.capabilities.serverUpdateUnavailable).toBeUndefined();
+    }),
+  );
+
   it.effect("structures persisted environment id filesystem failures", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

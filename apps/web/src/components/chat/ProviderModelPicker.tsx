@@ -17,8 +17,13 @@ import {
   ModelEsque,
   getTriggerDisplayModelLabel,
   getTriggerDisplayModelName,
+  resolveModelVendorIcon,
 } from "./providerIconUtils";
-import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
+import {
+  hasSoleProviderInstance,
+  shouldShowInstanceBadge,
+  type ProviderInstanceEntry,
+} from "../../providerInstances";
 import {
   ComposerControl,
   ComposerControlChevron,
@@ -95,6 +100,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     : triggerTitle;
   const showInstanceBadge =
     activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries);
+  const isSoleProviderInstance = useMemo(
+    () => hasSoleProviderInstance(props.instanceEntries),
+    [props.instanceEntries],
+  );
 
   const setIsMenuOpen = (open: boolean) => {
     props.onOpenChange?.(open);
@@ -172,6 +181,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     return {
       ...selection,
       entry,
+      vendorIcon: resolveModelVendorIcon(
+        model ?? { slug: selection.model },
+        isSoleProviderInstance,
+      ),
       label: model
         ? `${getTriggerDisplayModelName(model)}${model.isUnavailable ? " (Unavailable)" : ""}`
         : selection.model,
@@ -233,6 +246,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                       driverKind={selection.entry.driverKind}
                       displayName={selection.entry.displayName}
                       accentColor={selection.entry.accentColor}
+                      vendorIcon={selection.vendorIcon}
                       className="size-4 rounded-full bg-[var(--chat-composer-glass-surface,var(--background))] ring-2 ring-[var(--chat-composer-glass-surface,var(--background))]"
                       iconClassName="size-4"
                     />
@@ -249,6 +263,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               driverKind={activeEntry.driverKind}
               displayName={activeEntry.displayName}
               accentColor={activeEntry.accentColor}
+              vendorIcon={resolveModelVendorIcon(
+                selectedModel ?? { slug: props.model },
+                isSoleProviderInstance,
+              )}
               showBadge={showInstanceBadge}
               className="size-4"
               iconClassName={cn("size-4", props.activeProviderIconClassName)}

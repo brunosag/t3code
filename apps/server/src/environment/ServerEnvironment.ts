@@ -16,7 +16,10 @@ import * as Schema from "effect/Schema";
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { readAgentActivityPublishingActive } from "../cloud/config.ts";
-import { resolveServerSelfUpdateCapability } from "../cloud/selfUpdate.ts";
+import {
+  resolveServerSelfUpdateCapability,
+  SERVER_RELEASES_PUBLISHED,
+} from "../cloud/selfUpdate.ts";
 import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -243,6 +246,13 @@ export const make = Effect.gen(function* () {
       environmentIcon: true,
       projectCloneTracking: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),
+      // A desktop server is updated through its app, which does publish
+      // releases. Every other build here is a fork build that publishes none,
+      // so a client has no way to update it in place; see
+      // SERVER_RELEASES_PUBLISHED.
+      ...(serverConfig.mode === "desktop" || SERVER_RELEASES_PUBLISHED
+        ? {}
+        : { serverUpdateUnavailable: true }),
       ...(serverSelfUpdate === "boot-service" || desktopAppUpdate
         ? {
             serverSelfUpdateProgress: true,

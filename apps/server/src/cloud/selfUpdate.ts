@@ -37,6 +37,18 @@ import { isExactServiceVersion, SERVICE_LAUNCHER_PROTOCOL } from "./serviceProto
 
 const PREFLIGHT_TIMEOUT = Duration.seconds(30);
 
+/**
+ * Whether this build publishes server release artifacts of its own. The stock
+ * self-update downloads them from the release base URL; the fork publishes
+ * none, so the versions it installs (`<core>-pi.<sha>`) have no archives, and
+ * the manual fallback (`npx t3@<version>`) would install stock upstream t3
+ * over the Pi runtime. Servers built here therefore advertise
+ * `serverUpdateUnavailable` and clients offer no update affordance at all.
+ * Flip this when the fork publishes server releases and points its hosts at
+ * them with T3CODE_RELEASE_BASE_URL.
+ */
+export const SERVER_RELEASES_PUBLISHED = false;
+
 export function resolveServerSelfUpdateCapability(input: {
   readonly desktopManaged: boolean;
   readonly launcherManaged: boolean;

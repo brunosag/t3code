@@ -29,8 +29,9 @@ import {
   resolveProviderInstanceDisplayName,
   shouldShowInstanceBadge,
 } from "@t3tools/client-runtime/state/provider-instance-display";
+import { hasSoleProviderInstance } from "@t3tools/client-runtime/state/model-vendor";
 
-export { normalizeProviderAccentColor, shouldShowInstanceBadge };
+export { hasSoleProviderInstance, normalizeProviderAccentColor, shouldShowInstanceBadge };
 
 /**
  * Local-only placeholder used while a draft has no provider it can safely

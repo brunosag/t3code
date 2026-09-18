@@ -1,13 +1,23 @@
 import { ProviderDriverKind } from "@t3tools/contracts";
+import { type ModelVendor, resolveModelVendor } from "@t3tools/client-runtime/state/model-vendor";
 import {
   AntigravityIcon,
   ClaudeAI,
   CursorIcon,
+  DeepSeekIcon,
+  Gemini,
   GrokIcon,
   Icon,
+  MeituanIcon,
+  MetaIcon,
+  MiniMaxIcon,
+  MistralIcon,
+  MoonshotIcon,
   OpenAI,
   OpenCodeIcon,
   PiIcon,
+  QwenIcon,
+  XiaomiIcon,
 } from "../Icons";
 
 export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
@@ -19,6 +29,39 @@ export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>
   [ProviderDriverKind.make("antigravity")]: AntigravityIcon,
   [ProviderDriverKind.make("pi")]: PiIcon,
 };
+
+const VENDOR_ICON_BY_VENDOR: Partial<Record<ModelVendor, Icon>> = {
+  openai: OpenAI,
+  anthropic: ClaudeAI,
+  google: Gemini,
+  meta: MetaIcon,
+  xai: GrokIcon,
+  deepseek: DeepSeekIcon,
+  qwen: QwenIcon,
+  moonshot: MoonshotIcon,
+  minimax: MiniMaxIcon,
+  mistral: MistralIcon,
+  xiaomi: XiaomiIcon,
+  meituan: MeituanIcon,
+};
+
+/**
+ * Glyph to show in place of the provider glyph, or `undefined` to keep the
+ * provider glyph.
+ *
+ * When a single provider instance is configured, its mark repeats on every row
+ * and identifies nothing; the model's vendor is the useful signal instead. With
+ * several instances configured the provider mark is what tells them apart, so
+ * it always wins. Vendors without a glyph fall back the same way.
+ */
+export function resolveModelVendorIcon(
+  model: { readonly slug?: string | undefined; readonly name?: string | undefined } | null,
+  isSoleProviderInstance: boolean,
+): Icon | undefined {
+  if (!isSoleProviderInstance) return undefined;
+  const vendor = resolveModelVendor(model);
+  return vendor ? VENDOR_ICON_BY_VENDOR[vendor] : undefined;
+}
 
 export type ModelEsque = {
   slug: string;

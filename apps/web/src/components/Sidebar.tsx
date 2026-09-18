@@ -212,9 +212,11 @@ import {
 import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
-import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
+import { getTriggerDisplayModelLabel, resolveModelVendorIcon } from "./chat/providerIconUtils";
+import type { Icon } from "./Icons";
 import {
   deriveProviderEntriesByEnvironment,
+  hasSoleProviderInstance,
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from "../providerInstances";
@@ -318,6 +320,7 @@ function SidebarThreadTooltip({
   environmentMachine,
   providerEntry,
   showInstanceBadge,
+  vendorIcon,
   modelInstanceId,
   modelLabel,
   branchMismatch,
@@ -331,6 +334,7 @@ function SidebarThreadTooltip({
   environmentMachine: EnvironmentMachineKind;
   providerEntry: ProviderInstanceEntry | null;
   showInstanceBadge: boolean;
+  vendorIcon: Icon | undefined;
   modelInstanceId: string;
   modelLabel: string;
   branchMismatch: {
@@ -392,6 +396,7 @@ function SidebarThreadTooltip({
                   providerEntry?.displayName ?? thread.session?.providerName ?? modelInstanceId
                 }
                 accentColor={providerEntry?.accentColor}
+                vendorIcon={vendorIcon}
                 // Initials would swallow a size-3 glyph: accent dot, name in label.
                 showBadge={showInstanceBadge && providerEntry?.accentColor !== undefined}
                 badgeContent="none"
@@ -1203,6 +1208,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const modelLabel = selectedModel
     ? getTriggerDisplayModelLabel(selectedModel)
     : thread.modelSelection.model;
+  const vendorIcon = resolveModelVendorIcon(
+    selectedModel ?? { slug: thread.modelSelection.model },
+    hasSoleProviderInstance(props.providerEntryByInstanceId.values()),
+  );
 
   // The local environment is "this machine" and needs no marker; every other
   // one gets its machine glyph. With no local environment (the hosted app)
@@ -1219,6 +1228,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       environmentMachine={props.environmentMachine}
       providerEntry={providerEntry}
       showInstanceBadge={showInstanceBadge}
+      vendorIcon={vendorIcon}
       modelInstanceId={modelInstanceId}
       modelLabel={modelLabel}
       branchMismatch={branchMismatch}
@@ -1964,6 +1974,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                         modelInstanceId
                       }
                       accentColor={providerEntry?.accentColor}
+                      vendorIcon={vendorIcon}
                       showBadge={showInstanceBadge}
                       // Glyph dims, badge stays saturated; offset matches the composer trigger.
                       iconClassName="size-3.5 opacity-60"
@@ -2045,6 +2056,10 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   const modelLabel = selectedModel
     ? getTriggerDisplayModelLabel(selectedModel)
     : thread.modelSelection.model;
+  const vendorIcon = resolveModelVendorIcon(
+    selectedModel ?? { slug: thread.modelSelection.model },
+    hasSoleProviderInstance(props.providerEntryByInstanceId.values()),
+  );
   const runningTerminalIds = useThreadRunningTerminalIds({
     environmentId: thread.environmentId,
     threadId: thread.id,
@@ -2117,6 +2132,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
           environmentMachine={props.environmentMachine}
           providerEntry={providerEntry}
           showInstanceBadge={showInstanceBadge}
+          vendorIcon={vendorIcon}
           modelInstanceId={modelInstanceId}
           modelLabel={modelLabel}
           branchMismatch={branchMismatch}

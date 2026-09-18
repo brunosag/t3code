@@ -13,6 +13,7 @@ import {
   dismissServerUpdateFailure,
   dismissVersionMismatch,
   isServerUpdateFailureDismissed,
+  isServerUpdateUnavailable,
   isVersionMismatchDismissed,
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
@@ -227,5 +228,28 @@ describe("versionSkew", () => {
   it("matches version-drift guidance to the advertised update path", () => {
     expect(serverUpdateGuidance("respawn")).toBe("Update to stay in sync");
     expect(serverUpdateGuidance("desktop-managed")).toBe("Update the desktop app");
+  });
+
+  it("hides the update affordance for a build with no releases of its own", () => {
+    const descriptor = (serverUpdateUnavailable?: boolean) => ({
+      environment: {
+        environmentId: EnvironmentId.make("environment-fork"),
+        label: "tutor-prod",
+        platform: { os: "linux", arch: "x64" } as const,
+        serverVersion: "0.0.41-pi.b4afb578a",
+        capabilities: {
+          repositoryIdentity: true,
+          // The capability still names the launcher; it is the missing release
+          // channel that makes every client action wrong.
+          serverSelfUpdate: "boot-service" as const,
+          ...(serverUpdateUnavailable === undefined ? {} : { serverUpdateUnavailable }),
+        },
+      },
+    });
+
+    expect(isServerUpdateUnavailable(descriptor(true))).toBe(true);
+    expect(isServerUpdateUnavailable(descriptor())).toBe(false);
+    expect(isServerUpdateUnavailable(descriptor(false))).toBe(false);
+    expect(isServerUpdateUnavailable(null)).toBe(false);
   });
 });

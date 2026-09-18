@@ -10,6 +10,7 @@ import {
   dismissServerUpdateFailure,
   dismissVersionMismatch,
   isServerUpdateFailureDismissed,
+  isServerUpdateUnavailable,
   isVersionMismatchDismissed,
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
@@ -57,6 +58,9 @@ export function useAutoBalanceUpdateBanner(
     )
       return [];
     const selfUpdate = resolveServerSelfUpdateCapability(environment.serverConfig);
+    // A build with no releases of its own offers nothing to action: no RPC
+    // update, no copy-command fallback, and no notice to dismiss.
+    if (isServerUpdateUnavailable(environment.serverConfig)) return [];
     const desktopAppUpdate = supportsDesktopAppUpdate(environment.serverConfig);
     return [
       {

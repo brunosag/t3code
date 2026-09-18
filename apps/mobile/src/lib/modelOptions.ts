@@ -7,6 +7,11 @@ import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
+import {
+  hasSoleProviderInstance,
+  type ModelVendor,
+  resolveModelVendor,
+} from "@t3tools/client-runtime/state/model-vendor";
 
 export type ModelOption = {
   readonly key: string;
@@ -15,6 +20,12 @@ export type ModelOption = {
   readonly providerKey: string;
   readonly providerLabel: string;
   readonly providerDriver: string;
+  /**
+   * Model vendor glyph to draw instead of the provider glyph. Only set when a
+   * single provider instance is configured, where the provider mark repeats on
+   * every row and identifies nothing.
+   */
+  readonly vendor: ModelVendor | undefined;
   readonly isDefault: boolean;
   readonly isLegacy: boolean;
   readonly isUnavailable?: boolean;
@@ -152,6 +163,14 @@ export function buildModelOptions(
   fallbackModelSelection: ModelSelection | null,
 ): ReadonlyArray<ModelOption> {
   const options = new Map<string, ModelOption>();
+  const soleProvider = hasSoleProviderInstance(
+    (config?.providers ?? []).map((provider) => ({
+      enabled: provider.enabled,
+      isAvailable: provider.availability !== "unavailable",
+    })),
+  );
+  const vendorFor = (model: { slug?: string | undefined; name?: string | undefined } | null) =>
+    soleProvider ? resolveModelVendor(model) : undefined;
 
   for (const provider of config?.providers ?? []) {
     if (
@@ -173,6 +192,7 @@ export function buildModelOptions(
         providerKey: provider.instanceId,
         providerLabel,
         providerDriver: provider.driver,
+        vendor: vendorFor(model),
         isDefault: model.isDefault === true,
         isLegacy: model.isLegacy === true,
         capabilities: model.capabilities,
@@ -220,6 +240,7 @@ export function buildModelOptions(
         providerKey: fallbackModelSelection.instanceId,
         providerLabel,
         providerDriver,
+        vendor: vendorFor(model ?? { slug: fallbackModelSelection.model }),
         isDefault: false,
         isLegacy: model?.isLegacy === true,
         ...(isModelSelectionUnavailable(config, fallbackModelSelection)

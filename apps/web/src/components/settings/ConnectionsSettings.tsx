@@ -137,6 +137,7 @@ import {
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { useUiStateStore } from "~/uiStateStore";
 import {
+  isServerUpdateUnavailable,
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
   supportsDesktopAppUpdate,
@@ -1547,11 +1548,14 @@ function SavedBackendListRow({
     .join(" · ");
 
   // Only a connected, enabled machine can take a remote update; a switched-off
-  // one keeps the version note so the icon is not a surprise later.
+  // one keeps the version note so the icon is not a surprise later. A server
+  // whose build publishes no releases of its own takes no update at all.
+  const serverUpdateUnavailable = isServerUpdateUnavailable(environment.serverConfig);
   const showUpdateAction =
     enabled &&
     isConnected &&
     versionMismatch !== null &&
+    !serverUpdateUnavailable &&
     (serverUpdateState.status === "idle" || serverUpdateState.status === "failed");
 
   return (
@@ -1579,7 +1583,7 @@ function SavedBackendListRow({
               : enabled
                 ? connectionStatusText(environment.connection)
                 : "Switched off"}
-            {versionMismatch
+            {versionMismatch && !serverUpdateUnavailable
               ? `\nUpdate available: ${versionMismatch.serverVersion} → ${versionMismatch.clientVersion}`
               : ""}
           </TooltipPopup>
@@ -1885,8 +1889,11 @@ export function ConnectionsSettings() {
           !environment.entry.enabled ||
           environment.connection.phase !== "connected" ||
           isDesktopLocalConnectionTarget(environment.entry.target) ||
-          // Manual-update machines only offer a copy command on their row.
+          // Manual-update machines only offer a copy command on their row, and
+          // a build with no releases of its own offers neither that nor a
+          // remote update.
           selfUpdate === null ||
+          isServerUpdateUnavailable(environment.serverConfig) ||
           (selfUpdate === "desktop-managed" && !desktopAppUpdate)
         ) {
           return [];
@@ -3330,6 +3337,7 @@ export function ConnectionsSettings() {
                 control={
                   primaryVersionMismatch &&
                   primaryEnvironmentId !== null &&
+                  !isServerUpdateUnavailable(primaryServerConfig) &&
                   primaryServerUpdateState.status !== "running" ? (
                     <ServerUpdateAction
                       size="sm"

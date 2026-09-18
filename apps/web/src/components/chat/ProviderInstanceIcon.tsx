@@ -3,6 +3,7 @@ import { type ProviderDriverKind } from "@t3tools/contracts";
 import { providerInstanceInitials } from "@t3tools/client-runtime/state/provider-instance-display";
 
 import { PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
+import type { Icon as IconComponent } from "../Icons";
 import { cn } from "~/lib/utils";
 
 export { providerInstanceInitials };
@@ -18,8 +19,10 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   badgeClassName?: string;
   statusDotClassName?: string;
   indicatorBackground?: string;
+  /** Model vendor glyph shown instead of the provider glyph, from `resolveModelVendorIcon`. */
+  vendorIcon?: IconComponent | undefined;
 }) {
-  const Icon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
+  const Icon = props.vendorIcon ?? PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
   const indicatorBackground = props.indicatorBackground ?? "var(--card)";
   const accentStyle = props.accentColor
     ? ({ "--provider-accent": props.accentColor } as CSSProperties)

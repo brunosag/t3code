@@ -79,10 +79,9 @@ jobs:
       # The core is the rule the fork's desktop AppImage already uses
       # (scripts/resolve-nightly-release.ts): one patch above the release package,
       # so a build sorts above the stable release it is based on. Both artifact
-      # lines have to carry it. On the unbumped core this server reads as older
-      # than every client connected to it, and a fork client that sees a behind
-      # server offers an npm self-update that cannot exist — and that would
-      # install stock upstream t3 over the Pi runtime if it did.
+      # lines carry it so this server and those clients compare on the same core.
+      # The update affordance itself is not offered for these builds at all
+      # (see FORK.md): a fork build publishes no server artifacts.
       - name: Set deploy version
         id: version
         run: |
@@ -166,7 +165,7 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -t ed25519 "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-          ssh_opts=(-i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20)
+          ssh_opts=(-i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
           scp "${ssh_opts[@]}" "$TGZ" "$VPS_USER@$VPS_HOST:local/t3-pi/releases/"
 
           # Installs into runtime/versions/<version> with the preseed sentinel, then
@@ -176,18 +175,52 @@ jobs:
           # installed one. This workflow's whole job is to install the pushed
           # commit, and the preseed plus .install-complete is what keeps the stock
           # installer from replacing the fork with the registry package.
-          ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "VERSION=$(printf '%q' "$VERSION") bash -s" <<'REMOTE'
+          #
+          # The install is bounded on both ends — a host-side timeout on npm and a
+          # timeout on the session — because a stalled install used to sit until
+          # the job's own 45-minute timeout killed the runner mid-run, which
+          # orphaned npm on the host and left that user unable to open a session.
+          timeout 1500 ssh "${ssh_opts[@]}" "$VPS_USER@$VPS_HOST" "VERSION=$(printf '%q' "$VERSION") bash -s" <<'REMOTE'
           set -euo pipefail
           BASE="$HOME/local/t3-pi"
           RUNTIME="$BASE/runtime/versions/$VERSION"
           umask 077
+
+          test -n "$VERSION" || { echo "VERSION is required" >&2; exit 1; }
+          # The runner computes this version, but it names a directory that the
+          # cleanup trap removes recursively, so refuse anything that could
+          # escape runtime/versions.
+          case "$VERSION" in
+            */*) echo "refusing a version with a path separator: $VERSION" >&2; exit 1 ;;
+          esac
+          case "$RUNTIME" in
+            "$BASE/runtime/versions/"*) ;;
+            *) echo "refusing to install outside $BASE/runtime/versions" >&2; exit 1 ;;
+          esac
+
+          # A failed install leaves nothing behind. The runtime only stops being
+          # removable once .install-complete exists, so a run that dies in npm
+          # never leaves a husk for the next deploy (or the retention prune) to
+          # trip over. Only this version's directory is ever touched.
+          cleanup_incomplete_runtime() {
+            status="$?"
+            if [ "$status" -ne 0 ] && [ ! -f "$RUNTIME/.install-complete" ]; then
+              echo "removing the incomplete runtime at $RUNTIME" >&2
+              rm -rf -- "$RUNTIME"
+            fi
+            return "$status"
+          }
+          trap cleanup_incomplete_runtime EXIT
 
           mkdir -p "$RUNTIME"
           # Preseeding the runtime plus .install-complete is what stops the stock
           # pinned-runtime installer from replacing this fork with the registry
           # package (see DEPLOYMENT.md on the host).
           printf '%s\n' '{"private":true,"allowScripts":{"node-pty":true,"msgpackr-extract":true}}' > "$RUNTIME/package.json"
-          npm install --prefix "$RUNTIME" --no-fund --no-audit "$BASE/releases/t3-$VERSION.tgz"
+          # Bounded on the host, not just the runner: killing the ssh session must
+          # not leave npm running in this user's session (it compiles node-pty, so
+          # a genuine run is minutes, not an hour).
+          timeout --kill-after=30s 900s npm install --prefix "$RUNTIME" --no-fund --no-audit "$BASE/releases/t3-$VERSION.tgz"
           node "$RUNTIME/node_modules/t3/dist/bin.mjs" --version
           printf '%s\n' "$VERSION" > "$RUNTIME/.install-complete"
 

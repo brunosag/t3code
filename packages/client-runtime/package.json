@@ -131,6 +131,10 @@
       "types": "./src/state/git.ts",
       "default": "./src/state/git.ts"
     },
+    "./state/model-vendor": {
+      "types": "./src/state/modelVendor.ts",
+      "default": "./src/state/modelVendor.ts"
+    },
     "./state/models": {
       "types": "./src/state/models.ts",
       "default": "./src/state/models.ts"

@@ -4,6 +4,11 @@ import {
   resolveProviderInstanceDisplayName,
   shouldShowInstanceBadge,
 } from "@t3tools/client-runtime/state/provider-instance-display";
+import {
+  hasSoleProviderInstance,
+  type ModelVendor,
+  resolveModelVendor,
+} from "@t3tools/client-runtime/state/model-vendor";
 import type { EnvironmentId, ProviderDriverKind, ServerConfig } from "@t3tools/contracts";
 
 /** What a thread row needs to draw the provider glyph and its account badge. */
@@ -12,6 +17,8 @@ export interface ThreadRowProviderInstance {
   readonly displayName: string;
   readonly accentColor?: string | undefined;
   readonly showBadge: boolean;
+  /** Model vendor glyph replacing the provider glyph; see `resolveModelVendor`. */
+  readonly vendor: ModelVendor | undefined;
 }
 
 /**
@@ -32,11 +39,20 @@ export function resolveThreadProviderInstance(
     displayName: resolveProviderInstanceDisplayName(snapshot),
     accentColor: normalizeProviderAccentColor(snapshot.accentColor),
   };
+  const selectedModel = snapshot.models.find((model) => model.slug === thread.modelSelection.model);
   return {
     ...entry,
     showBadge: shouldShowInstanceBadge(
       entry,
       providers.map((provider) => ({ driverKind: provider.driver })),
     ),
+    vendor: hasSoleProviderInstance(
+      providers.map((provider) => ({
+        enabled: provider.enabled,
+        isAvailable: provider.availability !== "unavailable",
+      })),
+    )
+      ? resolveModelVendor(selectedModel ?? { slug: thread.modelSelection.model })
+      : undefined,
   };
 }

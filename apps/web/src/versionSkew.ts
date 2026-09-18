@@ -98,6 +98,17 @@ export function resolveServerSelfUpdateCapability(
   return serverConfig?.environment.capabilities.serverSelfUpdate ?? null;
 }
 
+/** True when this server runs a build with no releases of its own, so no
+    client can update it in place. Both the launcher path (release archives
+    that this build never publishes) and the manual `npx t3@<version>`
+    fallback (stock upstream t3 over a forked runtime) are traps there, so
+    clients must offer no update affordance at all. */
+export function isServerUpdateUnavailable(
+  serverConfig: Pick<ServerConfig, "environment"> | null | undefined,
+): boolean {
+  return serverConfig?.environment.capabilities.serverUpdateUnavailable === true;
+}
+
 /** True when the desktop app supervising this server can be told to update
     itself over RPC. Older desktop servers only get the manual instruction. */
 export function supportsDesktopAppUpdate(

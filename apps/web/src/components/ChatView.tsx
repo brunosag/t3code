@@ -520,6 +520,7 @@ import {
   dismissServerUpdateFailure,
   dismissVersionMismatch,
   isServerUpdateFailureDismissed,
+  isServerUpdateUnavailable,
   isVersionMismatchDismissed,
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
@@ -2759,8 +2760,11 @@ export default function ChatView(props: ChatViewProps) {
       !automaticEnvironment &&
       serverUpdateEnvironmentId &&
       !reconnectingThroughVersionSkew &&
+      // A server that publishes no releases of its own has nothing to offer
+      // here; keep only the progress and failure rows of an update already in
+      // flight.
       (serverUpdateState.status === "idle"
-        ? showVersionMismatchBanner
+        ? showVersionMismatchBanner && !isServerUpdateUnavailable(serverConfig)
         : !serverUpdateFailureDismissed)
     ) {
       const updateInProgress = serverUpdateState.status === "running";
@@ -2853,6 +2857,7 @@ export default function ChatView(props: ChatViewProps) {
     versionMismatch,
     versionMismatchDismissKey,
     serverUpdateEnvironmentId,
+    serverConfig,
     versionMismatchSelfUpdate,
     versionMismatchDesktopAppUpdate,
     versionMismatchThreadContinuation,
