@@ -735,12 +735,14 @@ export const OpenCodeIcon: Icon = (props) => (
   </svg>
 );
 
-// Pi brand mark from https://pi.dev/logo.svg, cropped to the mark's bounds.
+// Pi brand mark from https://pi.dev/favicon.svg, the monochrome variant of the
+// colored logo. `currentColor` keeps it white on dark surfaces, like the other
+// single-tone provider marks.
 export const PiIcon: Icon = ({ className, ...props }) => (
-  <svg {...props} viewBox="165.29 165.29 469.43 469.43" fill="none" className={className}>
-    <path fill="#F09082" d="M165.29 165.29H517.36V400H400V282.65H165.29Z" />
-    <path fill="#4D9ABF" d="M165.29 282.65H282.65V400H400V517.36H282.65V634.72H165.29Z" />
-    <path fill="#F1BE58" d="M517.36 400H634.72V634.72H517.36Z" />
+  <svg {...props} viewBox="0 0 560 560" fill="none" className={className}>
+    <path fill="currentColor" d="M420 280H280V140H0V0H420V280Z" />
+    <path fill="currentColor" d="M560 560H420V280H560V560Z" />
+    <path fill="currentColor" d="M140 560H0V140H140V280H280V420H140V560Z" />
   </svg>
 );
 
