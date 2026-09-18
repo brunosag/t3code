@@ -1712,7 +1712,7 @@ const make = Effect.gen(function* () {
         return yield* deliverUserInputAnswersAsMessage(event);
       }
 
-      yield* providerService
+      const outcome = yield* providerService
         .respondToUserInput({
           threadId: event.payload.threadId,
           requestId: event.payload.requestId,
@@ -1722,25 +1722,30 @@ const make = Effect.gen(function* () {
             : {}),
         })
         .pipe(
+          Effect.map((result) =>
+            result.delivered ? ("delivered" as const) : ("no-callback" as const),
+          ),
           Effect.catchCause((cause) => {
-            if (!isGoneUserInputCallbackError(cause)) {
-              return appendProviderFailureActivity({
-                threadId: event.payload.threadId,
-                kind: "provider.user-input.respond.failed",
-                summary: "Provider user input response failed",
-                detail: isUnknownPendingUserInputRequestError(cause)
-                  ? stalePendingRequestDetail("user-input", event.payload.requestId)
-                  : Cause.pretty(cause),
-                turnId: null,
-                createdAt: event.payload.createdAt,
-                requestId: event.payload.requestId,
-              });
+            // A provider that lost its pending request while the process lives
+            // reports it as a failure rather than an inactive session.
+            if (isGoneUserInputCallbackError(cause)) {
+              return Effect.succeed("no-callback" as const);
             }
-            // The callback died with its provider process, so nobody is waiting
-            // for this reply; the answers are still worth keeping.
-            return deliverUserInputAnswersAsMessage(event);
+            return appendProviderFailureActivity({
+              threadId: event.payload.threadId,
+              kind: "provider.user-input.respond.failed",
+              summary: "Provider user input response failed",
+              detail: isUnknownPendingUserInputRequestError(cause)
+                ? stalePendingRequestDetail("user-input", event.payload.requestId)
+                : Cause.pretty(cause),
+              turnId: null,
+              createdAt: event.payload.createdAt,
+              requestId: event.payload.requestId,
+            }).pipe(Effect.as("failed" as const));
           }),
         );
+      // Nobody is waiting for this reply; the answers are still worth keeping.
+      if (outcome === "no-callback") yield* deliverUserInputAnswersAsMessage(event);
     },
   );
 

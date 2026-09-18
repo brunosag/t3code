@@ -1601,6 +1601,35 @@ routing.layer("ProviderServiceLive routing", (it) => {
       }),
   );
 
+  it.effect("reports user-input answers as undelivered instead of starting a session", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-user-input-without-live-session");
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        cwd: fixtureCwd("project"),
+        runtimeMode: "full-access",
+      });
+      // The process the question came from is gone, but its binding survives,
+      // exactly as it does after a server restart.
+      yield* routing.codex.adapter.stopSession(threadId);
+      routing.codex.startSession.mockClear();
+      routing.codex.respondToUserInput.mockClear();
+
+      const result = yield* provider.respondToUserInput({
+        threadId,
+        requestId: asRequestId("req-user-input-without-session"),
+        answers: { sandbox_mode: "workspace-write" },
+      });
+
+      assert.deepEqual(result, { delivered: false });
+      assert.equal(routing.codex.startSession.mock.calls.length, 0);
+      assert.equal(routing.codex.respondToUserInput.mock.calls.length, 0);
+    }),
+  );
+
   it.effect("allows promptless continuation only for capable providers", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;

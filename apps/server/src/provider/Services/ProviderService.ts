@@ -76,10 +76,15 @@ export interface ProviderServiceShape {
 
   /**
    * Respond to a provider structured user-input request.
+   *
+   * A user-input callback lives inside the provider process that opened it, so
+   * a recovered session can never receive the answers. `delivered: false` means
+   * no live session holds the callback and nothing was sent; the caller decides
+   * how to keep the answers.
    */
   readonly respondToUserInput: (
     input: ProviderRespondToUserInputInput,
-  ) => Effect.Effect<void, ProviderServiceError>;
+  ) => Effect.Effect<{ readonly delivered: boolean }, ProviderServiceError>;
 
   /**
    * Stop a provider session.

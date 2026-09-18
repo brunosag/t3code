@@ -2001,10 +2001,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     });
     let metricProvider = "unknown";
     return yield* Effect.gen(function* () {
+      // Recovery is deliberately off: the callback waiting for these answers is
+      // a promise inside the provider process that opened it, so starting a
+      // fresh one could only stall the response and then reject it.
       const routed = yield* resolveRoutableSession({
         threadId: input.threadId,
         operation: "ProviderService.respondToUserInput",
-        allowRecovery: true,
+        allowRecovery: false,
       });
       metricProvider = routed.adapter.provider;
       yield* Effect.annotateCurrentSpan({
@@ -2013,11 +2016,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         "provider.thread_id": input.threadId,
         "provider.request_id": input.requestId,
       });
+      if (!routed.isActive) return { delivered: false } as const;
       const answers = yield* appendUserInputAttachmentPaths({
         ...input,
         attachmentsDir: serverConfig.attachmentsDir,
       }).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
       yield* routed.adapter.respondToUserInput(routed.threadId, input.requestId, answers);
+      return { delivered: true } as const;
     }).pipe(
       withMetrics({
         counter: providerTurnsTotal,

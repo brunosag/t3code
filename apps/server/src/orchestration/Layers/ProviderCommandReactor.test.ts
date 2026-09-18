@@ -275,7 +275,9 @@ describe("ProviderCommandReactor", () => {
     const compactThread = vi.fn((_: ThreadId) => input?.compactThreadEffect?.() ?? Effect.void);
     const interruptTurn = vi.fn((_: unknown) => input?.interruptTurnEffect?.() ?? Effect.void);
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
-    const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
+    const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() =>
+      Effect.succeed({ delivered: true }),
+    );
     const stopSession = vi.fn((stopInput: unknown) =>
       (input?.stopSessionEffect?.() ?? Effect.void).pipe(
         Effect.tap(() =>
@@ -4454,6 +4456,97 @@ describe("ProviderCommandReactor", () => {
       expect(
         thread?.messages.some(
           (message) => message.role === "user" && message.text.includes("workspace-write"),
+        ),
+      ).toBe(true);
+    }),
+  );
+
+  effectIt.effect("delivers answers as a message when no live session holds the callback", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      const now = "2026-01-01T00:00:00.000Z";
+      harness.respondToUserInput.mockImplementation(() => Effect.succeed({ delivered: false }));
+
+      // A server restart leaves the session record behind in an error state
+      // while the process that opened the question is long gone.
+      yield* harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-for-restarted-server"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "error",
+          providerName: "pi",
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: "The server restarted while this turn was running.",
+          updatedAt: now,
+        },
+        createdAt: now,
+      });
+
+      yield* harness.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("cmd-user-input-requested-restarted-server"),
+        threadId: ThreadId.make("thread-1"),
+        activity: {
+          id: EventId.make("activity-user-input-requested-restarted-server"),
+          tone: "info",
+          kind: "user-input.requested",
+          summary: "User input requested",
+          payload: {
+            requestId: "user-input-request-1",
+            questions: [
+              {
+                id: "sandbox_mode",
+                header: "Sandbox",
+                question: "Which mode should be used?",
+                options: [{ label: "workspace-write", description: "Allow workspace writes only" }],
+              },
+            ],
+          },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      });
+
+      yield* harness.engine.dispatch({
+        type: "thread.user-input.respond",
+        commandId: CommandId.make("cmd-user-input-respond-restarted-server"),
+        threadId: ThreadId.make("thread-1"),
+        requestId: asApprovalRequestId("user-input-request-1"),
+        answers: { sandbox_mode: "workspace-write" },
+        createdAt: now,
+      });
+
+      yield* Effect.promise(() =>
+        waitFor(async () => {
+          const readModel = await harness.readModel();
+          const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+          return (
+            thread?.messages.some(
+              (message) => message.role === "user" && message.text.includes("workspace-write"),
+            ) ?? false
+          );
+        }),
+      );
+
+      const thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+        (entry) => entry.id === ThreadId.make("thread-1"),
+      );
+      expect(
+        thread?.activities.some(
+          (activity) => activity.kind === "provider.user-input.respond.failed",
+        ),
+      ).toBe(false);
+      expect(
+        thread?.activities.some(
+          (activity) =>
+            activity.kind === "user-input.resolved" &&
+            typeof activity.payload === "object" &&
+            activity.payload !== null &&
+            (activity.payload as Record<string, unknown>).requestId === "user-input-request-1",
         ),
       ).toBe(true);
     }),
