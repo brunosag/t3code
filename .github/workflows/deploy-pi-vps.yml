@@ -222,6 +222,19 @@ jobs:
           # a genuine run is minutes, not an hour).
           timeout --kill-after=30s 900s npm install --prefix "$RUNTIME" --no-fund --no-audit "$BASE/releases/t3-$VERSION.tgz"
           node "$RUNTIME/node_modules/t3/dist/bin.mjs" --version
+          # The merged CLI's pinned runtime is the archive layout: it looks for the
+          # executable at runtime/versions/<version>/t3, treats a tree without it as
+          # an incomplete install, and would otherwise delete this npm-installed
+          # runtime to download a release archive that no fork version publishes.
+          # This shim is that entry point, so the launcher can run <version>/t3
+          # __service-launcher and spawn <version>/t3 serve while the runtime stays
+          # the npm tarball installed above. Verified on the host: the launcher
+          # starts the server and the state file moves to protocol 3.
+          NODE_BIN="$(command -v node)"
+          test -n "$NODE_BIN"
+          printf '#!/bin/sh\nexec %s "$(dirname "$0")/node_modules/t3/dist/bin.mjs" "$@"\n' "$NODE_BIN" > "$RUNTIME/t3"
+          chmod 0755 "$RUNTIME/t3"
+          "$RUNTIME/t3" --version
           printf '%s\n' "$VERSION" > "$RUNTIME/.install-complete"
 
           node "$RUNTIME/node_modules/t3/dist/bin.mjs" service update --base-dir "$BASE" --allow-downgrade < /dev/null
