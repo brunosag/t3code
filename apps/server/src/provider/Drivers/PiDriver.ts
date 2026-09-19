@@ -171,6 +171,20 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
                   );
                 }
               }
+              const slashCommands = commands.commands
+                .filter((command) => command.name.trim())
+                .map((command) => ({
+                  name: command.name,
+                  ...(command.description?.trim() ? { description: command.description } : {}),
+                }));
+              // Pi's built-in /compact command is handled by the RPC protocol but is not
+              // included in get_commands (which only reports extensions, prompts, and skills).
+              if (!slashCommands.some((command) => command.name === "compact")) {
+                slashCommands.push({
+                  name: "compact",
+                  description: "Manually compact the session context",
+                });
+              }
               return {
                 ...base(),
                 installed: true,
@@ -182,12 +196,7 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
                   isCustom: false,
                   capabilities: capabilities.get(`${model.provider}/${model.id}`) ?? null,
                 })),
-                slashCommands: commands.commands
-                  .filter((command) => command.name.trim())
-                  .map((command) => ({
-                    name: command.name,
-                    ...(command.description?.trim() ? { description: command.description } : {}),
-                  })),
+                slashCommands,
               };
             } finally {
               signal.removeEventListener("abort", abort);
