@@ -6225,7 +6225,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     />
                     {!isChoiceOnlyPendingQuestion ||
                     activePendingProgress?.activeQuestion?.multiSelect ? (
-                      <ComposerBanner.Body>
+                      <ComposerBanner.Body className="ps-2 sm:ps-1.5">
                         <div
                           data-chat-composer-mobile-pending-compact="true"
                           className={cn(
