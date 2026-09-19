@@ -2,7 +2,7 @@
 /**
  * PiRpcClient — JSONL transport for `pi --mode rpc`.
  *
- * Spawns the binary with `["--mode", "rpc"]` (plus T3's extension and `--session` when given),
+ * Spawns the binary with `["--mode", "rpc"]` (plus T3's extensions and `--session` when given),
  * correlates `request()` calls with `response` envelopes by id, and forwards
  * other envelopes to `onEvent`. Any transport failure rejects pending work
  * and reports via `onExit` once; `close()` stops the owned child and never
@@ -29,6 +29,8 @@ export interface PiRpcClientOptions {
   readonly onExit: (error: Error) => void;
   /** Per-request timeout in milliseconds. Defaults to 60 seconds. */
   readonly requestTimeoutMs?: number;
+  /** Extra T3 extensions loaded with `--extension`; they share no fd-3 channel. */
+  readonly extensionPaths?: ReadonlyArray<string>;
   /** Optional T3 extension loaded into Pi with a dedicated fd-3 JSONL channel. */
   readonly sideChannel?: {
     readonly extensionPath: string;
@@ -96,6 +98,9 @@ export class PiRpcClient {
     this.requestTimeoutMs = timeout;
 
     const args = ["--mode", "rpc"];
+    for (const extensionPath of options.extensionPaths ?? []) {
+      args.push("--extension", extensionPath);
+    }
     if (options.sideChannel !== undefined) {
       args.push("--extension", options.sideChannel.extensionPath);
     }

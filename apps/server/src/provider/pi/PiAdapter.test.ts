@@ -16,6 +16,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import {
   ApprovalRequestId,
+  EnvironmentId,
   ProviderInstanceId,
   ProviderRuntimeEvent,
   ThreadId,
@@ -26,7 +27,9 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { makePiAdapter } from "./PiAdapter.ts";
+import { PI_MCP_ENV } from "./PiMcpExtension.ts";
 import type { PiRpcClient } from "./PiRpcClient.ts";
 
 type PiAdapter = Effect.Success<ReturnType<typeof makePiAdapter>>;
@@ -174,6 +177,7 @@ function makeHarness(): Harness {
       cwd: "/default-cwd",
       attachmentsDir: "/attachments",
       userInputExtensionPath: "/t3/pi-user-input.mjs",
+      mcpExtensionPath: "/t3/pi-mcp.mjs",
       instanceId: piInstance,
       createClient: (init) => {
         inits.push(init);
@@ -239,6 +243,7 @@ describe("PiAdapter", () => {
       expect(harness.inits[0]?.environment).toBe(harness.environment);
       expect(harness.inits[0]?.sessionPath).toBeUndefined();
       expect(harness.inits[0]?.sideChannel?.extensionPath).toBe("/t3/pi-user-input.mjs");
+      expect(harness.inits[0]?.extensionPaths).toBeUndefined();
       expect(first.cwd).toBe("/custom-cwd");
 
       const events = Array.from(yield* Fiber.join(receipts));
@@ -248,6 +253,39 @@ describe("PiAdapter", () => {
       ]);
       expect(yield* adapter.hasSession(threadId)).toBe(true);
       expect(yield* adapter.listSessions()).toHaveLength(1);
+    }),
+  );
+
+  it.effect("carries a thread's MCP credential and toolkit extension", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-mcp-credential");
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("environment-1"),
+        threadId,
+        providerSessionId: "provider-session-1",
+        providerInstanceId: piInstance,
+        endpoint: "http://127.0.0.1:1234/mcp",
+        authorizationHeader: "Bearer token-1",
+        capabilities: new Set(["preview", "device", "pull-requests"]),
+        agentDeviceEnvironment: { PATH: "/shim", PATH_SEPARATOR: ":" },
+      });
+
+      yield* startSession(adapter, threadId);
+
+      const init = harness.inits[0];
+      expect(init?.extensionPaths).toEqual(["/t3/pi-mcp.mjs"]);
+      expect(init?.environment).toMatchObject({
+        T3_PI_ADAPTER_TEST: "1",
+        [PI_MCP_ENV.endpoint]: "http://127.0.0.1:1234/mcp",
+        [PI_MCP_ENV.bearerToken]: "token-1",
+        [PI_MCP_ENV.capabilities]: "preview,device,pull-requests",
+      });
+      // Device access also puts the agent-device shim ahead of the ambient PATH.
+      expect(init?.environment?.PATH).toBe("/shim:/bin");
+
+      yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId));
     }),
   );
 

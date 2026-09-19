@@ -203,6 +203,7 @@ function createClient(input?: {
   readonly sessionPath?: string;
   readonly requestTimeoutMs?: number;
   readonly sideChannel?: boolean;
+  readonly extensionPaths?: ReadonlyArray<string>;
 }): ClientHarness {
   const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pi-rpc-"));
   fixtureDirectories.push(directory);
@@ -220,6 +221,7 @@ function createClient(input?: {
     },
     ...(input?.sessionPath !== undefined ? { sessionPath: input.sessionPath } : {}),
     ...(input?.requestTimeoutMs !== undefined ? { requestTimeoutMs: input.requestTimeoutMs } : {}),
+    ...(input?.extensionPaths !== undefined ? { extensionPaths: input.extensionPaths } : {}),
     ...(input?.sideChannel
       ? {
           sideChannel: {
@@ -327,6 +329,24 @@ describe("PiRpcClient", () => {
         answers: { q: "A" },
       },
     });
+  });
+
+  it("loads every T3 extension and keeps the side channel on the user-input one", async () => {
+    const { client } = createClient({
+      extensionPaths: ["/t3/pi-mcp.mjs", "/t3/pi-extra.mjs"],
+      sideChannel: true,
+    });
+    const argv = (await client.request("get_argv")) as { argv: string[] };
+    expect(argv.argv).toEqual([
+      "--mode",
+      "rpc",
+      "--extension",
+      "/t3/pi-mcp.mjs",
+      "--extension",
+      "/t3/pi-extra.mjs",
+      "--extension",
+      expect.stringMatching(/t3-user-input\.mjs$/),
+    ]);
   });
 
   it("correlates concurrent requests and routes events to onEvent", async () => {

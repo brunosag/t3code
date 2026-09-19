@@ -23,6 +23,7 @@ import { mapPiThinkingCapabilities } from "../pi/PiCapabilities.ts";
 import { PiRpcClient } from "../pi/PiRpcClient.ts";
 import { PiCommands, PiModels, PiState, PiThinkingLevels } from "../pi/PiProtocol.ts";
 import { makePiTextGeneration } from "../pi/PiTextGeneration.ts";
+import { materializePiMcpExtension } from "../pi/PiMcpExtension.ts";
 import { materializePiUserInputExtension } from "../pi/PiUserInputExtension.ts";
 
 const decodePiState = Schema.decodeUnknownSync(PiState);
@@ -83,6 +84,18 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
             driver: DRIVER,
             instanceId,
             detail: `Failed to prepare the Pi user-input extension: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`,
+            cause,
+          }),
+      });
+      const mcpExtensionPath = yield* Effect.tryPromise({
+        try: () => materializePiMcpExtension(server.stateDir),
+        catch: (cause) =>
+          new ProviderDriverError({
+            driver: DRIVER,
+            instanceId,
+            detail: `Failed to prepare the Pi T3-toolkit extension: ${
               cause instanceof Error ? cause.message : String(cause)
             }`,
             cause,
@@ -207,6 +220,7 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
         attachmentsDir: server.attachmentsDir,
         environment: processEnv,
         userInputExtensionPath,
+        mcpExtensionPath,
       });
       yield* refresh;
       return {

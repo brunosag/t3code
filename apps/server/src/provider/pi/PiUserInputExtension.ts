@@ -1,7 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - materializes a standalone extension consumed by stock Pi.
-import * as NodeCrypto from "node:crypto";
-import * as NodeFSP from "node:fs/promises";
-import * as NodePath from "node:path";
+import { materializePiExtension } from "./PiExtensionFile.ts";
 
 /**
  * T3-owned Pi extension. It registers the rich `t3_ask_user` tool and exchanges
@@ -222,55 +220,11 @@ export default function t3UserInput(pi) {
 }
 `;
 
-const EXTENSION_PREFIX = "t3-user-input-";
-
-async function readExtension(path: string): Promise<string | undefined> {
-  try {
-    return await NodeFSP.readFile(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-    throw error;
-  }
-}
-
-/** Materialize a content-addressed extension file that stock Pi can load with `--extension`. */
-export async function materializePiUserInputExtension(stateDir: string): Promise<string> {
-  const directory = NodePath.join(stateDir, "pi");
-  const digest = NodeCrypto.createHash("sha256")
-    .update(PI_USER_INPUT_EXTENSION_SOURCE)
-    .digest("hex")
-    .slice(0, 16);
-  const extensionPath = NodePath.join(directory, `${EXTENSION_PREFIX}${digest}.mjs`);
-  await NodeFSP.mkdir(directory, { recursive: true });
-
-  if ((await readExtension(extensionPath)) === PI_USER_INPUT_EXTENSION_SOURCE) {
-    return extensionPath;
-  }
-
-  const temporaryPath = `${extensionPath}.${process.pid}.${NodeCrypto.randomUUID()}.tmp`;
-  await NodeFSP.writeFile(temporaryPath, PI_USER_INPUT_EXTENSION_SOURCE, {
-    encoding: "utf8",
-    flag: "wx",
-    mode: 0o600,
+/** Materialize the user-input extension that stock Pi loads with `--extension`. */
+export function materializePiUserInputExtension(stateDir: string): Promise<string> {
+  return materializePiExtension({
+    stateDir,
+    filePrefix: "t3-user-input-",
+    source: PI_USER_INPUT_EXTENSION_SOURCE,
   });
-  try {
-    try {
-      await NodeFSP.rename(temporaryPath, extensionPath);
-    } catch (error) {
-      // Windows does not replace an existing destination. A concurrent T3
-      // writer is safe only when it installed the exact expected bytes.
-      if (
-        !["EEXIST", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "") ||
-        (await readExtension(extensionPath)) !== PI_USER_INPUT_EXTENSION_SOURCE
-      ) {
-        throw error;
-      }
-    }
-    if ((await readExtension(extensionPath)) !== PI_USER_INPUT_EXTENSION_SOURCE) {
-      throw new Error("Materialized Pi user-input extension did not match its expected content.");
-    }
-    return extensionPath;
-  } finally {
-    await NodeFSP.rm(temporaryPath, { force: true });
-  }
 }

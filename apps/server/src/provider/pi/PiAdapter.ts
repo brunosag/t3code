@@ -23,8 +23,10 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { ProviderAdapterRequestError } from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
+import { withPiMcpEnvironment } from "./PiMcpExtension.ts";
 import { PiRpcClient } from "./PiRpcClient.ts";
 import {
   PiDelta,
@@ -134,6 +136,8 @@ export interface PiAdapterOptions {
   cwd: string;
   attachmentsDir: string;
   userInputExtensionPath?: string;
+  /** T3's MCP-toolkit extension, loaded only for threads that have a credential. */
+  mcpExtensionPath?: string;
   instanceId: ProviderInstanceId;
   createClient?: (options: ConstructorParameters<typeof PiRpcClient>[0]) => Client;
 }
@@ -608,6 +612,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             // Pi treats a missing --session path as a new session; never silently lose history.
             await NodeFSP.access(cursor.sessionPath);
           }
+          // T3 mints one MCP credential per provider session. Reading it here
+          // keeps the browser, device, and pull-request toolkits on the same
+          // capability decision the built-in providers already honor.
+          const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
           const now = new Date().toISOString();
           const ctx: Session = {
             client: undefined as unknown as Client,
@@ -633,7 +641,13 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           ctx.client = createClient({
             binaryPath: options.binaryPath,
             cwd: input.cwd ?? options.cwd,
-            environment: options.environment,
+            environment:
+              mcpSession === undefined
+                ? options.environment
+                : withPiMcpEnvironment(options.environment, mcpSession),
+            ...(mcpSession !== undefined && options.mcpExtensionPath !== undefined
+              ? { extensionPaths: [options.mcpExtensionPath] }
+              : {}),
             ...(cursor ? { sessionPath: cursor.sessionPath } : {}),
             onEvent: (event) => handleEvent(ctx, event),
             ...(options.userInputExtensionPath
