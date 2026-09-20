@@ -26,6 +26,7 @@ import {
   MAX_APPEARANCE_CONTRAST,
   MAX_CODE_FONT_SIZE,
   MAX_GLASS_OPACITY,
+  MAX_LINE_WIDTH,
   MAX_INTERFACE_FONT_SIZE,
   MAX_PANEL_ANIMATION_DURATION_MS,
   MAX_PROMPT_FONT_SIZE,
@@ -35,6 +36,7 @@ import {
   MIN_APPEARANCE_CONTRAST,
   MIN_GLASS_OPACITY,
   MIN_INTERFACE_FONT_SIZE,
+  MIN_LINE_WIDTH,
   MIN_PANEL_ANIMATION_DURATION_MS,
   MIN_PROMPT_FONT_SIZE,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
@@ -527,6 +529,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.appearanceContrast !== DEFAULT_UNIFIED_SETTINGS.appearanceContrast
         ? ["Contrast"]
         : []),
+      ...(settings.lineWidth !== DEFAULT_UNIFIED_SETTINGS.lineWidth ? ["Line width"] : []),
       ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
       ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
         ? ["Diff colors"]
@@ -637,6 +640,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.browserLinkTarget,
       settings.browserAutoShowFloatingPreview,
       settings.appearanceContrast,
+      settings.lineWidth,
       settings.diffColorScheme,
       settings.enableAgentBrowserAccess,
       settings.confirmQuit,
@@ -748,6 +752,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     }
     updateSettings({
       appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
+      lineWidth: DEFAULT_UNIFIED_SETTINGS.lineWidth,
       diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
@@ -1164,6 +1169,11 @@ export function AppearanceSettingsPanel() {
     "--settings-slider-progress": `${appearanceContrastRatio * 100}%`,
     "--settings-slider-fill-offset": `${0.5 - appearanceContrastRatio}rem`,
   } as CSSProperties;
+  const lineWidthRatio = (settings.lineWidth - MIN_LINE_WIDTH) / (MAX_LINE_WIDTH - MIN_LINE_WIDTH);
+  const lineWidthSliderStyle = {
+    "--settings-slider-progress": `${lineWidthRatio * 100}%`,
+    "--settings-slider-fill-offset": `${0.5 - lineWidthRatio}rem`,
+  } as CSSProperties;
   const panelAnimationDurationRatio =
     (settings.panelAnimationDurationMs - MIN_PANEL_ANIMATION_DURATION_MS) /
     (MAX_PANEL_ANIMATION_DURATION_MS - MIN_PANEL_ANIMATION_DURATION_MS);
@@ -1236,6 +1246,50 @@ export function AppearanceSettingsPanel() {
                 style={appearanceContrastSliderStyle}
                 type="range"
                 value={settings.appearanceContrast}
+              />
+            </div>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("setting-line-width")}
+          description="Set the maximum width of chat messages and the composer."
+          resetAction={
+            settings.lineWidth !== DEFAULT_UNIFIED_SETTINGS.lineWidth ? (
+              <SettingResetButton
+                label="line width"
+                onClick={() => updateSettings({ lineWidth: DEFAULT_UNIFIED_SETTINGS.lineWidth })}
+              />
+            ) : null
+          }
+          control={
+            <div className="flex w-full items-center gap-3 sm:w-52">
+              <output
+                className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
+                htmlFor="line-width"
+              >
+                {settings.lineWidth}px
+              </output>
+              <input
+                aria-label="Line width"
+                className="settings-slider min-w-0 flex-1"
+                id="line-width"
+                max={MAX_LINE_WIDTH}
+                min={MIN_LINE_WIDTH}
+                onChange={(event) => {
+                  const lineWidth = Number(event.currentTarget.value);
+                  if (
+                    Number.isInteger(lineWidth) &&
+                    lineWidth >= MIN_LINE_WIDTH &&
+                    lineWidth <= MAX_LINE_WIDTH
+                  ) {
+                    updateSettings({ lineWidth });
+                  }
+                }}
+                step={16}
+                style={lineWidthSliderStyle}
+                type="range"
+                value={settings.lineWidth}
               />
             </div>
           }

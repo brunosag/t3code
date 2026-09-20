@@ -503,6 +503,22 @@ describe("ClientSettings appearance contrast", () => {
   });
 });
 
+describe("ClientSettings line width", () => {
+  it("defaults to the standard chat column width", () => {
+    expect(decodeClientSettings({}).lineWidth).toBe(768);
+  });
+
+  it.each([479, 1201, 768.5])("rejects an invalid line width: %s", (value) => {
+    expect(() => decodeClientSettings({ lineWidth: value })).toThrow();
+    expect(() => decodeClientSettingsPatch({ lineWidth: value })).toThrow();
+  });
+
+  it.each([480, 768, 1200])("accepts a line width in range: %s", (value) => {
+    expect(decodeClientSettings({ lineWidth: value }).lineWidth).toBe(value);
+    expect(decodeClientSettingsPatch({ lineWidth: value }).lineWidth).toBe(value);
+  });
+});
+
 describe("ClientSettings panel animations", () => {
   it("defaults to instant changes", () => {
     expect(decodeClientSettings({}).panelAnimationDurationMs).toBe(0);

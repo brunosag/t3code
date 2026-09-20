@@ -291,6 +291,7 @@ function FontAppearanceSync() {
   const fontSizePrompt = useClientSettings((settings) => settings.fontSizePrompt);
   const fontSizeCode = useClientSettings((settings) => settings.fontSizeCode);
   const fontSmoothing = useClientSettings((settings) => settings.fontSmoothing);
+  const lineWidth = useClientSettings((settings) => settings.lineWidth);
 
   useEffect(() => {
     applyAppearanceFontVariables(document.documentElement, {
@@ -302,6 +303,7 @@ function FontAppearanceSync() {
       sizeCode: fontSizeCode,
       smoothing: fontSmoothing,
     });
+    document.documentElement.style.setProperty("--chat-line-width", `${lineWidth}px`);
   }, [
     fontFamilyCode,
     fontFamilyComposer,
@@ -310,6 +312,7 @@ function FontAppearanceSync() {
     fontSizeInterface,
     fontSizePrompt,
     fontSmoothing,
+    lineWidth,
   ]);
 
   return null;

@@ -197,6 +197,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["colors borders interface"],
   },
   {
+    // Prefixed because the slider control already owns the `line-width` id.
+    id: "setting-line-width",
+    title: "Line width",
+    to: "/settings/appearance",
+    searchTerms: ["chat messages composer column width readable text"],
+  },
+  {
     // Prefixed because the slider control already owns the `glass-opacity` id.
     id: "setting-glass-opacity",
     title: "Glass opacity",

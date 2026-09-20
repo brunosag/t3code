@@ -103,6 +103,16 @@ export const AppearanceContrast = Schema.Int.check(
 );
 export type AppearanceContrast = typeof AppearanceContrast.Type;
 const DEFAULT_APPEARANCE_CONTRAST: AppearanceContrast = 100;
+
+/** Maximum width of the chat column, in CSS pixels. */
+export const MIN_LINE_WIDTH = 480;
+export const MAX_LINE_WIDTH = 1200;
+export const LineWidth = Schema.Int.check(
+  Schema.isBetween({ minimum: MIN_LINE_WIDTH, maximum: MAX_LINE_WIDTH }),
+);
+export type LineWidth = typeof LineWidth.Type;
+export const DEFAULT_LINE_WIDTH: LineWidth = 768;
+
 export const MIN_PANEL_ANIMATION_DURATION_MS = 0;
 export const MAX_PANEL_ANIMATION_DURATION_MS = 400;
 export const PanelAnimationDurationMs = Schema.Int.check(
@@ -300,6 +310,7 @@ export const ClientSettingsSchema = Schema.Struct({
   appearanceContrast: AppearanceContrast.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_APPEARANCE_CONTRAST)),
   ),
+  lineWidth: LineWidth.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_LINE_WIDTH))),
   // Panel motion defaults to zero because width and height transitions cause
   // layout work on every frame, which is noticeable on lower-power clients.
   panelAnimationDurationMs: PanelAnimationDurationMs.pipe(
@@ -1542,6 +1553,7 @@ export const ClientSettingsPatch = Schema.Struct({
   loadBalancingEnabled: Schema.optionalKey(Schema.Boolean),
   loadBalancingWeights: Schema.optionalKey(LoadBalancingWeights),
   appearanceContrast: Schema.optionalKey(AppearanceContrast),
+  lineWidth: Schema.optionalKey(LineWidth),
   panelAnimationDurationMs: Schema.optionalKey(PanelAnimationDurationMs),
   browserDefaultViewport: Schema.optionalKey(PreviewViewportSetting),
   browserDefaultZoomFactor: Schema.optionalKey(PreviewZoomFactor),
