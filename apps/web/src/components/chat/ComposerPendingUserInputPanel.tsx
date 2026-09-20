@@ -189,7 +189,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         }
         data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
       >
-        <ComposerBanner.Content>
+        <ComposerBanner.Content className="!ps-4 sm:!ps-3">
           <span className="shrink-0 font-medium text-muted-foreground">
             {activeQuestion.header}
           </span>
@@ -232,7 +232,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       </CollapsibleTrigger>
       <CollapsiblePanel>
         <ComposerBanner.Scroll>
-          <ComposerBanner.Body className="ps-2 pe-1 pb-1 wrap-anywhere sm:ps-1.5">
+          <ComposerBanner.Body className="ps-4 pe-1 pb-1 wrap-anywhere sm:ps-3">
             <p className="text-sm text-foreground/85">{activeQuestion.question}</p>
             {customAnswerActive && activeQuestion.options.length > 0 ? (
               <p className="mt-1 text-secondary-label text-xs">
