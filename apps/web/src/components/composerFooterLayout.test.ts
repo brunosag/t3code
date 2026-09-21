@@ -47,16 +47,17 @@ describe("shouldUseCompactComposerFooter", () => {
     expect(shouldUseCompactComposerFooter(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX + 48)).toBe(false);
   });
 
-  it("keeps the full footer controls while only primary actions use the wide breakpoint", () => {
+  it("uses a higher breakpoint for wide action states", () => {
     expect(
-      shouldUseCompactComposerFooter(COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX - 1),
-    ).toBe(false);
-    expect(
-      shouldUseCompactComposerPrimaryActions(
-        COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX - 1,
-        { hasWideActions: true },
-      ),
+      shouldUseCompactComposerFooter(COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX - 1, {
+        hasWideActions: true,
+      }),
     ).toBe(true);
+    expect(
+      shouldUseCompactComposerFooter(COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX, {
+        hasWideActions: true,
+      }),
+    ).toBe(false);
   });
 });
 
@@ -445,6 +446,82 @@ describe("resolveScrollToEndClearance", () => {
       expect(resolveScrollToEndClearance({ ...layout, button: { left: 590, right: 710 } })).toBe(
         overlayHeight,
       );
+    }
+  });
+});
+
+describe("progressive composer controls", () => {
+  const measurement = {
+    gap: 4,
+    naturalFixedWidth: 140,
+    minimumFixedWidth: 80,
+    blockWidths: [80, 140],
+    iconOnlyBlockWidths: [40, 60],
+    overflowWidth: 24,
+  };
+
+  it("keeps labels while they fit and removes trailing labels before controls", () => {
+    for (const [hostWidth, iconOnlyCount, hiddenCount] of [
+      [368, 0, 0],
+      [367, 1, 0],
+      [288, 1, 0],
+      [287, 2, 0],
+      [248, 2, 0],
+      [247, 2, 1],
+      [211, 2, 2],
+    ] as const) {
+      expect(resolveRestingComposerControlsLayout({ ...measurement, hostWidth })).toEqual({
+        hiddenCount,
+        iconOnlyCount,
+        visible: true,
+      });
+    }
+  });
+
+  it("requires slack to restore labels and controls", () => {
+    for (const [hostWidth, previous, promoted] of [
+      [
+        368,
+        { hiddenCount: 0, iconOnlyCount: 1, visible: true },
+        { hiddenCount: 0, iconOnlyCount: 0, visible: true },
+      ],
+      [
+        288,
+        { hiddenCount: 0, iconOnlyCount: 2, visible: true },
+        { hiddenCount: 0, iconOnlyCount: 1, visible: true },
+      ],
+      [
+        248,
+        { hiddenCount: 1, iconOnlyCount: 2, visible: true },
+        { hiddenCount: 0, iconOnlyCount: 2, visible: true },
+      ],
+    ] as const) {
+      expect(resolveRestingComposerControlsLayout({ ...measurement, hostWidth, previous })).toEqual(
+        previous,
+      );
+      expect(
+        resolveRestingComposerControlsLayout({
+          ...measurement,
+          hostWidth: hostWidth + 1,
+          previous,
+        }),
+      ).toEqual(promoted);
+    }
+  });
+
+  it("settles through fractional label-width changes at each threshold", () => {
+    for (const hostWidth of [368, 288, 248]) {
+      let previous = resolveRestingComposerControlsLayout({ ...measurement, hostWidth });
+      for (let index = 0; index < 10; index += 1) {
+        const next = resolveRestingComposerControlsLayout({
+          ...measurement,
+          hostWidth,
+          previous,
+          naturalFixedWidth: 140 + (index % 2) * 0.5,
+        });
+        if (index > 1) expect(next).toEqual(previous);
+        previous = next;
+      }
     }
   });
 });

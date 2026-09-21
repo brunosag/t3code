@@ -12,6 +12,7 @@ import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts"
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as NetAddress from "effect/unstable/net/NetAddress";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { HttpRouter, HttpServer } from "effect/unstable/http";
@@ -517,7 +518,7 @@ const fakeEnvironment = ServerEnvironment.ServerEnvironment.of({
 });
 /** The registry only uses the address to render a credential's endpoint; the test server's real port is not known yet. */
 const fakeMcpAddress = HttpServer.HttpServer.of({
-  address: { _tag: "TcpAddress", hostname: "127.0.0.1", port: 43123 },
+  address: NetAddress.inetAddressFromIpStringUnsafe("127.0.0.1", 43123),
   serve: (() => Effect.void) as HttpServer.HttpServer["Service"]["serve"],
 });
 
@@ -575,7 +576,7 @@ it.effect("drives the real preview toolkit with a real thread credential", () =>
         disableLogger: true,
       }).pipe(Layer.build);
       const httpServer = yield* HttpServer.HttpServer;
-      if (httpServer.address._tag !== "TcpAddress") {
+      if (!NetAddress.isInetAddress(httpServer.address)) {
         return yield* Effect.die(new Error("test MCP server has no TCP address"));
       }
       const endpoint = `http://127.0.0.1:${httpServer.address.port}/mcp`;
