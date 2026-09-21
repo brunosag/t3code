@@ -722,6 +722,236 @@ describe("PiAdapter", () => {
     }),
   );
 
+  it.effect("folds a foreground subagent's Agent tool frames into task events", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-subagent-foreground");
+      yield* startSession(adapter, threadId);
+      const receipts = yield* subscribe(adapter, 6);
+
+      const client = harness.clients[0]!;
+      client.emit({
+        type: "tool_execution_start",
+        toolCallId: "call_agent",
+        toolName: "Agent",
+        args: { description: "Find the config" },
+      });
+      // The extension attaches AgentDetails to partialResult on every stream
+      // frame; the first one identifies the run.
+      client.emit({
+        type: "tool_execution_update",
+        toolCallId: "call_agent",
+        toolName: "Agent",
+        args: { description: "Find the config" },
+        partialResult: {
+          content: [{ type: "text", text: "3 tool uses..." }],
+          details: {
+            displayName: "Scout",
+            description: "Find the config",
+            subagentType: "scout",
+            modelName: "haiku 4.5",
+            tags: ["thinking: high"],
+            status: "running",
+            activity: "reading src/config.ts",
+            toolUses: 3,
+            tokens: "33.8k token",
+            durationMs: 1200,
+          },
+        },
+      });
+      client.emit({
+        type: "tool_execution_end",
+        toolCallId: "call_agent",
+        toolName: "Agent",
+        args: { description: "Find the config" },
+        result: {
+          content: [{ type: "text", text: "Found it." }],
+          details: {
+            displayName: "Scout",
+            description: "Find the config",
+            subagentType: "scout",
+            modelName: "haiku 4.5",
+            tags: ["thinking: high"],
+            status: "completed",
+            toolUses: 4,
+            tokens: "41.2k token",
+            durationMs: 2600,
+          },
+        },
+        isError: false,
+      });
+
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events.map((event) => event.type)).toEqual([
+        "item.started",
+        "item.updated",
+        "task.started",
+        "task.progress",
+        "item.completed",
+        "task.completed",
+      ]);
+      for (const event of events) {
+        expect(() => assertRuntimeEvent(event)).not.toThrow();
+      }
+      // No reported agentId on a foreground run, so the tool call id is the
+      // task identity across every frame.
+      expect(events[2]).toMatchObject({
+        type: "task.started",
+        payload: {
+          taskId: "call_agent",
+          taskType: "subagent",
+          title: "Scout",
+          description: "Find the config",
+          role: "scout",
+          model: "haiku 4.5",
+          effort: "high",
+        },
+      });
+      expect(events[3]).toMatchObject({
+        type: "task.progress",
+        payload: {
+          taskId: "call_agent",
+          description: "reading src/config.ts",
+          summary: "reading src/config.ts",
+          status: "running",
+          typedUsage: { totalTokens: 33800, toolUses: 3, durationMs: 1200 },
+        },
+      });
+      expect(events[5]).toMatchObject({
+        type: "task.completed",
+        payload: {
+          taskId: "call_agent",
+          status: "completed",
+          typedUsage: { totalTokens: 41200, toolUses: 4, durationMs: 2600 },
+        },
+      });
+    }),
+  );
+
+  it.effect("settles a background agent from its completion notification", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-subagent-background");
+      yield* startSession(adapter, threadId);
+      const receipts = yield* subscribe(adapter, 5);
+
+      const client = harness.clients[0]!;
+      client.emit({
+        type: "tool_execution_start",
+        toolCallId: "call_bg",
+        toolName: "Agent",
+        args: { description: "Build the thing" },
+      });
+      // A background spawn returns immediately with its agent id and
+      // `background`; the run continues after the parent turn settles.
+      client.emit({
+        type: "tool_execution_end",
+        toolCallId: "call_bg",
+        toolName: "Agent",
+        args: { description: "Build the thing" },
+        result: {
+          content: [{ type: "text", text: "Running in background (ID: agent-7)" }],
+          details: {
+            displayName: "Worker",
+            description: "Build the thing",
+            subagentType: "worker",
+            status: "background",
+            agentId: "agent-7",
+            toolUses: 0,
+            durationMs: 0,
+          },
+        },
+        isError: false,
+      });
+      client.emit({
+        type: "message_end",
+        message: {
+          role: "custom",
+          customType: "subagent-notification",
+          content: "Background agent completed",
+          details: {
+            id: "agent-7",
+            description: "Build the thing",
+            status: "completed",
+            toolUses: 9,
+            totalTokens: 12000,
+            durationMs: 45000,
+            resultPreview: "Build finished.",
+            outputFile: "/tmp/agent-7.md",
+          },
+        },
+      });
+
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events.map((event) => event.type)).toEqual([
+        "item.started",
+        "item.completed",
+        "task.started",
+        "task.progress",
+        "task.completed",
+      ]);
+      for (const event of events) {
+        expect(() => assertRuntimeEvent(event)).not.toThrow();
+      }
+      // The reported agent id, not the tool call id, is the task identity so
+      // the later notification can find the same row.
+      expect(events[2]).toMatchObject({
+        type: "task.started",
+        payload: { taskId: "agent-7", taskType: "subagent", title: "Worker", role: "worker" },
+      });
+      expect(events[3]).toMatchObject({
+        type: "task.progress",
+        payload: { taskId: "agent-7", status: "running" },
+      });
+      expect(events[4]).toMatchObject({
+        type: "task.completed",
+        payload: {
+          taskId: "agent-7",
+          status: "completed",
+          summary: "Build finished.",
+          outputFile: "/tmp/agent-7.md",
+          typedUsage: { totalTokens: 12000, toolUses: 9, durationMs: 45000 },
+        },
+      });
+    }),
+  );
+
+  it.effect("leaves a tool result with unrelated details as an ordinary call", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-subagent-negative");
+      yield* startSession(adapter, threadId);
+      const receipts = yield* subscribe(adapter, 2);
+
+      const client = harness.clients[0]!;
+      client.emit({
+        type: "tool_execution_start",
+        toolCallId: "call_bash",
+        toolName: "bash",
+        args: { command: "ls" },
+      });
+      client.emit({
+        type: "tool_execution_end",
+        toolCallId: "call_bash",
+        toolName: "bash",
+        args: { command: "ls" },
+        // Structured details, but not an agent: no displayName/subagentType/
+        // agentId, so it must not join the Agents surface.
+        result: {
+          content: [{ type: "text", text: "done" }],
+          details: { truncation: null, fullOutputPath: null, status: "completed" },
+        },
+        isError: false,
+      });
+
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events.map((event) => event.type)).toEqual(["item.started", "item.completed"]);
+    }),
+  );
+
   it.effect("reports Pi's context usage as a canonical token-usage event", () =>
     Effect.gen(function* () {
       const harness = makeHarness();
@@ -822,6 +1052,72 @@ describe("PiAdapter", () => {
       // Settlement closed the turn, so the next turn starts fresh.
       const next = yield* adapter.sendTurn({ threadId, input: "after settle" });
       expect(next.turnId).not.toBe(first.turnId);
+    }),
+  );
+
+  it.effect("marks a turn that delegated as having subagents", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-subagent-usage");
+      yield* startSession(adapter, threadId);
+      harness.clients[0]!.state = { ...harness.clients[0]!.state, isStreaming: true };
+      const receipts = yield* subscribe(adapter, 8);
+
+      yield* adapter.sendTurn({ threadId, input: "delegate" });
+      const client = harness.clients[0]!;
+      client.emit({
+        type: "tool_execution_start",
+        toolCallId: "call_agent",
+        toolName: "Agent",
+        args: { description: "Find it" },
+      });
+      client.emit({
+        type: "tool_execution_end",
+        toolCallId: "call_agent",
+        toolName: "Agent",
+        args: { description: "Find it" },
+        result: {
+          content: [{ type: "text", text: "Found it." }],
+          details: { displayName: "Scout", subagentType: "scout", status: "completed" },
+        },
+        isError: false,
+      });
+      client.emit({ type: "agent_settled" });
+
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events.map((event) => event.type)).toEqual([
+        "turn.started",
+        "session.state.changed",
+        "item.started",
+        "item.completed",
+        "task.started",
+        "task.completed",
+        "turn.completed",
+        "session.state.changed",
+      ]);
+      expect(events[6]).toMatchObject({
+        type: "turn.completed",
+        payload: {
+          state: "completed",
+          tokenUsage: {
+            usageScope: "main_agent",
+            usageStatus: "unavailable",
+            hasSubagents: true,
+          },
+        },
+      });
+
+      // A turn that delegated nothing keeps its previous payload shape.
+      const nextReceipts = yield* subscribe(adapter, 4);
+      yield* adapter.sendTurn({ threadId, input: "just talk" });
+      client.emit({ type: "agent_settled" });
+      const nextEvents = Array.from(yield* Fiber.join(nextReceipts));
+      expect(nextEvents[2]).toMatchObject({
+        type: "turn.completed",
+        payload: { state: "completed" },
+      });
+      expect(nextEvents[2]!.payload).not.toHaveProperty("tokenUsage");
     }),
   );
 

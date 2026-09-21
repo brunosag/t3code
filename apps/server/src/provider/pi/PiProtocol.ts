@@ -89,6 +89,11 @@ export const PiMessage = Schema.Struct({
   ),
   stopReason: Schema.optional(Schema.String),
   errorMessage: Schema.optional(Schema.String),
+  // Custom messages carry the extension's own type and payload. T3 reads
+  // `subagent-notification` to settle background agents; everything else is
+  // still parsed as ordinary text.
+  customType: Schema.optional(Schema.String),
+  details: Schema.optional(Schema.Unknown),
 });
 export const PiDelta = Schema.Struct({
   type: Schema.String,
@@ -118,6 +123,55 @@ export const PiSideChannelMessage = Schema.Union([
   }),
 ]);
 export type PiSideChannelMessage = typeof PiSideChannelMessage.Type;
+
+/**
+ * The pi-subagents extension attaches this to the `Agent` tool's `result` and
+ * `partialResult`. It is extension-owned rather than part of Pi's RPC protocol,
+ * so every field is optional and an unrecognized status is ignored instead of
+ * failing the turn. `tokens` is the extension's preformatted display string
+ * ("33.8k token"); numeric totals only arrive on a completion notification.
+ */
+export const PiAgentDetails = Schema.Struct({
+  displayName: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  subagentType: Schema.optional(Schema.String),
+  modelName: Schema.optional(Schema.String),
+  tags: Schema.optional(Schema.Array(Schema.String)),
+  status: Schema.optional(Schema.String),
+  activity: Schema.optional(Schema.String),
+  agentId: Schema.optional(Schema.String),
+  toolUses: Schema.optional(Schema.Finite),
+  turnCount: Schema.optional(Schema.Finite),
+  maxTurns: Schema.optional(Schema.Finite),
+  durationMs: Schema.optional(Schema.Finite),
+  tokens: Schema.optional(Schema.String),
+  cost: Schema.optional(Schema.Finite),
+  error: Schema.optional(Schema.String),
+});
+export type PiAgentDetails = typeof PiAgentDetails.Type;
+
+/**
+ * Details on the `subagent-notification` custom message — how a *background*
+ * agent's terminal state reaches the parent. A group completion carries the
+ * remaining agents in `others`, so one notification can settle several tasks.
+ */
+export const PiAgentNotification = Schema.Struct({
+  id: Schema.String,
+  description: Schema.optional(Schema.String),
+  status: Schema.optional(Schema.String),
+  toolUses: Schema.optional(Schema.Finite),
+  turnCount: Schema.optional(Schema.Finite),
+  maxTurns: Schema.optional(Schema.Finite),
+  totalTokens: Schema.optional(Schema.Finite),
+  totalCost: Schema.optional(Schema.Finite),
+  durationMs: Schema.optional(Schema.Finite),
+  outputFile: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String),
+  resultPreview: Schema.optional(Schema.String),
+  // Same shape as the parent, recursively; decoded per element by the adapter.
+  others: Schema.optional(Schema.Array(Schema.Unknown)),
+});
+export type PiAgentNotification = typeof PiAgentNotification.Type;
 
 // T3 selects Pi models as `provider/modelId`. The removed synthetic `default`
 // selection is tolerated so threads that still carry it keep running whatever

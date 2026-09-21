@@ -7,11 +7,14 @@ import {
   ProviderDriverKind,
   RuntimeItemId,
   RuntimeRequestId,
+  RuntimeTaskId,
   TurnId,
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderRuntimeEventBase,
   type ProviderSession,
+  type RuntimeTaskStatus,
+  type RuntimeTaskUsage,
   type ThreadId,
   type ThreadTokenUsageSnapshot,
   type UserInputQuestion,
@@ -29,6 +32,8 @@ import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { withPiMcpEnvironment } from "./PiMcpExtension.ts";
 import { PiRpcClient } from "./PiRpcClient.ts";
 import {
+  PiAgentDetails,
+  PiAgentNotification,
   PiDelta,
   PiForkMessages,
   PiForkResult,
@@ -85,6 +90,136 @@ const toolDetail = (value: unknown): string | undefined => {
       .slice(0, 12_000) || undefined
   );
 };
+const decodeToolEnvelope = Schema.decodeUnknownOption(Schema.Struct({ details: Schema.Unknown }));
+const decodePiAgentDetails = Schema.decodeUnknownOption(PiAgentDetails);
+const decodePiAgentNotification = Schema.decodeUnknownOption(PiAgentNotification);
+
+/**
+ * pi-subagents statuses T3 understands. An unrecognized status is ignored
+ * rather than emitted, so an extension update can never fail or stall a turn.
+ */
+const PI_AGENT_STATUSES: ReadonlySet<string> = new Set([
+  "queued",
+  "running",
+  "background",
+  "completed",
+  "steered",
+  "stopped",
+  "aborted",
+  "error",
+]);
+/** Terminal statuses. `stopped` is terminal but is not a RuntimeTaskStatus. */
+const PI_AGENT_TERMINAL_STATUSES: ReadonlySet<string> = new Set([
+  "completed",
+  "steered",
+  "stopped",
+  "aborted",
+  "error",
+]);
+
+/** Maps a pi-subagents status onto T3's task vocabulary. */
+function piAgentRuntimeStatus(status: string | undefined): RuntimeTaskStatus | undefined {
+  switch (status) {
+    case "queued":
+      return "pending";
+    case "running":
+    case "background":
+      return "running";
+    case "completed":
+    case "steered":
+      return "completed";
+    case "aborted":
+      return "cancelled";
+    case "error":
+      return "failed";
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The extension folds the run's thinking level into a `thinking: high` tag.
+ * T3 surfaces that as the task's effort; the other tags are decoration.
+ */
+function piAgentEffort(tags: readonly string[] | undefined): string | undefined {
+  for (const tag of tags ?? []) {
+    const match = /^thinking:\s*(.+)$/.exec(tag.trim());
+    const effort = match?.[1]?.trim();
+    if (effort) return effort;
+  }
+  return undefined;
+}
+
+/**
+ * Parses pi-subagents' preformatted token string ("33.8k token"). That is a
+ * display value, so the parse is best-effort: an unrecognized shape yields
+ * undefined and the Agents row shows no total instead of an invented one.
+ */
+function parsePiTokenCount(value: string | undefined): number | undefined {
+  const match = /^([\d.]+)\s*([kM])?\s*token$/.exec(value?.trim() ?? "");
+  if (!match?.[1]) return undefined;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount)) return undefined;
+  const scale = match[2] === "M" ? 1_000_000 : match[2] === "k" ? 1_000 : 1;
+  return Math.round(amount * scale);
+}
+
+/**
+ * Reads pi-subagents' structured `details` off a tool result. Detection is
+ * structural, not by tool name: any tool returning an agent-shaped details
+ * object feeds the Agents surface, and a result without one stays an ordinary
+ * tool call.
+ */
+function piAgentDetailsFromToolResult(value: unknown): PiAgentDetails | undefined {
+  const envelope = decodeToolEnvelope(value);
+  if (Option.isNone(envelope)) return undefined;
+  const details = decodePiAgentDetails(envelope.value.details);
+  if (Option.isNone(details)) return undefined;
+  const agent = details.value;
+  const identified =
+    (agent.displayName?.trim().length ?? 0) > 0 ||
+    (agent.subagentType?.trim().length ?? 0) > 0 ||
+    (agent.agentId?.trim().length ?? 0) > 0;
+  if (!identified || agent.status === undefined || !PI_AGENT_STATUSES.has(agent.status)) {
+    return undefined;
+  }
+  return agent;
+}
+
+/** One observation of a subagent, from either a tool frame or a notification. */
+interface PiAgentObservation {
+  taskId: string;
+  status?: string | undefined;
+  title?: string | undefined;
+  description?: string | undefined;
+  role?: string | undefined;
+  model?: string | undefined;
+  effort?: string | undefined;
+  activity?: string | undefined;
+  toolUses?: number | undefined;
+  durationMs?: number | undefined;
+  totalTokens?: number | undefined;
+  error?: string | undefined;
+  result?: string | undefined;
+  outputFile?: string | undefined;
+}
+
+/**
+ * The client fold drops a usage object without a numeric `totalTokens`, so only
+ * emit one when a real total is known; tool and duration counts ride along.
+ */
+function piAgentUsage(observation: PiAgentObservation): RuntimeTaskUsage | undefined {
+  const totalTokens = finiteNonNegativeInt(observation.totalTokens);
+  if (totalTokens === undefined) return undefined;
+  const toolUses = finiteNonNegativeInt(observation.toolUses);
+  const durationMs = finiteNonNegativeInt(observation.durationMs);
+  return {
+    totalTokens,
+    ...(toolUses !== undefined ? { toolUses } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+  };
+}
+
 type EventBody = ProviderRuntimeEvent extends infer E
   ? E extends ProviderRuntimeEvent
     ? Pick<E, "type" | "payload">
@@ -172,6 +307,19 @@ interface Session {
    * rebuild the rest after a resume.
    */
   turnPrompts: number[];
+  /**
+   * Subagent tasks observed this session, keyed by task id, so repeated tool
+   * frames and a later completion notification update one row instead of
+   * reopening a settled agent.
+   */
+  agents: Map<string, { terminal: boolean }>;
+  /** pi-subagents' own agent id → T3 task id, to correlate a background
+   * completion notification with the `Agent` call that spawned it. */
+  agentTaskIdByAgentId: Map<string, string>;
+  /** The `Agent` tool call id → task id, stable across its update/end frames. */
+  agentTaskIdByToolCallId: Map<string, string>;
+  /** Whether a subagent ran this turn. */
+  hasSubagents: boolean;
   pending: Map<string, PendingInput>;
   operations: Promise<unknown>;
 }
@@ -215,6 +363,120 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     }
     if (!usage) return;
     emit(ctx, { type: "thread.token-usage.updated", payload: { usage } });
+  };
+  // Pi has no task events of its own: the pi-subagents extension reports agent
+  // state as structured `details` on the Agent tool and as a custom completion
+  // message. Translating both here is what lights up the Agents surface.
+  const observePiAgent = (ctx: Session, observation: PiAgentObservation): void => {
+    const { taskId } = observation;
+    const existing = ctx.agents.get(taskId);
+    const status = observation.status;
+    const terminal = status !== undefined && PI_AGENT_TERMINAL_STATUSES.has(status);
+    ctx.agents.set(taskId, { terminal: terminal || existing?.terminal === true });
+    const linkage = {
+      taskType: "subagent",
+      ...(observation.role ? { role: observation.role } : {}),
+      ...(observation.model ? { model: observation.model } : {}),
+      ...(observation.effort ? { effort: observation.effort } : {}),
+    };
+    const typedUsage = piAgentUsage(observation);
+    if (!existing) {
+      ctx.hasSubagents = true;
+      emit(ctx, {
+        type: "task.started",
+        payload: {
+          taskId: RuntimeTaskId.make(taskId),
+          ...(observation.description ? { description: observation.description } : {}),
+          ...(observation.title ? { title: observation.title } : {}),
+          ...linkage,
+        },
+      });
+    }
+    if (!terminal) {
+      // A settled row must not reopen on a late non-terminal frame.
+      if (existing?.terminal === true) return;
+      const runtimeStatus = piAgentRuntimeStatus(status);
+      emit(ctx, {
+        type: "task.progress",
+        payload: {
+          taskId: RuntimeTaskId.make(taskId),
+          description:
+            observation.activity ?? observation.description ?? observation.title ?? taskId,
+          ...(observation.activity ? { summary: observation.activity } : {}),
+          ...(runtimeStatus ? { status: runtimeStatus } : {}),
+          ...(typedUsage ? { typedUsage } : {}),
+          ...linkage,
+        },
+      });
+      return;
+    }
+    // `task.completed` cannot carry `cancelled`, so an aborted agent settles
+    // through `task.updated`, exactly as Claude's killed tasks do.
+    if (status === "aborted") {
+      emit(ctx, {
+        type: "task.updated",
+        payload: {
+          taskId: RuntimeTaskId.make(taskId),
+          status: "cancelled",
+          ...(observation.error ? { error: observation.error } : {}),
+          ...linkage,
+        },
+      });
+      return;
+    }
+    const summary = observation.error ?? observation.result ?? observation.activity;
+    emit(ctx, {
+      type: "task.completed",
+      payload: {
+        taskId: RuntimeTaskId.make(taskId),
+        status: status === "error" ? "failed" : status === "stopped" ? "stopped" : "completed",
+        ...(summary ? { summary } : {}),
+        ...(typedUsage ? { typedUsage } : {}),
+        ...(observation.outputFile ? { outputFile: observation.outputFile } : {}),
+        ...linkage,
+      },
+    });
+  };
+  const observePiAgentTool = (ctx: Session, toolCallId: string, details: PiAgentDetails): void => {
+    const reportedId = details.agentId?.trim() || undefined;
+    const taskId = ctx.agentTaskIdByToolCallId.get(toolCallId) ?? reportedId ?? toolCallId;
+    ctx.agentTaskIdByToolCallId.set(toolCallId, taskId);
+    if (reportedId) ctx.agentTaskIdByAgentId.set(reportedId, taskId);
+    observePiAgent(ctx, {
+      taskId,
+      status: details.status,
+      title: details.displayName?.trim() || undefined,
+      description: details.description?.trim() || undefined,
+      role: details.subagentType?.trim() || undefined,
+      model: details.modelName?.trim() || undefined,
+      effort: piAgentEffort(details.tags),
+      activity: details.activity?.trim() || undefined,
+      toolUses: details.toolUses,
+      durationMs: details.durationMs,
+      totalTokens: parsePiTokenCount(details.tokens),
+      error: details.error?.trim() || undefined,
+    });
+  };
+  const observePiAgentNotification = (ctx: Session, value: unknown): void => {
+    const decoded = decodePiAgentNotification(value);
+    if (Option.isNone(decoded)) return;
+    const notification = decoded.value;
+    const reportedId = notification.id.trim();
+    if (reportedId) {
+      observePiAgent(ctx, {
+        taskId: ctx.agentTaskIdByAgentId.get(reportedId) ?? reportedId,
+        status: notification.status,
+        description: notification.description?.trim() || undefined,
+        toolUses: notification.toolUses,
+        durationMs: notification.durationMs,
+        totalTokens: notification.totalTokens,
+        error: notification.error?.trim() || undefined,
+        result: notification.resultPreview?.trim() || undefined,
+        outputFile: notification.outputFile?.trim() || undefined,
+      });
+    }
+    // A group completion settles every remaining agent it names.
+    for (const other of notification.others ?? []) observePiAgentNotification(ctx, other);
   };
   const call = <A>(method: string, run: () => Promise<A>) =>
     Effect.tryPromise({
@@ -333,6 +595,18 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       payload: {
         state: ctx.interrupted ? "interrupted" : ctx.failure ? "failed" : "completed",
         ...(ctx.failure ? { errorMessage: ctx.failure } : {}),
+        // Pi reports session-wide totals, not per-turn ones, so a turn that
+        // delegated cannot supply a complete main-agent total. Marking it lets
+        // usage rollups exclude delegated turns, as the other adapters do.
+        ...(ctx.hasSubagents
+          ? {
+              tokenUsage: {
+                usageScope: "main_agent" as const,
+                usageStatus: "unavailable" as const,
+                hasSubagents: true,
+              },
+            }
+          : {}),
       },
     });
     const { activeTurnId: _, ...rest } = ctx.session;
@@ -419,6 +693,14 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
         }
         case "message_end": {
           const message = decodePiMessage(event.message);
+          // A background agent's terminal state arrives as a custom completion
+          // message; foreground runs report through the Agent tool instead.
+          if (message.role === "custom") {
+            if (message.customType === "subagent-notification") {
+              observePiAgentNotification(ctx, message.details);
+            }
+            break;
+          }
           if (message.role !== "assistant") break;
           if (!ctx.itemId) ctx.itemId = RuntimeItemId.make(NodeCrypto.randomUUID());
           const text = piMessageText(message);
@@ -486,6 +768,8 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             },
             { itemId: RuntimeItemId.make(tool.toolCallId) },
           );
+          const agentDetails = piAgentDetailsFromToolResult(event.result ?? event.partialResult);
+          if (agentDetails) observePiAgentTool(ctx, tool.toolCallId, agentDetails);
           break;
         }
         // agent_end is NOT settlement: Pi may retry, compact, or run a follow-up.
@@ -635,6 +919,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             runStarted: false,
             interruptEpoch: 0,
             turnPrompts: [],
+            agents: new Map(),
+            agentTaskIdByAgentId: new Map(),
+            agentTaskIdByToolCallId: new Map(),
+            hasSubagents: false,
             pending: new Map(),
             operations: Promise.resolve(),
           };
@@ -770,6 +1058,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
             ctx.failure = undefined;
             ctx.interrupted = false;
             ctx.runStarted = false;
+            ctx.hasSubagents = false;
             ctx.session = {
               ...ctx.session,
               activeTurnId: turnId,
