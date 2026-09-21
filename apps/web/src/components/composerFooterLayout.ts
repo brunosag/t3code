@@ -13,14 +13,8 @@ export function getRestingComposerImagePreviewCounts(imageCount: number): {
   };
 }
 
-export function shouldUseCompactComposerFooter(
-  width: number | null,
-  options?: { hasWideActions?: boolean },
-): boolean {
-  const breakpoint = options?.hasWideActions
-    ? COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX
-    : COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX;
-  return width !== null && width < breakpoint;
+export function shouldUseCompactComposerFooter(width: number | null): boolean {
+  return width !== null && width < COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX;
 }
 
 export function shouldUseRestingComposerLayout(input: {

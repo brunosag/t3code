@@ -187,7 +187,6 @@ import { useComposerPathSearch } from "../../lib/composerPathSearchState";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import {
   COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
-  COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX,
   getRestingComposerImagePreviewCounts,
   resolveRestingComposerControlsLayout,
   shouldAnimateComposerRestingTransition,
@@ -3149,14 +3148,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const measureComposerFormWidth = () => composerForm.clientWidth;
     const measureFooterCompactness = () => {
       const composerFormWidth = measureComposerFormWidth();
-      const footerCompact = shouldUseCompactComposerFooter(composerFormWidth, {
+      const footerCompact = shouldUseCompactComposerFooter(composerFormWidth);
+      const primaryActionsCompact = shouldUseCompactComposerPrimaryActions(composerFormWidth, {
         hasWideActions: composerFooterHasWideActions,
       });
-      const primaryActionsCompact =
-        footerCompact &&
-        shouldUseCompactComposerPrimaryActions(composerFormWidth, {
-          hasWideActions: composerFooterHasWideActions,
-        });
       return {
         primaryActionsCompact,
         footerCompact,
@@ -3175,9 +3170,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           active: panelAnimationsActive,
           durationMs: panelAnimationDurationMs,
           breakpoint: {
-            value: composerFooterHasWideActions
-              ? COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX
-              : COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
+            value: COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
             unit: "px",
           },
         })

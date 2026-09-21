@@ -47,17 +47,16 @@ describe("shouldUseCompactComposerFooter", () => {
     expect(shouldUseCompactComposerFooter(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX + 48)).toBe(false);
   });
 
-  it("uses a higher breakpoint for wide action states", () => {
+  it("keeps the full footer controls while only primary actions use the wide breakpoint", () => {
     expect(
-      shouldUseCompactComposerFooter(COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX - 1, {
-        hasWideActions: true,
-      }),
-    ).toBe(true);
-    expect(
-      shouldUseCompactComposerFooter(COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX, {
-        hasWideActions: true,
-      }),
+      shouldUseCompactComposerFooter(COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX - 1),
     ).toBe(false);
+    expect(
+      shouldUseCompactComposerPrimaryActions(
+        COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX - 1,
+        { hasWideActions: true },
+      ),
+    ).toBe(true);
   });
 });
 
