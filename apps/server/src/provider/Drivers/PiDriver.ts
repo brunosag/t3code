@@ -1,5 +1,6 @@
 // @effect-diagnostics schemaSyncInEffect:off globalDate:off - RPC Promise boundary; decode failures are caught by tryPromise.
 import {
+  type AgentDefinition,
   type ModelCapabilities,
   PiConnectionSettings,
   ProviderDriverKind,
@@ -10,6 +11,7 @@ import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { ServerConfig } from "../../config.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
@@ -19,6 +21,12 @@ import {
 } from "../ProviderDriver.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import { makePiAdapter } from "../pi/PiAdapter.ts";
+import {
+  materializePiAgentsExtension,
+  piAgentDefinitionsPath,
+  withPiAgentsEnvironment,
+  writePiAgentDefinitions,
+} from "../pi/PiAgentsExtension.ts";
 import { mapPiThinkingCapabilities } from "../pi/PiCapabilities.ts";
 import { PiRpcClient } from "../pi/PiRpcClient.ts";
 import { PiCommands, PiModels, PiState, PiThinkingLevels } from "../pi/PiProtocol.ts";
@@ -62,7 +70,7 @@ const probePiModelCapabilities = async (
 };
 
 const DRIVER = ProviderDriverKind.make("pi");
-export type PiDriverEnv = ServerConfig;
+export type PiDriverEnv = ServerConfig | ServerSettingsService;
 const maintenance = makeManualOnlyProviderMaintenanceCapabilities({
   provider: DRIVER,
   packageName: null,
@@ -76,6 +84,7 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const server = yield* ServerConfig;
+      const serverSettings = yield* ServerSettingsService;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const userInputExtensionPath = yield* Effect.tryPromise({
         try: () => materializePiUserInputExtension(server.stateDir),
@@ -101,6 +110,55 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
             cause,
           }),
       });
+      const agentsExtensionPath = yield* Effect.tryPromise({
+        try: () => materializePiAgentsExtension(server.stateDir),
+        catch: (cause) =>
+          new ProviderDriverError({
+            driver: DRIVER,
+            instanceId,
+            detail: `Failed to prepare the Pi agent-registration extension: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`,
+            cause,
+          }),
+      });
+      const writeAgents = (definitions: readonly AgentDefinition[]) =>
+        Effect.tryPromise({
+          try: () => writePiAgentDefinitions(server.stateDir, definitions),
+          catch: (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER,
+              instanceId,
+              detail: `Failed to write Pi agent definitions: ${
+                cause instanceof Error ? cause.message : String(cause)
+              }`,
+              cause,
+            }),
+        });
+      const initialAgentDefinitions = yield* serverSettings.getSettings.pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER,
+              instanceId,
+              detail: `Failed to read Pi agent definitions: ${
+                cause instanceof Error ? cause.message : String(cause)
+              }`,
+              cause,
+            }),
+        ),
+        Effect.map((settings) => settings.agentDefinitions),
+      );
+      yield* writeAgents(initialAgentDefinitions);
+      // The extension re-reads the file at each session start, so rewriting it
+      // is what makes an edit reach the next new thread. Failures inside the
+      // watcher must not take the driver down.
+      yield* Effect.forkScoped(
+        serverSettings.streamChanges.pipe(
+          Stream.runForEach((settings) => writeAgents(settings.agentDefinitions)),
+          Effect.catch(() => Effect.void),
+        ),
+      );
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER,
         instanceId,
@@ -227,9 +285,10 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
         instanceId,
         cwd: server.cwd,
         attachmentsDir: server.attachmentsDir,
-        environment: processEnv,
+        environment: withPiAgentsEnvironment(processEnv, piAgentDefinitionsPath(server.stateDir)),
         userInputExtensionPath,
         mcpExtensionPath,
+        agentsExtensionPath,
       });
       yield* refresh;
       return {

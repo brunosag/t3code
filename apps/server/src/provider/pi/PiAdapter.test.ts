@@ -289,6 +289,46 @@ describe("PiAdapter", () => {
     }),
   );
 
+  it.effect("loads the agent-registration extension on every Pi process", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter({
+        ...harness.options,
+        agentsExtensionPath: "/t3/pi-agents.mjs",
+      });
+      const threadId = ThreadId.make("thread-agents-extension");
+      yield* startSession(adapter, threadId);
+      // No MCP credential here: the agent roster is not credential-scoped.
+      expect(harness.inits[0]?.extensionPaths).toEqual(["/t3/pi-agents.mjs"]);
+    }),
+  );
+
+  it.effect("loads the agent extension alongside the credential-scoped MCP one", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter({
+        ...harness.options,
+        agentsExtensionPath: "/t3/pi-agents.mjs",
+      });
+      const threadId = ThreadId.make("thread-agents-mcp-extensions");
+      McpProviderSession.setMcpProviderSession({
+        environmentId: EnvironmentId.make("environment-1"),
+        threadId,
+        providerSessionId: "provider-session-1",
+        providerInstanceId: piInstance,
+        endpoint: "http://127.0.0.1:1234/mcp",
+        authorizationHeader: "Bearer token-1",
+        capabilities: new Set(["preview"]),
+        agentDeviceEnvironment: { PATH: "/shim", PATH_SEPARATOR: ":" },
+      });
+
+      yield* startSession(adapter, threadId);
+      expect(harness.inits[0]?.extensionPaths).toEqual(["/t3/pi-agents.mjs", "/t3/pi-mcp.mjs"]);
+
+      yield* Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId));
+    }),
+  );
+
   it.effect("keeps other subscribers and sessions alive across disconnect and stop", () =>
     Effect.gen(function* () {
       const harness = makeHarness();

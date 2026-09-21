@@ -120,6 +120,14 @@ describe("searchSettings", () => {
     },
   );
 
+  it.each(["subagent", "delegate", "system prompt"])("finds the Agents panel by %s", (query) => {
+    expect(searchSettings(query)[0]).toMatchObject({
+      id: "agents",
+      to: "/settings/agents",
+      scope: "environment",
+    });
+  });
+
   it("returns no results for an empty query", () => {
     expect(searchSettings("   ", ITEMS)).toEqual([]);
   });
@@ -250,6 +258,7 @@ describe("searchSettings", () => {
   it("serves anchor props to panels from the catalog", () => {
     expect(searchableSetting("word-wrap")).toEqual({ id: "word-wrap", title: "Word wrap" });
     expect(searchableSetting("archive")).toEqual({ id: "archive", title: "Archived threads" });
+    expect(searchableSetting("agents")).toEqual({ id: "agents", title: "Agents" });
   });
 
   it("routes appearance settings to their current section", () => {

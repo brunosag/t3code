@@ -384,6 +384,9 @@ export function applyServerSettingsPatch(
     ...(patch.defaultProjectScripts !== undefined
       ? { defaultProjectScripts: patch.defaultProjectScripts }
       : {}),
+    // A definition list is replaced wholesale, not deep-merged element-wise:
+    // deleting or reordering an entry must survive the round trip.
+    ...(patch.agentDefinitions !== undefined ? { agentDefinitions: patch.agentDefinitions } : {}),
     ...(usageLimitSourcesPatch !== undefined
       ? {
           usageLimitSources: mergeSettingsEntries(

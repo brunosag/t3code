@@ -273,6 +273,8 @@ export interface PiAdapterOptions {
   userInputExtensionPath?: string;
   /** T3's MCP-toolkit extension, loaded only for threads that have a credential. */
   mcpExtensionPath?: string;
+  /** T3's agent-registration extension, loaded on every Pi process. */
+  agentsExtensionPath?: string;
   instanceId: ProviderInstanceId;
   createClient?: (options: ConstructorParameters<typeof PiRpcClient>[0]) => Client;
 }
@@ -900,6 +902,14 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
           // keeps the browser, device, and pull-request toolkits on the same
           // capability decision the built-in providers already honor.
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+          // Both T3 extensions ride the same `--extension` list; only the MCP one
+          // is credential-scoped, so an agent roster is present even without one.
+          const extensionPaths = [
+            ...(options.agentsExtensionPath !== undefined ? [options.agentsExtensionPath] : []),
+            ...(mcpSession !== undefined && options.mcpExtensionPath !== undefined
+              ? [options.mcpExtensionPath]
+              : []),
+          ];
           const now = new Date().toISOString();
           const ctx: Session = {
             client: undefined as unknown as Client,
@@ -933,9 +943,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
               mcpSession === undefined
                 ? options.environment
                 : withPiMcpEnvironment(options.environment, mcpSession),
-            ...(mcpSession !== undefined && options.mcpExtensionPath !== undefined
-              ? { extensionPaths: [options.mcpExtensionPath] }
-              : {}),
+            ...(extensionPaths.length > 0 ? { extensionPaths } : {}),
             ...(cursor ? { sessionPath: cursor.sessionPath } : {}),
             onEvent: (event) => handleEvent(ctx, event),
             ...(options.userInputExtensionPath

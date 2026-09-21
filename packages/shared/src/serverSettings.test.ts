@@ -804,3 +804,23 @@ describe("serverSettings helpers", () => {
     expect(resolved.pauseWhenOnBattery).toBe(false);
   });
 });
+
+describe("agentDefinitions patching", () => {
+  const scout = { name: "scout", systemPrompt: "You scout.", enabled: true };
+  const reviewer = { name: "reviewer", systemPrompt: "You review.", enabled: false };
+
+  it("replaces the whole list rather than deep-merging entries", () => {
+    const first = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      agentDefinitions: [scout, reviewer],
+    });
+    expect(first.agentDefinitions.map((definition) => definition.name)).toEqual([
+      "scout",
+      "reviewer",
+    ]);
+
+    // Removing an entry must survive the round trip; an element-wise merge
+    // would keep `reviewer` alive.
+    const second = applyServerSettingsPatch(first, { agentDefinitions: [scout] });
+    expect(second.agentDefinitions.map((definition) => definition.name)).toEqual(["scout"]);
+  });
+});
