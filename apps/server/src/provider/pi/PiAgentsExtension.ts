@@ -91,6 +91,10 @@ export interface PiAgentDefinitionWire {
   systemPrompt: string;
   model?: string;
   thinking?: string;
+  extensions?: boolean | readonly string[];
+  skills?: boolean | readonly string[];
+  maxTurns?: number;
+  promptMode?: "replace" | "append" | "auto";
   tools?: string[];
 }
 
@@ -106,6 +110,10 @@ export function toPiAgentDefinitions(
       systemPrompt: definition.systemPrompt,
       ...(definition.model ? { model: definition.model } : {}),
       ...(definition.thinking ? { thinking: definition.thinking } : {}),
+      ...(definition.extensions !== undefined ? { extensions: definition.extensions } : {}),
+      ...(definition.skills !== undefined ? { skills: definition.skills } : {}),
+      ...(definition.maxTurns !== undefined ? { maxTurns: definition.maxTurns } : {}),
+      ...(definition.promptMode !== undefined ? { promptMode: definition.promptMode } : {}),
       ...(definition.tools && definition.tools.length > 0 ? { tools: [...definition.tools] } : {}),
     }));
 }

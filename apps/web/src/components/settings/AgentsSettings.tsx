@@ -5,12 +5,32 @@ import type { AgentDefinition } from "@t3tools/contracts";
 
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
+
+/** How `boolean | string[]` inherit fields (extensions, skills) are edited. */
+type AgentNamesMode = "unset" | "all" | "none" | "custom";
+
+const AGENT_NAMES_MODE_LABELS: Record<AgentNamesMode, string> = {
+  unset: "Inherit",
+  all: "All",
+  none: "None",
+  custom: "Only…",
+};
+
+type AgentPromptMode = "unset" | "replace" | "append" | "auto";
+
+const AGENT_PROMPT_MODE_LABELS: Record<AgentPromptMode, string> = {
+  unset: "Default",
+  replace: "Replace",
+  append: "Append",
+  auto: "Auto",
+};
 
 /**
  * Local edit shape. Every field is a plain string so a freshly added agent can
@@ -26,7 +46,45 @@ interface AgentDraft {
   readonly model: string;
   readonly thinking: string;
   readonly tools: string;
+  readonly extensionsMode: AgentNamesMode;
+  readonly extensionsList: string;
+  readonly skillsMode: AgentNamesMode;
+  readonly skillsList: string;
+  readonly maxTurns: string;
+  readonly promptMode: AgentPromptMode;
   readonly enabled: boolean;
+}
+
+/** Split a comma-separated draft field into the trimmed names it lists. */
+function parseNames(value: string): string[] {
+  return value
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+}
+
+function toNamesMode(value: boolean | readonly string[] | undefined): AgentNamesMode {
+  if (value === undefined) return "unset";
+  if (value === true) return "all";
+  if (value === false) return "none";
+  return "custom";
+}
+
+function toNamesList(value: boolean | readonly string[] | undefined): string {
+  return value === undefined || typeof value === "boolean" ? "" : value.join(", ");
+}
+
+/**
+ * Reverse of {@link toNamesMode}. `unset` omits the field, leaving it to a
+ * same-named Pi agent file and then to the loader default.
+ */
+function fromNamesMode(mode: AgentNamesMode, list: string): boolean | string[] | undefined {
+  if (mode === "unset") return undefined;
+  if (mode === "all") return true;
+  if (mode === "none") return false;
+  // Nothing named yet: stay unset rather than narrowing the set to nothing.
+  const names = parseNames(list);
+  return names.length > 0 ? names : undefined;
 }
 
 let agentDraftId = 0;
@@ -42,6 +100,12 @@ function toDraft(definition: AgentDefinition, id: string): AgentDraft {
     model: definition.model ?? "",
     thinking: definition.thinking ?? "",
     tools: (definition.tools ?? []).join(", "),
+    extensionsMode: toNamesMode(definition.extensions),
+    extensionsList: toNamesList(definition.extensions),
+    skillsMode: toNamesMode(definition.skills),
+    skillsList: toNamesList(definition.skills),
+    maxTurns: definition.maxTurns === undefined ? "" : String(definition.maxTurns),
+    promptMode: definition.promptMode ?? "unset",
     enabled: definition.enabled,
   };
 }
@@ -56,6 +120,10 @@ function toDefinition(draft: AgentDraft): AgentDefinition {
   const description = draft.description.trim();
   const model = draft.model.trim();
   const thinking = draft.thinking.trim();
+  const extensions = fromNamesMode(draft.extensionsMode, draft.extensionsList);
+  const skills = fromNamesMode(draft.skillsMode, draft.skillsList);
+  const maxTurns = draft.maxTurns.trim();
+  const parsedMaxTurns = /^\d+$/.test(maxTurns) ? Number(maxTurns) : undefined;
   return {
     name: draft.name.trim(),
     systemPrompt: draft.systemPrompt.trim(),
@@ -65,6 +133,10 @@ function toDefinition(draft: AgentDraft): AgentDefinition {
     ...(model ? { model } : {}),
     ...(thinking ? { thinking } : {}),
     ...(tools.length > 0 ? { tools } : {}),
+    ...(extensions !== undefined ? { extensions } : {}),
+    ...(skills !== undefined ? { skills } : {}),
+    ...(parsedMaxTurns !== undefined ? { maxTurns: parsedMaxTurns } : {}),
+    ...(draft.promptMode !== "unset" ? { promptMode: draft.promptMode } : {}),
   };
 }
 
@@ -81,11 +153,61 @@ function nextAgentName(definitions: readonly AgentDraft[]): string {
   return `agent-${suffix}`;
 }
 
+/**
+ * Extensions and skills share a shape: inherit, all, none, or an explicit list.
+ * `Only…` reveals the comma-separated list below the picker.
+ */
+function AgentNamesField({
+  label,
+  mode,
+  list,
+  placeholder,
+  onModeChange,
+  onListChange,
+  onCommit,
+}: {
+  readonly label: string;
+  readonly mode: AgentNamesMode;
+  readonly list: string;
+  readonly placeholder: string;
+  readonly onModeChange: (mode: AgentNamesMode) => void;
+  readonly onListChange: (list: string) => void;
+  readonly onCommit: () => void;
+}) {
+  return (
+    <div className="block space-y-1.5 text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <Select value={mode} onValueChange={(value) => onModeChange(value as AgentNamesMode)}>
+        <SelectTrigger size="sm" aria-label={label}>
+          <SelectValue>{AGENT_NAMES_MODE_LABELS[mode]}</SelectValue>
+        </SelectTrigger>
+        <SelectPopup align="start" alignItemWithTrigger={false}>
+          <SelectItem value="unset">Inherit</SelectItem>
+          <SelectItem value="all">All</SelectItem>
+          <SelectItem value="none">None</SelectItem>
+          <SelectItem value="custom">Only…</SelectItem>
+        </SelectPopup>
+      </Select>
+      {mode === "custom" ? (
+        <Input
+          value={list}
+          spellCheck={false}
+          placeholder={placeholder}
+          aria-label={`${label} names`}
+          onChange={(event) => onListChange(event.target.value)}
+          onBlur={onCommit}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function AgentCard({
   definition,
   index,
   onChange,
   onCommit,
+  onCommitPatch,
   onToggle,
   onRemove,
 }: {
@@ -93,6 +215,8 @@ function AgentCard({
   readonly index: number;
   readonly onChange: (patch: Partial<AgentDraft>) => void;
   readonly onCommit: () => void;
+  /** Selects persist the moment they change, so they commit a patch directly. */
+  readonly onCommitPatch: (patch: Partial<AgentDraft>) => void;
   readonly onToggle: (enabled: boolean) => void;
   readonly onRemove: () => void;
 }) {
@@ -163,11 +287,60 @@ function AgentCard({
           <Input
             value={definition.tools}
             spellCheck={false}
-            placeholder="read, grep, edit"
+            placeholder="read, grep, ext:pi-web-access/web_search"
             onChange={(event) => onChange({ tools: event.target.value })}
             onBlur={onCommit}
           />
         </label>
+        <AgentNamesField
+          label="Extensions"
+          mode={definition.extensionsMode}
+          list={definition.extensionsList}
+          placeholder="pi-web-access, librarian"
+          onModeChange={(extensionsMode) => onCommitPatch({ extensionsMode })}
+          onListChange={(extensionsList) => onChange({ extensionsList })}
+          onCommit={onCommit}
+        />
+        <AgentNamesField
+          label="Skills"
+          mode={definition.skillsMode}
+          list={definition.skillsList}
+          placeholder="commit, review"
+          onModeChange={(skillsMode) => onCommitPatch({ skillsMode })}
+          onListChange={(skillsList) => onChange({ skillsList })}
+          onCommit={onCommit}
+        />
+        <label className="block space-y-1.5 text-sm">
+          <span className="text-muted-foreground">Max turns</span>
+          <Input
+            value={definition.maxTurns}
+            spellCheck={false}
+            type="number"
+            min={0}
+            inputMode="numeric"
+            placeholder="Unlimited"
+            aria-label={`Max turns for ${label}`}
+            onChange={(event) => onChange({ maxTurns: event.target.value })}
+            onBlur={onCommit}
+          />
+        </label>
+        <div className="block space-y-1.5 text-sm">
+          <span className="text-muted-foreground">Prompt mode</span>
+          <Select
+            value={definition.promptMode}
+            onValueChange={(value) => onCommitPatch({ promptMode: value as AgentPromptMode })}
+          >
+            <SelectTrigger size="sm" aria-label={`Prompt mode for ${label}`}>
+              <SelectValue>{AGENT_PROMPT_MODE_LABELS[definition.promptMode]}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="start" alignItemWithTrigger={false}>
+              <SelectItem value="unset">Default</SelectItem>
+              <SelectItem value="replace">Replace</SelectItem>
+              <SelectItem value="append">Append</SelectItem>
+              <SelectItem value="auto">Auto</SelectItem>
+            </SelectPopup>
+          </Select>
+        </div>
       </div>
       <label className="mt-3 block space-y-1.5 text-sm">
         <span className="text-muted-foreground">System prompt</span>
@@ -230,6 +403,12 @@ export function AgentsSettings() {
         model: "",
         thinking: "",
         tools: "",
+        extensionsMode: "unset",
+        extensionsList: "",
+        skillsMode: "unset",
+        skillsList: "",
+        maxTurns: "",
+        promptMode: "unset",
         enabled: true,
       },
     ]);
@@ -265,6 +444,11 @@ export function AgentsSettings() {
                   index={index}
                   onChange={(patch) => updateAt(index, patch)}
                   onCommit={() => commit(definitions)}
+                  onCommitPatch={(patch) =>
+                    commit(
+                      definitions.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)),
+                    )
+                  }
                   onToggle={(enabled) =>
                     commit(
                       definitions.map((entry, i) => (i === index ? { ...entry, enabled } : entry)),

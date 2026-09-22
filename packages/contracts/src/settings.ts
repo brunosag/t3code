@@ -1091,6 +1091,13 @@ export const AgentDefinition = Schema.Struct({
   systemPrompt: TrimmedNonEmptyString,
   model: Schema.optional(TrimmedNonEmptyString),
   thinking: Schema.optional(TrimmedNonEmptyString),
+  // `true` inherits every extension/skill, `false` inherits none, and a list
+  // allows only those names — the same shape Pi's agent files use. Omitted
+  // leaves the value to a same-named Pi agent file, then to the loader default.
+  extensions: Schema.optional(Schema.Union([Schema.Boolean, Schema.Array(TrimmedNonEmptyString)])),
+  skills: Schema.optional(Schema.Union([Schema.Boolean, Schema.Array(TrimmedNonEmptyString)])),
+  maxTurns: Schema.optional(Schema.Finite),
+  promptMode: Schema.optional(Schema.Literals(["replace", "append", "auto"])),
   tools: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
