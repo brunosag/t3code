@@ -104,6 +104,21 @@ export function isActiveSubagentStatus(status: RuntimeSubagentStatus): boolean {
   return status === "pending" || status === "running" || status === "waiting";
 }
 
+/**
+ * Whether a frame belongs to the run that already settled rather than to a new
+ * one. A terminal row and the progress frames that produced it can share
+ * `created_at` to the millisecond, and activities are tie-broken by
+ * `activity_id` — a random id for `task.completed`, a stable `task-progress:`
+ * for the rest — so a read order that hands the terminal row over first reads
+ * its own progress as a fresh run and the panel never settles. A real
+ * reactivation strictly postdates the completion it replaces.
+ */
+function isStaleFrameAfterTerminal(agent: MutableAgent, at: string): boolean {
+  return (
+    isTerminalSubagentStatus(agent.status) && agent.completedAt !== null && at <= agent.completedAt
+  );
+}
+
 const RECENT_ACTIVITY_LIMIT = 6;
 const SUMMARY_CHAR_LIMIT = 180;
 const ROSTER_LIMIT = 100;
@@ -515,7 +530,9 @@ export function foldSubagentActivities(
         if (agent.activationCount === 0) agent.activationCount = 1;
         const explicitStatus = asRuntimeStatus(payload.status);
         if (explicitStatus) {
-          applyStatus(agent, explicitStatus, at);
+          if (!isStaleFrameAfterTerminal(agent, at)) {
+            applyStatus(agent, explicitStatus, at);
+          }
         } else if (
           (payload.usageSnapshot !== true || !existed) &&
           !isTerminalSubagentStatus(agent.status) &&
@@ -558,7 +575,7 @@ export function foldSubagentActivities(
         if (agent.activationCount === 0) agent.activationCount = 1;
         const wasTerminal = isTerminalSubagentStatus(agent.status);
         const status = asRuntimeStatus(payload.status);
-        if (status) applyStatus(agent, status, at);
+        if (status && !isStaleFrameAfterTerminal(agent, at)) applyStatus(agent, status, at);
         const error = asString(payload.error);
         if (error) agent.error = bounded(error);
         // Provider end time beats ingestion time for the transition that

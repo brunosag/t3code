@@ -194,6 +194,57 @@ describe("foldSubagentActivities", () => {
     expect(agent.status).toBe("running");
   });
 
+  // Activities from one tool frame share created_at to the millisecond, and
+  // rows are tie-broken by activity_id: a random id for task.completed, a
+  // stable `task-progress:` for the rest. A read order that serves the terminal
+  // row first would otherwise read its own progress as a fresh run and count up
+  // forever. This is the observed stuck panel on the tutor thread.
+  it("a same-instant progress frame cannot revive a run the terminal row settled", () => {
+    const instant = "2026-08-01T10:00:30.000Z";
+    const agents = fold([
+      activity(
+        "task.started",
+        { taskId: "task-stale-progress", taskType: "subagent", title: "researcher" },
+        "2026-08-01T10:00:01.000Z",
+      ),
+      activity(
+        "task.completed",
+        { taskId: "task-stale-progress", status: "completed", summary: "done" },
+        instant,
+      ),
+      activity(
+        "task.progress",
+        { taskId: "task-stale-progress", status: "running", summary: "still going" },
+        instant,
+      ),
+      activity(
+        "task.progress",
+        { taskId: "task-stale-progress", typedUsage: { totalTokens: 2700 } },
+        instant,
+      ),
+    ]);
+    const agent = agents[0]!;
+    expect(agent.status).toBe("completed");
+    expect(agent.activationCount).toBe(1);
+    expect(agent.result).toBe("done");
+    expect(agent.usage).toEqual({ totalTokens: 2700 });
+  });
+
+  it("a same-instant status patch cannot revive a run the terminal row settled", () => {
+    const instant = "2026-08-01T10:00:45.000Z";
+    const agents = fold([
+      activity(
+        "task.started",
+        { taskId: "task-stale-updated", taskType: "local_agent" },
+        "2026-08-01T10:00:01.000Z",
+      ),
+      activity("task.completed", { taskId: "task-stale-updated", status: "completed" }, instant),
+      activity("task.updated", { taskId: "task-stale-updated", status: "running" }, instant),
+    ]);
+    expect(agents[0]!.status).toBe("completed");
+    expect(agents[0]!.activationCount).toBe(1);
+  });
+
   it("idle is nonterminal: an idle agent resumes without losing identity", () => {
     const agents = fold([
       activity("task.started", { taskId: "codex-child-1", title: "Marlow", role: "explorer" }),
