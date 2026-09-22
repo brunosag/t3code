@@ -85,6 +85,16 @@ compares against `brew info` since casks trail npm by hours; native installs sha
 train, so the registry stays authoritative for them.
 See the [resolver](../../apps/server/src/provider/providerMaintenance.ts).
 
+Pi is the one provider T3 refreshes with the provider's own updater: the
+[driver](../../apps/server/src/provider/Drivers/PiDriver.ts) forks
+[`pi update --all` and `pi update --models`](../../apps/server/src/provider/pi/PiStartupUpdate.ts)
+after the first probe and re-probes when either step lands. The flags are
+mutually exclusive in pi's parser, hence two steps, and T3 never edits pi's
+install or invokes a package manager against it — pi's updater owns its
+managed install, lock, and package scope. The first probe serves the cached
+snapshot so server startup never waits on the network, and pi's settings-level
+update action stays manual-only.
+
 Ownership is cached per instance and re-read immediately before an update runs. The
 [runner](../../apps/server/src/provider/providerMaintenanceRunner.ts) refuses when the lock key
 changed since the advisory, and reports success only when the refreshed provider is still installed

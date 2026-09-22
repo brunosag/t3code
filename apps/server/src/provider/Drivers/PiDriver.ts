@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -31,6 +32,7 @@ import { mapPiThinkingCapabilities } from "../pi/PiCapabilities.ts";
 import { PiRpcClient } from "../pi/PiRpcClient.ts";
 import { PiCommands, PiModels, PiState, PiThinkingLevels } from "../pi/PiProtocol.ts";
 import { makePiTextGeneration } from "../pi/PiTextGeneration.ts";
+import { runPiStartupUpdate } from "../pi/PiStartupUpdate.ts";
 import { materializePiMcpExtension } from "../pi/PiMcpExtension.ts";
 import { materializePiUserInputExtension } from "../pi/PiUserInputExtension.ts";
 
@@ -70,7 +72,10 @@ const probePiModelCapabilities = async (
 };
 
 const DRIVER = ProviderDriverKind.make("pi");
-export type PiDriverEnv = ServerConfig | ServerSettingsService;
+export type PiDriverEnv =
+  | ServerConfig
+  | ServerSettingsService
+  | ChildProcessSpawner.ChildProcessSpawner;
 const maintenance = makeManualOnlyProviderMaintenanceCapabilities({
   provider: DRIVER,
   packageName: null,
@@ -186,7 +191,7 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
         slashCommands: [],
         skills: [],
         message:
-          "Pi is externally configured. T3 does not install, authenticate, update, or configure it.",
+          "Pi is configured outside T3. T3 runs pi's own updater (pi update) to refresh Pi and its model catalogs at startup, but never installs, authenticates, or configures it.",
       });
       let current = base();
       const probe = (cwd: string) =>
@@ -291,6 +296,29 @@ export const PiDriver: ProviderDriver<PiConnectionSettings, PiDriverEnv> = {
         agentsExtensionPath,
       });
       yield* refresh;
+      // A restarted server brings pi current in the background: pi's own
+      // updater floats the install and unpinned packages (pi-claude-bridge),
+      // the catalog refresh lifts pi.dev's overlays, and the re-probe publishes
+      // whatever landed. The probe above already served the cached snapshot, so
+      // startup never waits on the network. Instances sharing one pi binary may
+      // race; pi serializes updates behind its own lock and every instance
+      // re-probes after its own attempt.
+      yield* Effect.forkScoped(
+        Effect.gen(function* () {
+          if (!current.installed) {
+            return;
+          }
+          const updated = yield* runPiStartupUpdate({
+            binaryPath: config.binaryPath,
+            env: processEnv,
+          });
+          if (updated) {
+            // `refresh` reports probe failures inside its own snapshot, so a
+            // re-probe after a landed update cannot fail this fiber.
+            yield* refresh;
+          }
+        }),
+      );
       return {
         instanceId,
         driverKind: DRIVER,
