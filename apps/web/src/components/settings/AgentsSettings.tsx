@@ -1,16 +1,33 @@
 import { PlusIcon, Trash2Icon } from "lucide-react";
 import * as Equal from "effect/Equal";
-import { useState } from "react";
-import type { AgentDefinition } from "@t3tools/contracts";
+import { useMemo, useState, type ReactNode } from "react";
+import type { AgentDefinition, ServerProvider } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 
+import { getCustomModelOptionsByInstance } from "../../modelSelection";
+import {
+  applyProviderInstanceSettings,
+  deriveProviderInstanceEntries,
+  sortProviderInstanceEntries,
+  type ProviderInstanceEntry,
+} from "../../providerInstances";
+import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
+import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { TraitsPicker } from "../chat/TraitsPicker";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  SETTINGS_PICKER_TRIGGER_CLASSNAME,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
+import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 /** How `boolean | string[]` inherit fields (extensions, skills) are edited. */
@@ -144,6 +161,28 @@ function isComplete(draft: AgentDraft): boolean {
   return draft.name.trim().length > 0 && draft.systemPrompt.trim().length > 0;
 }
 
+/** Display name for an agent row, shared by its picker labels and remove button. */
+function agentLabel(definition: AgentDraft, index: number): string {
+  return definition.displayName.trim() || definition.name.trim() || `Agent ${index + 1}`;
+}
+
+/**
+ * Pick the Pi instance a stored agent model slug belongs to. Prefer one that
+ * can serve the slug right now, then any pickable instance, then whatever
+ * exists so the pickers still render an unavailable provider.
+ */
+function resolveAgentInstanceEntry(
+  entries: ReadonlyArray<ProviderInstanceEntry>,
+  model: string,
+): ProviderInstanceEntry | undefined {
+  const pickable = entries.filter((entry) => entry.enabled && entry.isAvailable);
+  return (
+    pickable.find((entry) => entry.models.some((candidate) => candidate.slug === model)) ??
+    pickable[0] ??
+    entries[0]
+  );
+}
+
 /** Roster keys must stay unique; fall back to `agent-2`, `agent-3`, … when `agent` is taken. */
 function nextAgentName(definitions: readonly AgentDraft[]): string {
   const taken = new Set(definitions.map((definition) => definition.name.trim()));
@@ -205,6 +244,7 @@ function AgentNamesField({
 function AgentCard({
   definition,
   index,
+  modelControl,
   onChange,
   onCommit,
   onCommitPatch,
@@ -213,6 +253,8 @@ function AgentCard({
 }: {
   readonly definition: AgentDraft;
   readonly index: number;
+  /** Composer model/effort pickers; absent when no Pi instance can host them. */
+  readonly modelControl?: ReactNode;
   readonly onChange: (patch: Partial<AgentDraft>) => void;
   readonly onCommit: () => void;
   /** Selects persist the moment they change, so they commit a patch directly. */
@@ -220,7 +262,7 @@ function AgentCard({
   readonly onToggle: (enabled: boolean) => void;
   readonly onRemove: () => void;
 }) {
-  const label = definition.displayName.trim() || definition.name.trim() || `Agent ${index + 1}`;
+  const label = agentLabel(definition, index);
   return (
     <div className="rounded-xl border border-border/60 bg-card/40 p-3 sm:p-4">
       <div className="flex items-start gap-3">
@@ -262,26 +304,35 @@ function AgentCard({
             onBlur={onCommit}
           />
         </label>
-        <label className="block space-y-1.5 text-sm">
-          <span className="text-muted-foreground">Model</span>
-          <Input
-            value={definition.model}
-            spellCheck={false}
-            placeholder="Provider default"
-            onChange={(event) => onChange({ model: event.target.value })}
-            onBlur={onCommit}
-          />
-        </label>
-        <label className="block space-y-1.5 text-sm">
-          <span className="text-muted-foreground">Thinking</span>
-          <Input
-            value={definition.thinking}
-            spellCheck={false}
-            placeholder="Provider default"
-            onChange={(event) => onChange({ thinking: event.target.value })}
-            onBlur={onCommit}
-          />
-        </label>
+        {modelControl ? (
+          <div className="block space-y-1.5 text-sm sm:col-span-2">
+            <span className="text-muted-foreground">Model and reasoning</span>
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">{modelControl}</div>
+          </div>
+        ) : (
+          <>
+            <label className="block space-y-1.5 text-sm">
+              <span className="text-muted-foreground">Model</span>
+              <Input
+                value={definition.model}
+                spellCheck={false}
+                placeholder="Provider default"
+                onChange={(event) => onChange({ model: event.target.value })}
+                onBlur={onCommit}
+              />
+            </label>
+            <label className="block space-y-1.5 text-sm">
+              <span className="text-muted-foreground">Thinking</span>
+              <Input
+                value={definition.thinking}
+                spellCheck={false}
+                placeholder="Provider default"
+                onChange={(event) => onChange({ thinking: event.target.value })}
+                onBlur={onCommit}
+              />
+            </label>
+          </>
+        )}
         <label className="block space-y-1.5 text-sm">
           <span className="text-muted-foreground">Tools</span>
           <Input
@@ -366,9 +417,26 @@ function AgentCard({
 export function AgentsSettings() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-  const { scope } = useSettingsScope();
+  const { scope, environment } = useSettingsScope();
+  const navigate = useNavigate();
   const [draft, setDraft] = useState<AgentDraft[] | null>(null);
   const environmentWide = scope.kind === "project" || scope.kind === "checkout";
+
+  // Agents are Pi-only, so the model and reasoning pickers are scoped to the
+  // Pi instances of the representative environment.
+  const providers = environment?.serverConfig?.providers ?? EMPTY_SERVER_PROVIDERS;
+  const piProviders = useMemo(
+    (): ReadonlyArray<ServerProvider> => providers.filter((provider) => provider.driver === "pi"),
+    [providers],
+  );
+  const entries = useMemo(
+    () =>
+      sortProviderInstanceEntries(
+        applyProviderInstanceSettings(deriveProviderInstanceEntries(piProviders), settings),
+      ),
+    [piProviders, settings],
+  );
+  const modelDisabledReason = useScopedModelDisabledReason(settings, entries);
 
   const definitions =
     draft ?? settings.agentDefinitions.map((entry, index) => toDraft(entry, `settings-${index}`));
@@ -388,6 +456,10 @@ export function AgentsSettings() {
   const updateAt = (index: number, patch: Partial<AgentDraft>) => {
     setDraft(definitions.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
   };
+
+  // Selects persist the moment they change, so they commit a patch directly.
+  const commitPatchAt = (index: number, patch: Partial<AgentDraft>) =>
+    commit(definitions.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
 
   const addAgent = () => {
     // A new agent is incomplete by design; the commit below holds it in the
@@ -412,6 +484,68 @@ export function AgentsSettings() {
         enabled: true,
       },
     ]);
+  };
+
+  /**
+   * Composer pickers for one agent, or null to keep the raw text inputs.
+   * Changing the model clears the effort so a stale level cannot survive it.
+   */
+  const modelControlFor = (definition: AgentDraft, index: number): ReactNode => {
+    const activeEntry = resolveAgentInstanceEntry(entries, definition.model);
+    if (!activeEntry) return null;
+    const label = agentLabel(definition, index);
+    return (
+      <>
+        <ProviderModelPicker
+          activeInstanceId={activeEntry.instanceId}
+          model={definition.model}
+          lockedProvider={null}
+          instanceEntries={entries}
+          modelOptionsByInstance={getCustomModelOptionsByInstance(
+            settings,
+            piProviders,
+            activeEntry.instanceId,
+            definition.model,
+          )}
+          triggerVariant="outline"
+          triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+          triggerAriaLabel={`Model for ${label}`}
+          getModelDisabledReason={modelDisabledReason}
+          onOpenProviderSetup={(instanceId) => {
+            if (environment) {
+              void navigate({
+                to: "/settings/providers",
+                search: { environmentId: environment.environmentId, instanceId },
+              });
+            }
+          }}
+          onInstanceModelChange={(_instanceId, model) =>
+            commitPatchAt(index, { model, thinking: "" })
+          }
+        />
+        <TraitsPicker
+          provider={activeEntry.driverKind}
+          models={activeEntry.models}
+          model={definition.model}
+          prompt=""
+          onPromptChange={() => {}}
+          modelOptions={
+            definition.thinking ? [{ id: "reasoningEffort", value: definition.thinking }] : []
+          }
+          allowPromptInjectedEffort={false}
+          planModeEnabled={false}
+          triggerVariant="outline"
+          triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+          onModelOptionsChange={(options) =>
+            commitPatchAt(index, {
+              thinking: String(
+                options?.find((option) => option.id === "reasoningEffort")?.value ?? "",
+              ),
+            })
+          }
+        />
+      </>
+    );
   };
 
   return (
@@ -442,13 +576,10 @@ export function AgentsSettings() {
                   key={definition.id}
                   definition={definition}
                   index={index}
+                  modelControl={modelControlFor(definition, index)}
                   onChange={(patch) => updateAt(index, patch)}
                   onCommit={() => commit(definitions)}
-                  onCommitPatch={(patch) =>
-                    commit(
-                      definitions.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)),
-                    )
-                  }
+                  onCommitPatch={(patch) => commitPatchAt(index, patch)}
                   onToggle={(enabled) =>
                     commit(
                       definitions.map((entry, i) => (i === index ? { ...entry, enabled } : entry)),
