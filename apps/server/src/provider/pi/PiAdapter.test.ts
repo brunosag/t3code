@@ -992,6 +992,160 @@ describe("PiAdapter", () => {
     }),
   );
 
+  it.effect("settles a background agent from the extension lifecycle event", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-subagent-lifecycle");
+      yield* startSession(adapter, threadId);
+      const receipts = yield* subscribe(adapter, 5);
+
+      const client = harness.clients[0]!;
+      client.emit({
+        type: "tool_execution_start",
+        toolCallId: "call_bg",
+        toolName: "Agent",
+        args: { description: "Research sources" },
+      });
+      client.emit({
+        type: "tool_execution_end",
+        toolCallId: "call_bg",
+        toolName: "Agent",
+        args: { description: "Research sources" },
+        result: {
+          content: [{ type: "text", text: "Running in background (ID: agent-7)" }],
+          details: {
+            displayName: "Researcher",
+            subagentType: "researcher",
+            status: "background",
+            agentId: "agent-7",
+            toolUses: 0,
+            durationMs: 0,
+          },
+        },
+        isError: false,
+      });
+      // The parent consumed the result, so the extension suppresses its
+      // completion notification; this event is what must still settle the run.
+      client.emitSideChannel({
+        type: "subagent.activity",
+        event: "failed",
+        agentId: "agent-7",
+        status: "error",
+        error: "Cannot find module 'openai-completions'",
+        toolUses: 0,
+        durationMs: 12,
+      });
+
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events.map((event) => event.type)).toEqual([
+        "item.started",
+        "item.completed",
+        "task.started",
+        "task.progress",
+        "task.completed",
+      ]);
+      for (const event of events) {
+        expect(() => assertRuntimeEvent(event)).not.toThrow();
+      }
+      expect(events[4]).toMatchObject({
+        type: "task.completed",
+        payload: {
+          taskId: "agent-7",
+          status: "failed",
+          summary: "Cannot find module 'openai-completions'",
+        },
+      });
+    }),
+  );
+
+  it.effect("ignores a lifecycle event for a run the tool frames already settled", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-subagent-lifecycle-foreground");
+      yield* startSession(adapter, threadId);
+      const receipts = yield* subscribe(adapter, 7);
+
+      const client = harness.clients[0]!;
+      client.emit({
+        type: "tool_execution_start",
+        toolCallId: "call_fg",
+        toolName: "Agent",
+        args: {},
+      });
+      client.emit({
+        type: "tool_execution_update",
+        toolCallId: "call_fg",
+        toolName: "Agent",
+        args: {},
+        partialResult: {
+          content: [{ type: "text", text: "running" }],
+          details: { displayName: "Scout", subagentType: "scout", status: "running", toolUses: 1 },
+        },
+      });
+      client.emit({
+        type: "tool_execution_end",
+        toolCallId: "call_fg",
+        toolName: "Agent",
+        args: {},
+        result: {
+          content: [{ type: "text", text: "done" }],
+          details: {
+            displayName: "Scout",
+            subagentType: "scout",
+            status: "completed",
+            agentId: "agent-9",
+            toolUses: 2,
+          },
+        },
+        isError: false,
+      });
+      // A foreground run is already terminal; a late lifecycle event must not
+      // add a second terminal row.
+      client.emitSideChannel({
+        type: "subagent.activity",
+        event: "completed",
+        agentId: "agent-9",
+        status: "completed",
+      });
+      client.emit({ type: "auto_retry_start", errorMessage: "sentinel" });
+
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events.map((event) => event.type)).toEqual([
+        "item.started",
+        "item.updated",
+        "task.started",
+        "task.progress",
+        "item.completed",
+        "task.completed",
+        "runtime.warning",
+      ]);
+    }),
+  );
+
+  it.effect("ignores a lifecycle event for an agent nothing has tracked", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-subagent-lifecycle-untracked");
+      yield* startSession(adapter, threadId);
+      const receipts = yield* subscribe(adapter, 1);
+
+      const client = harness.clients[0]!;
+      client.emitSideChannel({
+        type: "subagent.activity",
+        event: "failed",
+        agentId: "ghost",
+        status: "error",
+      });
+      client.emit({ type: "auto_retry_start", errorMessage: "sentinel" });
+
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events.map((event) => event.type)).toEqual(["runtime.warning"]);
+    }),
+  );
+
   it.effect("reports Pi's context usage as a canonical token-usage event", () =>
     Effect.gen(function* () {
       const harness = makeHarness();

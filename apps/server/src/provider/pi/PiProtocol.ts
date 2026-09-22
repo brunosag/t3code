@@ -121,6 +121,33 @@ export const PiSideChannelMessage = Schema.Union([
     type: Schema.Literal("user-input.cancel"),
     requestId: Schema.String.check(Schema.isMinLength(1)),
   }),
+  /**
+   * A settled pi-subagents run, forwarded by T3's agent extension off the
+   * extension's event bus. This is the terminal signal that survives when the
+   * extension suppresses the parent notification (the parent consumed the
+   * result via `get_subagent_result`), which would otherwise leave a finished
+   * background agent looking like it was still running.
+   */
+  Schema.Struct({
+    type: Schema.Literal("subagent.activity"),
+    event: Schema.Literals(["completed", "failed"]),
+    agentId: Schema.String.check(Schema.isMinLength(1)),
+    agentType: Schema.optional(Schema.String),
+    description: Schema.optional(Schema.String),
+    /** Raw pi-subagents status (completed/error/stopped/aborted/…). */
+    status: Schema.optional(Schema.String),
+    error: Schema.optional(Schema.String),
+    result: Schema.optional(Schema.String),
+    toolUses: Schema.optional(Schema.Finite),
+    durationMs: Schema.optional(Schema.Finite),
+    tokens: Schema.optional(
+      Schema.Struct({
+        input: Schema.Finite,
+        output: Schema.Finite,
+        total: Schema.Finite,
+      }),
+    ),
+  }),
 ]);
 export type PiSideChannelMessage = typeof PiSideChannelMessage.Type;
 

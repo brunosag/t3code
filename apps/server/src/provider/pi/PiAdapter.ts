@@ -190,6 +190,9 @@ function piAgentDetailsFromToolResult(value: unknown): PiAgentDetails | undefine
 interface PiAgentObservation {
   taskId: string;
   status?: string | undefined;
+  /** True for a background spawn, which settles from the extension's own
+   * lifecycle event rather than from the Agent tool's frames. */
+  background?: boolean | undefined;
   title?: string | undefined;
   description?: string | undefined;
   role?: string | undefined;
@@ -314,7 +317,7 @@ interface Session {
    * frames and a later completion notification update one row instead of
    * reopening a settled agent.
    */
-  agents: Map<string, { terminal: boolean }>;
+  agents: Map<string, { terminal: boolean; background: boolean }>;
   /** pi-subagents' own agent id → T3 task id, to correlate a background
    * completion notification with the `Agent` call that spawned it. */
   agentTaskIdByAgentId: Map<string, string>;
@@ -374,7 +377,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     const existing = ctx.agents.get(taskId);
     const status = observation.status;
     const terminal = status !== undefined && PI_AGENT_TERMINAL_STATUSES.has(status);
-    ctx.agents.set(taskId, { terminal: terminal || existing?.terminal === true });
+    ctx.agents.set(taskId, {
+      terminal: terminal || existing?.terminal === true,
+      background: existing?.background === true || observation.background === true,
+    });
     const linkage = {
       taskType: "subagent",
       ...(observation.role ? { role: observation.role } : {}),
@@ -457,6 +463,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       durationMs: details.durationMs,
       totalTokens: parsePiTokenCount(details.tokens),
       error: details.error?.trim() || undefined,
+      background: details.status === "background",
     });
   };
   const observePiAgentNotification = (ctx: Session, value: unknown): void => {
@@ -479,6 +486,45 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
     }
     // A group completion settles every remaining agent it names.
     for (const other of notification.others ?? []) observePiAgentNotification(ctx, other);
+  };
+  /**
+   * Settle a background run from the extension's own lifecycle event. This is
+   * the only terminal signal T3 gets when the parent consumed the result via
+   * `get_subagent_result`, because the extension then suppresses the
+   * completion notification. Foreground runs settle from their tool frames, so
+   * this ignores anything not already tracked as a background agent.
+   */
+  const observePiAgentActivity = (
+    ctx: Session,
+    activity: {
+      readonly event: "completed" | "failed";
+      readonly agentId: string;
+      readonly status?: string | undefined;
+      readonly error?: string | undefined;
+      readonly result?: string | undefined;
+      readonly toolUses?: number | undefined;
+      readonly durationMs?: number | undefined;
+      readonly tokens?: { readonly total: number } | undefined;
+    },
+  ): void => {
+    const taskId = ctx.agentTaskIdByAgentId.get(activity.agentId) ?? activity.agentId;
+    const entry = ctx.agents.get(taskId);
+    if (entry?.background !== true || entry.terminal) return;
+    const status =
+      activity.status !== undefined && PI_AGENT_STATUSES.has(activity.status)
+        ? activity.status
+        : activity.event === "failed"
+          ? "error"
+          : "completed";
+    observePiAgent(ctx, {
+      taskId,
+      status,
+      ...(activity.error?.trim() ? { error: activity.error.trim() } : {}),
+      ...(activity.result?.trim() ? { result: activity.result.trim() } : {}),
+      toolUses: activity.toolUses,
+      durationMs: activity.durationMs,
+      totalTokens: activity.tokens?.total,
+    });
   };
   const call = <A>(method: string, run: () => Promise<A>) =>
     Effect.tryPromise({
@@ -618,6 +664,10 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
   };
   const handleSideChannelMessage = (ctx: Session, value: unknown) => {
     const message = decodePiSideChannelMessage(value);
+    if (message.type === "subagent.activity") {
+      observePiAgentActivity(ctx, message);
+      return;
+    }
     if (message.type === "user-input.cancel") {
       const pending = ctx.pending.get(message.requestId);
       if (pending?.kind === "side-channel") {

@@ -23,10 +23,11 @@ export const PI_AGENTS_ENV = {
  */
 const PI_AGENTS_EXTENSION_SOURCE = String.raw`
 "use strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeSync } from "node:fs";
 
 const DEFINITIONS_PATH_ENV = "__T3_PI_AGENTS_PATH__";
 const RPC_CHANNEL = "subagents:rpc:registerAgents";
+const CHANNEL_FD = 3;
 
 let api;
 
@@ -51,6 +52,40 @@ function register() {
   api.events.emit(RPC_CHANNEL, { requestId, agents: readDefinitions() });
 }
 
+/**
+ * Forward one settled run to T3 over the extension channel (fd 3). The
+ * subagents extension emits these events even when it suppresses the parent
+ * completion notification, so this is what lets T3 settle a background agent
+ * whose result the parent already consumed.
+ */
+function forward(event, data) {
+  if (!data || typeof data.id !== "string" || data.id.length === 0) return;
+  const message = {
+    type: "subagent.activity",
+    event: event,
+    agentId: data.id,
+    agentType: data.type,
+    description: data.description,
+    status: data.status,
+    error: data.error,
+    result: data.result,
+    toolUses: data.toolUses,
+    durationMs: data.durationMs,
+    tokens: data.tokens,
+  };
+  try {
+    const bytes = Buffer.from(JSON.stringify(message) + "\n", "utf8");
+    let offset = 0;
+    while (offset < bytes.length) {
+      const written = writeSync(CHANNEL_FD, bytes, offset, bytes.length - offset);
+      if (written === 0) throw new Error("no write progress");
+      offset += written;
+    }
+  } catch {
+    // No channel, or T3 is gone. Either way there is nothing to forward to.
+  }
+}
+
 export default function t3Agents(pi) {
   api = pi;
   pi.on("session_start", register);
@@ -59,6 +94,8 @@ export default function t3Agents(pi) {
   // that whichever order the two extensions load in, at least one fires after
   // its handler exists.
   pi.events.on("subagents:ready", register);
+  pi.events.on("subagents:completed", (data) => forward("completed", data));
+  pi.events.on("subagents:failed", (data) => forward("failed", data));
 }
 `;
 

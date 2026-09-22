@@ -2,11 +2,14 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 import {
   PiMessage,
+  PiSideChannelMessage,
   PiState,
   PiThinkingLevels,
   piMessageText,
   piModelSelection,
 } from "./PiProtocol.ts";
+
+const decodeSideChannel = Schema.decodeUnknownSync(PiSideChannelMessage);
 
 describe("Pi protocol translation", () => {
   it("tolerates the removed default selection and preserves slashes in explicit model IDs", () => {
@@ -44,5 +47,27 @@ describe("Pi protocol translation", () => {
     expect(decodeState(base).thinkingLevel).toBeUndefined();
     expect(() => decodeState({ ...base, thinkingLevel: "turbo" })).toThrow();
     expect(decodeThinkingLevels({ levels: ["off", "max"] }).levels).toEqual(["off", "max"]);
+  });
+
+  it("decodes a settled subagent activity from the extension channel", () => {
+    expect(
+      decodeSideChannel({
+        type: "subagent.activity",
+        event: "failed",
+        agentId: "agent-7",
+        agentType: "researcher",
+        description: "Check sources",
+        status: "error",
+        error: "boom",
+        toolUses: 0,
+        durationMs: 12,
+        tokens: { input: 10, output: 5, total: 15 },
+      }),
+    ).toMatchObject({ type: "subagent.activity", event: "failed", agentId: "agent-7" });
+    // Everything past the event and id is optional: a run that spent nothing
+    // omits its usage, and a completed run omits its error.
+    expect(
+      decodeSideChannel({ type: "subagent.activity", event: "completed", agentId: "agent-8" }),
+    ).toMatchObject({ event: "completed" });
   });
 });

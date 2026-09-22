@@ -64,7 +64,13 @@ describe("PiAgentsExtension", () => {
     const stateDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pi-agents-"));
     try {
       const extensionPath = await materializePiAgentsExtension(stateDir);
-      expect(NodeFS.readFileSync(extensionPath, "utf8")).toContain("subagents:rpc:registerAgents");
+      const source = NodeFS.readFileSync(extensionPath, "utf8");
+      expect(source).toContain("subagents:rpc:registerAgents");
+      // The settled-run bridge: T3 only sees a background run end when the
+      // extension suppresses its completion notification.
+      expect(source).toContain("subagents:completed");
+      expect(source).toContain("subagents:failed");
+      expect(source).toContain("subagent.activity");
 
       const env = withPiAgentsEnvironment({ PATH: "/bin" }, piAgentDefinitionsPath(stateDir));
       expect(env.T3_PI_AGENTS_PATH).toBe(piAgentDefinitionsPath(stateDir));
