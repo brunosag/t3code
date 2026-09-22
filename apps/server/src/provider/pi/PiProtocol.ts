@@ -148,6 +148,19 @@ export const PiSideChannelMessage = Schema.Union([
       }),
     ),
   }),
+  /**
+   * The agent-extension's verdict on its own roster push: whether Pi's
+   * subagents handler exists, accepted the payload, and read the definitions
+   * file. `ok: false` means Pi's own agent files would run instead of T3's,
+   * which has no other visible symptom — so T3 turns it into a runtime warning.
+   */
+  Schema.Struct({
+    type: Schema.Literal("subagent.registration"),
+    requestId: Schema.String.check(Schema.isMinLength(1)),
+    ok: Schema.Boolean,
+    count: Schema.optional(Schema.Finite),
+    error: Schema.optional(Schema.String),
+  }),
 ]);
 export type PiSideChannelMessage = typeof PiSideChannelMessage.Type;
 

@@ -1124,6 +1124,66 @@ describe("PiAdapter", () => {
     }),
   );
 
+  it.effect("warns when Pi did not take T3's agent roster", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-subagent-registration");
+      yield* startSession(adapter, threadId);
+      const receipts = yield* subscribe(adapter, 1);
+
+      // Without this warning, every roster failure — unreadable definitions,
+      // a rejected payload, no handler at all — looks exactly like success
+      // while Pi runs its own agent files instead of T3's.
+      harness.clients[0]!.emitSideChannel({
+        type: "subagent.registration",
+        requestId: "t3-agents-x",
+        ok: false,
+        error: "Pi's subagents extension never acknowledged T3's agent roster; update pi-setup.",
+      });
+
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events.map((event) => event.type)).toEqual(["runtime.warning"]);
+      expect(events[0]).toMatchObject({
+        type: "runtime.warning",
+        payload: {
+          message:
+            "Pi's subagents extension never acknowledged T3's agent roster; update pi-setup.",
+        },
+      });
+    }),
+  );
+
+  it.effect("stays quiet when Pi accepted T3's agent roster", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness();
+      const adapter = yield* makePiAdapter(harness.options);
+      const threadId = ThreadId.make("thread-subagent-registration-ok");
+      yield* startSession(adapter, threadId);
+      const receipts = yield* subscribe(adapter, 1);
+
+      const client = harness.clients[0]!;
+      client.emitSideChannel({
+        type: "subagent.registration",
+        requestId: "t3-agents-y",
+        ok: true,
+        count: 4,
+      });
+      // The sentinel produces the only warning; if the accepted registration
+      // had produced one too, it would arrive first and name the roster.
+      client.emit({ type: "auto_retry_start", errorMessage: "sentinel" });
+
+      const events = Array.from(yield* Fiber.join(receipts));
+      expect(events.map((event) => event.type)).toEqual(["runtime.warning"]);
+      // The only warning is the sentinel's: the accepted registration stayed
+      // silent, and had it not, it would have arrived first.
+      expect(events[0]).toMatchObject({
+        type: "runtime.warning",
+        payload: { message: "sentinel" },
+      });
+    }),
+  );
+
   it.effect("ignores a lifecycle event for an agent nothing has tracked", () =>
     Effect.gen(function* () {
       const harness = makeHarness();

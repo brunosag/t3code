@@ -17,9 +17,14 @@ export const PI_AGENTS_ENV = {
 /**
  * T3-owned Pi extension. It pushes T3's agent definitions into the pi-subagents
  * roster over that extension's cross-extension RPC, so T3 can own agents without
- * writing into Pi's own agent directories. Written without template literals or
- * escape sequences so it can live in a `String.raw` literal; the env name is
- * substituted from {@link PI_AGENTS_ENV}.
+ * writing into Pi's own agent directories. The push is `exclusive`: Pi's own
+ * agent files are not part of the roster while this extension is loaded.
+ * Every outcome — definitions unreadable, the payload rejected, or no handler
+ * at all — is reported back over the side channel as a `subagent.registration`
+ * message, because each one otherwise fails silently and lets Pi's agent files
+ * run instead of T3's.
+ * Written without template literals or escape sequences so it can live in a
+ * `String.raw` literal; the env name is substituted from {@link PI_AGENTS_ENV}.
  */
 const PI_AGENTS_EXTENSION_SOURCE = String.raw`
 "use strict";
@@ -28,28 +33,69 @@ import { readFileSync, writeSync } from "node:fs";
 const DEFINITIONS_PATH_ENV = "__T3_PI_AGENTS_PATH__";
 const RPC_CHANNEL = "subagents:rpc:registerAgents";
 const CHANNEL_FD = 3;
+// The registration rides the same bus as session start, so a reply normally
+// arrives in the same tick; the timer exists only to notice a subagents
+// extension that has no registerAgents handler at all.
+const ACK_TIMEOUT_MS = 5000;
 
 let api;
+// One live registration: a newer register() supersedes an unanswered older one.
+let pending = null;
+// Failure text already reported, so the session_start + subagents:ready pair
+// cannot deliver the same warning twice.
+let lastError = "";
 
 function readDefinitions() {
   const path = process.env[DEFINITIONS_PATH_ENV];
-  if (!path) return [];
+  if (!path) {
+    return { agents: [], failure: "T3_PI_AGENTS_PATH is not set on the Pi process." };
+  }
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8"));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    // A missing or unreadable file means "no T3-owned agents"; it must never
-    // take the session down.
-    return [];
+    if (!Array.isArray(parsed)) {
+      return { agents: [], failure: "Definitions file is not an array: " + path };
+    }
+    return { agents: parsed, failure: undefined };
+  } catch (err) {
+    return {
+      agents: [],
+      failure:
+        "Definitions file unreadable (" + path + "): " +
+        (err && err.message ? err.message : String(err)),
+    };
   }
 }
 
-function register() {
-  if (!api) return;
-  const requestId = "t3-agents-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
-  // Fire-and-forget: the subagents extension replaces its layer wholesale, so a
-  // duplicate or late registration is idempotent.
-  api.events.emit(RPC_CHANNEL, { requestId, agents: readDefinitions() });
+function writeLine(message) {
+  const bytes = Buffer.from(JSON.stringify(message) + "\n", "utf8");
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = writeSync(CHANNEL_FD, bytes, offset, bytes.length - offset);
+    if (written === 0) throw new Error("no write progress");
+    offset += written;
+  }
+}
+
+/** Report one roster outcome to T3. Identical failures are reported once. */
+function report(message) {
+  if (message.ok) {
+    lastError = "";
+  } else {
+    if (message.error === lastError) return;
+    lastError = message.error || "unknown failure";
+  }
+  try {
+    writeLine(message);
+  } catch {
+    // No channel, or T3 is gone. Either way there is nothing to report to.
+  }
+}
+
+function clearPending() {
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  pending.unsubscribe();
+  pending = null;
 }
 
 /**
@@ -74,15 +120,97 @@ function forward(event, data) {
     tokens: data.tokens,
   };
   try {
-    const bytes = Buffer.from(JSON.stringify(message) + "\n", "utf8");
-    let offset = 0;
-    while (offset < bytes.length) {
-      const written = writeSync(CHANNEL_FD, bytes, offset, bytes.length - offset);
-      if (written === 0) throw new Error("no write progress");
-      offset += written;
-    }
+    writeLine(message);
   } catch {
     // No channel, or T3 is gone. Either way there is nothing to forward to.
+  }
+}
+
+/**
+ * Push T3's roster and wait for the handler's reply envelope. The reply is the
+ * only proof that a registerAgents handler exists and accepted the payload —
+ * a subagents extension without one drops the event without a trace.
+ */
+function register() {
+  if (!api) return;
+  const read = readDefinitions();
+  clearPending();
+  const requestId =
+    "t3-agents-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+  let settled = false;
+  const settle = function (message) {
+    if (settled) return;
+    settled = true;
+    clearPending();
+    report(message);
+  };
+  const unsubscribe = api.events.on(RPC_CHANNEL + ":reply:" + requestId, function (reply) {
+    if (!reply || !reply.success) {
+      settle({
+        type: "subagent.registration",
+        requestId: requestId,
+        ok: false,
+        error:
+          "Pi's subagents extension rejected T3's agent roster: " +
+          (reply && reply.error ? reply.error : "no reply payload"),
+      });
+      return;
+    }
+    const accepted =
+      reply.data && typeof reply.data.count === "number"
+        ? reply.data.count
+        : read.agents.length;
+    // A handler that never heard of the exclusive claim would merge Pi's agent
+    // files back in while still replying success.
+    if (!reply.data || reply.data.exclusive !== true) {
+      settle({
+        type: "subagent.registration",
+        requestId: requestId,
+        ok: false,
+        error:
+          "Pi's subagents extension accepted T3's agent roster without honoring its " +
+          "exclusive claim, so Pi's own agent files still apply. Update pi-setup.",
+      });
+      return;
+    }
+    if (accepted !== read.agents.length) {
+      settle({
+        type: "subagent.registration",
+        requestId: requestId,
+        ok: false,
+        error:
+          "Pi's subagents extension registered " +
+          accepted +
+          " of " +
+          read.agents.length +
+          " T3 agent definitions.",
+      });
+      return;
+    }
+    settle({ type: "subagent.registration", requestId: requestId, ok: true, count: read.agents.length });
+  });
+  const timer = setTimeout(function () {
+    settle({
+      type: "subagent.registration",
+      requestId: requestId,
+      ok: false,
+      error:
+        "Pi's subagents extension never acknowledged T3's agent roster; its " +
+        "registerAgents RPC is missing, so Pi's own agent files would run instead. " +
+        "Update pi-setup.",
+    });
+  }, ACK_TIMEOUT_MS);
+  pending = { timer: timer, unsubscribe: unsubscribe };
+  // exclusive: T3 owns this session's roster, so Pi's agent files are not
+  // merged in at all — not for fields, not for names T3 omitted.
+  api.events.emit(RPC_CHANNEL, { requestId: requestId, agents: read.agents, exclusive: true });
+  if (read.failure) {
+    settle({
+      type: "subagent.registration",
+      requestId: requestId,
+      ok: false,
+      error: read.failure,
+    });
   }
 }
 

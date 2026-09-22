@@ -668,6 +668,17 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (options: PiAd
       observePiAgentActivity(ctx, message);
       return;
     }
+    // A failed roster push means Pi would run its own agent files instead of
+    // T3's — the only symptom of a whole class of configuration failures, so
+    // it surfaces as a warning rather than being logged away.
+    if (message.type === "subagent.registration") {
+      if (!message.ok)
+        emit(ctx, {
+          type: "runtime.warning",
+          payload: { message: message.error ?? "T3's agent roster was not registered with Pi." },
+        });
+      return;
+    }
     if (message.type === "user-input.cancel") {
       const pending = ctx.pending.get(message.requestId);
       if (pending?.kind === "side-channel") {
