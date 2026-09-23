@@ -60,7 +60,7 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
           style={{ backgroundColor: overlayBackground }}
           aria-hidden
         >
-          <OverlayIcon className="size-[67%]" />
+          <OverlayIcon className="size-[67%] text-white" />
         </span>
       ) : null}
       {props.statusDotClassName ? (
