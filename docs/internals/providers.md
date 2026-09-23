@@ -78,11 +78,14 @@ it. Homebrew and npm are proven by the real path (symlinks followed): a versione
 `brew --prefix`, or `<prefix>/lib/node_modules/<pkg>/` (Windows: the shim beside `node_modules`).
 Native installer layouts and the global bin directories of pnpm, Bun, and Vite+ may match on either
 the resolved path or its real target, since those installers place real files or their own symlinks
-there. Anything unproven stays manual-only but still reports the version gap. npm updates pin
-`--prefix` because the `npm` on `PATH` can belong to a different Node than the one that owns the
-provider. Homebrew
-compares against `brew info` since casks trail npm by hours; native installs share npm's version
-train, so the registry stays authoritative for them.
+there. npm proof outranks a native-layout match: `~/.local/bin/claude` is both the native
+installer's link directory and the bin shim of an npm `--prefix ~/.local` install (common on NixOS,
+where npm's default prefix is the read-only store), and the native updater there runs bare
+`npm install -g` against that store prefix and fails. Anything unproven stays manual-only but still
+reports the version gap. npm updates pin `--prefix` because the `npm` on `PATH` can belong to a
+different Node than the one that owns the provider. Homebrew compares against `brew info` since
+casks trail npm by hours; native installs share npm's version train, so the registry stays
+authoritative for them.
 See the [resolver](../../apps/server/src/provider/providerMaintenance.ts).
 
 Pi is the one provider T3 refreshes with the provider's own updater: the

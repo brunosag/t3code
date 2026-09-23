@@ -476,6 +476,52 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
     }),
   );
 
+  // An npm install with `--prefix ~/.local` (typical on NixOS, where npm's
+  // default prefix is the read-only store) shims its bin into the same
+  // `~/.local/bin` the native installer uses. The native updater would run
+  // bare `npm install -g` against the store prefix and fail, so npm's proof
+  // of ownership wins.
+  it.effect.skipIf(!symlinksSupported)(
+    "prefers npm ownership when an npm bin shim matches the native updater path",
+    () =>
+      Effect.gen(function* () {
+        const tempDir = yield* makeTempDir("t3-npm-native-capabilities");
+        const link = linkIntoPackage(NodePath.join(tempDir, ".local"), "native-package-tool", [
+          "lib",
+          "node_modules",
+          "@example",
+          "native-package-tool",
+        ]);
+        const prefix = NodePath.join(tempDir, ".local");
+
+        const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(
+          nativePackageToolUpdate,
+          {
+            binaryPath: link,
+            env: { PATH: "" },
+          },
+        ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn));
+
+        expect(capabilities).toEqual({
+          provider: driver("nativePackageTool"),
+          packageName: "@example/native-package-tool",
+          update: {
+            command: `npm install -g --prefix ${prefix} --allow-scripts=@example/native-package-tool @example/native-package-tool@latest`,
+            executable: "npm",
+            args: [
+              "install",
+              "-g",
+              "--prefix",
+              prefix,
+              "--allow-scripts=@example/native-package-tool",
+              "@example/native-package-tool@latest",
+            ],
+            lockKey: `npm-global:${normalizeCommandPath(prefix)}`,
+          },
+        });
+      }),
+  );
+
   // Regression for #9850: an explicit native path outside PATH, with spaces,
   // must be what actually gets spawned.
   it.effect.skipIf(windowsHost)("runs an explicit native updater outside PATH", () =>

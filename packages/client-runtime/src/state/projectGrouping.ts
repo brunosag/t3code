@@ -156,26 +156,25 @@ export function deriveProjectGroupLabel(input: {
   readonly representative: Pick<EnvironmentProject, "title" | "repositoryIdentity">;
   readonly members: ReadonlyArray<Pick<EnvironmentProject, "title" | "repositoryIdentity">>;
 }): string {
+  // A title every member shares names the group, even when it happens to
+  // equal the repository name; owner-qualified fallbacks only disambiguate
+  // members whose titles disagree.
   const sharedTitles = uniqueNonEmptyValues(input.members.map((member) => member.title));
+  const sharedTitle = sharedTitles[0];
+  if (sharedTitles.length === 1 && sharedTitle !== undefined) {
+    return sharedTitle;
+  }
+
   const sharedDisplayNames = uniqueNonEmptyValues(
     input.members.map((member) => member.repositoryIdentity?.displayName),
   );
-  const sharedRepositoryNames = uniqueNonEmptyValues(
-    input.members.map((member) => member.repositoryIdentity?.name),
-  );
-  const sharedTitle = sharedTitles[0];
-  if (
-    sharedTitles.length === 1 &&
-    sharedTitle !== undefined &&
-    !sharedDisplayNames.includes(sharedTitle) &&
-    !sharedRepositoryNames.includes(sharedTitle)
-  ) {
-    return sharedTitle;
-  }
   if (sharedDisplayNames.length === 1) {
     return sharedDisplayNames[0]!;
   }
 
+  const sharedRepositoryNames = uniqueNonEmptyValues(
+    input.members.map((member) => member.repositoryIdentity?.name),
+  );
   if (sharedRepositoryNames.length === 1) {
     return sharedRepositoryNames[0]!;
   }

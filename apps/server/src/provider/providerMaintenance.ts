@@ -364,8 +364,21 @@ export const resolvePackageManagedProviderMaintenance = Effect.fn(
   const commandPaths = [context.resolvedCommandPath, context.realCommandPath];
   const packageName = definition.npmPackageName;
 
+  // npm proof names the package, so it outranks what the path merely
+  // resembles: a Homebrew-installed Node keeps its globals under
+  // `Cellar/node/<ver>/lib/node_modules/`, and `~/.local/bin/claude` is both
+  // the native installer's link directory and the bin shim of an npm install
+  // with `--prefix ~/.local` (common on NixOS, where npm's default prefix is
+  // the read-only store). The native updater there runs bare `npm install -g`
+  // against that store prefix and fails.
+  const npmPrefix = yield* resolveNpmGlobalPrefix(context, packageName);
+
   const nativeUpdate = definition.nativeUpdate;
-  if (nativeUpdate && commandPaths.some((commandPath) => nativeUpdate.isCommandPath(commandPath))) {
+  if (
+    nativeUpdate &&
+    !npmPrefix &&
+    commandPaths.some((commandPath) => nativeUpdate.isCommandPath(commandPath))
+  ) {
     return makeProviderMaintenanceCapabilities({
       provider: definition.provider,
       packageName,
@@ -404,10 +417,6 @@ export const resolvePackageManagedProviderMaintenance = Effect.fn(
     });
   }
 
-  // npm proof names the package, so it outranks a keg the path merely passes
-  // through: a Homebrew-installed Node keeps its globals under
-  // `Cellar/node/<ver>/lib/node_modules/`, and that is npm's install, not brew's.
-  const npmPrefix = yield* resolveNpmGlobalPrefix(context, packageName);
   if (npmPrefix) {
     // npm 12 blocks install scripts by default (empty allow-scripts allowlist)
     // and still exits 0, so a package whose postinstall finishes the install
