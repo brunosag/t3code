@@ -21,6 +21,8 @@ type ProviderIconProps = {
    * ever set together with `vendor`; see `resolveModelVendorGlyph`.
    */
   readonly overlayProvider?: boolean;
+  /** Overrides the theme-dependent mono mark color (the chip wants white). */
+  readonly monoColor?: string;
 };
 
 /** Vendor marks, keyed the same way as `apps/web/src/components/chat/providerIconUtils.ts`. */
@@ -106,16 +108,16 @@ function vendorGlyph(props: { vendor: ModelVendor; size: number; mono: string })
 }
 
 /**
- * Provider mark stamped over a vendor glyph's bottom-right corner so a
- * multi-provider surface still shows which provider serves the model.
+ * B³ chip: a 55%-black rounded square stamped over a vendor glyph's
+ * bottom-right corner — the glyph shows through while the white provider
+ * mark stays readable.
  */
 function ProviderGlyphOverlay(props: {
   readonly provider: string | null | undefined;
   readonly size: number;
-  readonly surfaceColor: string;
 }) {
-  const chip = Math.max(Math.round(props.size * 0.62), 9);
-  const offset = Math.max(Math.round(props.size * 0.12), 1);
+  const chip = Math.max(Math.round(props.size * 0.64), 8);
+  const offset = Math.max(Math.round(props.size * 0.08), 1);
   return (
     <View
       style={{
@@ -124,32 +126,28 @@ function ProviderGlyphOverlay(props: {
         bottom: -offset,
         width: chip,
         height: chip,
-        borderRadius: chip / 2,
-        backgroundColor: props.surfaceColor,
+        borderRadius: Math.round(chip * 0.27),
+        backgroundColor: "rgba(0, 0, 0, 0.55)",
         alignItems: "center",
         justifyContent: "center",
       }}
     >
-      <ProviderIcon provider={props.provider} size={Math.round(chip * 0.72)} />
+      <ProviderIcon provider={props.provider} size={Math.round(chip * 0.67)} monoColor="#ffffff" />
     </View>
   );
 }
 
 export function ProviderIcon(props: ProviderIconProps) {
-  const { themeAppearance, themeVariables } = useAppearancePreferences();
+  const { themeAppearance } = useAppearancePreferences();
   const isDarkMode = themeAppearance === "dark";
   const size = props.size ?? 16;
-  const mono = isDarkMode ? "#e5e5e5" : "#171717";
+  const mono = props.monoColor ?? (isDarkMode ? "#e5e5e5" : "#171717");
 
   const withOverlay = (node: ReactNode): ReactNode =>
     props.overlayProvider ? (
       <View style={{ position: "relative", width: size, height: size }}>
         {node}
-        <ProviderGlyphOverlay
-          provider={props.provider}
-          size={size}
-          surfaceColor={themeVariables["--color-card"]}
-        />
+        <ProviderGlyphOverlay provider={props.provider} size={size} />
       </View>
     ) : (
       node
@@ -257,8 +255,7 @@ export function ProviderIcon(props: ProviderIconProps) {
  * (accent color present, or several instances share this driver), and the
  * provider overlay drawn when `overlayProvider` is set (see
  * `resolveModelVendorGlyph`) — the two claim the same corner, so only one
- * renders. The glyph and its provider overlay dim to 60% opacity while the
- * account badge stays fully saturated, matching
+ * renders. Glyph and overlay render at full strength, matching
  * `apps/web/src/components/chat/ProviderInstanceIcon.tsx`.
  */
 export function ProviderInstanceIcon(props: {
@@ -275,16 +272,10 @@ export function ProviderInstanceIcon(props: {
   const showBadge = props.showBadge === true && props.overlayProvider !== true;
   return (
     <View style={{ position: "relative" }}>
-      <View style={{ opacity: 0.6 }}>
-        <ProviderIcon provider={props.provider} size={size} vendor={props.vendor} />
-        {props.overlayProvider === true ? (
-          <ProviderGlyphOverlay
-            provider={props.provider}
-            size={size}
-            surfaceColor={props.surfaceColor}
-          />
-        ) : null}
-      </View>
+      <ProviderIcon provider={props.provider} size={size} vendor={props.vendor} />
+      {props.overlayProvider === true ? (
+        <ProviderGlyphOverlay provider={props.provider} size={size} />
+      ) : null}
       {showBadge ? (
         <View
           className={props.accentColor ? undefined : "bg-card"}

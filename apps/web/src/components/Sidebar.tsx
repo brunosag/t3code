@@ -402,12 +402,11 @@ function SidebarThreadTooltip({
                 }
                 accentColor={providerEntry?.accentColor}
                 vendorGlyph={vendorGlyph}
-                // Initials would swallow a size-3 glyph: accent dot, name in label.
+                // Initials would swallow a size-3.5 glyph: accent dot, name in label.
                 showBadge={showInstanceBadge && providerEntry?.accentColor !== undefined}
                 badgeContent="none"
                 badgeClassName="h-2 min-w-2 px-0"
-                iconClassName="size-3"
-                glyphClassName="grayscale opacity-60"
+                iconClassName="size-3.5 shrink-0"
               />
               <div className="min-w-0 truncate text-foreground/75">
                 {showInstanceBadge && providerEntry
@@ -1985,10 +1984,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       accentColor={providerEntry?.accentColor}
                       vendorGlyph={vendorGlyph}
                       showBadge={showInstanceBadge}
-                      // Glyph and its overlay dim together, badge stays saturated;
-                      // offset matches the composer trigger.
+                      // Badge offset matches the composer trigger.
                       iconClassName="size-3.5"
-                      glyphClassName="opacity-60"
                       badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
                     />
                   </span>

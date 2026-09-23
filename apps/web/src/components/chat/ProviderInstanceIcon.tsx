@@ -15,12 +15,6 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   badgeContent?: "initials" | "none";
   className?: string;
   iconClassName?: string;
-  /**
-   * Presentation effects (opacity, grayscale) for the glyph box, so a dimmed
-   * glyph and its provider overlay fade as one. Sizing stays in
-   * `iconClassName`.
-   */
-  glyphClassName?: string;
   badgeClassName?: string;
   statusDotClassName?: string;
   indicatorBackground?: string;
@@ -34,6 +28,9 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
     ? ({ "--provider-accent": props.accentColor } as CSSProperties)
     : undefined;
   const badgeContent = props.badgeContent ?? "initials";
+  // B³ chip: a 55%-black scrim keeps the white provider mark readable while
+  // the vendor glyph shows through it.
+  const overlayBackground = "rgba(0, 0, 0, 0.55)";
   // The provider overlay claims the bottom-right corner the account badge
   // would sit in; the instance stays named by the row's label and tooltip.
   const showBadge = props.showBadge === true && OverlayIcon === null;
@@ -47,30 +44,25 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
       style={accentStyle}
       data-provider-accent-color={props.accentColor}
     >
-      <span className={cn("relative inline-flex shrink-0", props.glyphClassName)}>
-        {Icon ? (
-          <Icon className={cn("size-5 shrink-0", props.iconClassName)} aria-hidden />
-        ) : (
-          <span className={cn("text-[10px] font-semibold leading-none", props.iconClassName)}>
-            {providerInstanceInitials(props.displayName)}
-          </span>
-        )}
-        {OverlayIcon ? (
-          <span
-            className={cn(
-              "pointer-events-none absolute -bottom-[8%] -right-[8%] z-10 flex aspect-square w-[62%] min-w-2 items-center justify-center rounded-full",
-              "text-foreground",
-            )}
-            style={{
-              backgroundColor: indicatorBackground,
-              boxShadow: `0 0 0 1px ${indicatorBackground}`,
-            }}
-            aria-hidden
-          >
-            <OverlayIcon className="size-[75%]" />
-          </span>
-        ) : null}
-      </span>
+      {Icon ? (
+        <Icon className={cn("size-5 shrink-0", props.iconClassName)} aria-hidden />
+      ) : (
+        <span className={cn("text-[10px] font-semibold leading-none", props.iconClassName)}>
+          {providerInstanceInitials(props.displayName)}
+        </span>
+      )}
+      {OverlayIcon ? (
+        <span
+          className={cn(
+            "pointer-events-none absolute -bottom-[8%] -right-[8%] z-10 flex aspect-square w-[64%] min-w-2 items-center justify-center rounded-[27%]",
+            "text-white",
+          )}
+          style={{ backgroundColor: overlayBackground }}
+          aria-hidden
+        >
+          <OverlayIcon className="size-[67%]" />
+        </span>
+      ) : null}
       {props.statusDotClassName ? (
         <span
           className={cn(
