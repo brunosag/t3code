@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { hasSoleProviderInstance, resolveModelVendor } from "./modelVendor.ts";
+import {
+  hasSoleProviderInstance,
+  resolveModelVendor,
+  resolveModelVendorGlyph,
+} from "./modelVendor.ts";
 
 describe("resolveModelVendor", () => {
   it("reads the model id rather than the gateway that serves it", () => {
@@ -23,6 +27,42 @@ describe("resolveModelVendor", () => {
   it("returns undefined for vendors with no rule", () => {
     expect(resolveModelVendor({ slug: "opencode-go/glm-5.3" })).toBeUndefined();
     expect(resolveModelVendor(null)).toBeUndefined();
+  });
+});
+
+describe("resolveModelVendorGlyph", () => {
+  const claude = { slug: "claude-sonnet-4", name: "Claude Sonnet 4" };
+
+  it("shows the vendor mark alone while Pi is the only active provider", () => {
+    expect(
+      resolveModelVendorGlyph({ model: claude, driverKind: "pi", isSoleProviderInstance: true }),
+    ).toEqual({ vendor: "anthropic", overlayProvider: false });
+  });
+
+  it("overlays Pi on the vendor mark while several providers are active", () => {
+    expect(
+      resolveModelVendorGlyph({ model: claude, driverKind: "pi", isSoleProviderInstance: false }),
+    ).toEqual({ vendor: "anthropic", overlayProvider: true });
+  });
+
+  it("leaves other providers their own mark while several are active", () => {
+    expect(
+      resolveModelVendorGlyph({
+        model: claude,
+        driverKind: "codex",
+        isSoleProviderInstance: false,
+      }),
+    ).toEqual({ vendor: undefined, overlayProvider: false });
+  });
+
+  it("keeps the plain provider mark for a model with no vendor rule", () => {
+    expect(
+      resolveModelVendorGlyph({
+        model: { slug: "m-7f3a" },
+        driverKind: "pi",
+        isSoleProviderInstance: false,
+      }),
+    ).toEqual({ vendor: undefined, overlayProvider: false });
   });
 });
 

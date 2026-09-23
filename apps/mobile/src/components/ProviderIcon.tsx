@@ -1,4 +1,5 @@
 import { Image } from "expo-image";
+import type { ReactNode } from "react";
 import { Path, Svg } from "react-native-svg";
 import { View } from "react-native";
 import type { ModelVendor } from "@t3tools/client-runtime/state/model-vendor";
@@ -10,10 +11,16 @@ type ProviderIconProps = {
   readonly provider: string | null | undefined;
   readonly size?: number;
   /**
-   * Model vendor glyph to draw instead of the provider glyph. Set only when a
-   * single provider instance is configured; see `resolveModelVendor`.
+   * Model vendor glyph to draw instead of the provider glyph, from
+   * `resolveModelVendorGlyph`.
    */
   readonly vendor?: ModelVendor | undefined;
+  /**
+   * Stamp the provider mark over the vendor mark's bottom-right corner, so a
+   * multi-provider surface still shows which provider serves the model. Only
+   * ever set together with `vendor`; see `resolveModelVendorGlyph`.
+   */
+  readonly overlayProvider?: boolean;
 };
 
 /** Vendor marks, keyed the same way as `apps/web/src/components/chat/providerIconUtils.ts`. */
@@ -98,20 +105,70 @@ function vendorGlyph(props: { vendor: ModelVendor; size: number; mono: string })
   }
 }
 
+/**
+ * Provider mark stamped over a vendor glyph's bottom-right corner so a
+ * multi-provider surface still shows which provider serves the model.
+ */
+function ProviderGlyphOverlay(props: {
+  readonly provider: string | null | undefined;
+  readonly size: number;
+  readonly surfaceColor: string;
+}) {
+  const chip = Math.max(Math.round(props.size * 0.62), 9);
+  const offset = Math.max(Math.round(props.size * 0.12), 1);
+  return (
+    <View
+      style={{
+        position: "absolute",
+        right: -offset,
+        bottom: -offset,
+        width: chip,
+        height: chip,
+        borderRadius: chip / 2,
+        backgroundColor: props.surfaceColor,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <ProviderIcon provider={props.provider} size={Math.round(chip * 0.72)} />
+    </View>
+  );
+}
+
 export function ProviderIcon(props: ProviderIconProps) {
-  const { themeAppearance } = useAppearancePreferences();
+  const { themeAppearance, themeVariables } = useAppearancePreferences();
   const isDarkMode = themeAppearance === "dark";
   const size = props.size ?? 16;
   const mono = isDarkMode ? "#e5e5e5" : "#171717";
 
+  const withOverlay = (node: ReactNode): ReactNode =>
+    props.overlayProvider ? (
+      <View style={{ position: "relative", width: size, height: size }}>
+        {node}
+        <ProviderGlyphOverlay
+          provider={props.provider}
+          size={size}
+          surfaceColor={themeVariables["--color-card"]}
+        />
+      </View>
+    ) : (
+      node
+    );
+
   if (props.vendor) {
     const glyph = vendorGlyph({ vendor: props.vendor, size, mono });
-    if (glyph) return glyph;
+    if (glyph) return withOverlay(glyph);
     // Vendors whose mark is already a provider mark render through the
-    // provider branches below.
-    if (props.vendor === "anthropic") return <ProviderIcon provider="claudeAgent" size={size} />;
-    if (props.vendor === "xai") return <ProviderIcon provider="grok" size={size} />;
-    if (props.vendor === "openai") return <ProviderIcon provider="codex" size={size} />;
+    // provider branches below, still as a distinct vendor mark. Google has no
+    // glyph here, so its mark stays the row's provider mark and must not
+    // stamp itself.
+    if (props.vendor === "anthropic") {
+      return withOverlay(<ProviderIcon provider="claudeAgent" size={size} />);
+    }
+    if (props.vendor === "xai") return withOverlay(<ProviderIcon provider="grok" size={size} />);
+    if (props.vendor === "openai") {
+      return withOverlay(<ProviderIcon provider="codex" size={size} />);
+    }
   }
 
   if (props.provider?.trim().toLowerCase() === "antigravity") {
@@ -197,25 +254,38 @@ export function ProviderIcon(props: ProviderIconProps) {
 /**
  * `ProviderIcon` plus the web sidebar's account badge: an accent-color
  * initials bubble in the bottom-right corner, drawn when `showBadge` is set
- * (accent color present, or several instances share this driver). The glyph
- * dims to 60% opacity while the badge stays fully saturated, matching
+ * (accent color present, or several instances share this driver), and the
+ * provider overlay drawn when `overlayProvider` is set (see
+ * `resolveModelVendorGlyph`) — the two claim the same corner, so only one
+ * renders. The glyph and its provider overlay dim to 60% opacity while the
+ * account badge stays fully saturated, matching
  * `apps/web/src/components/chat/ProviderInstanceIcon.tsx`.
  */
 export function ProviderInstanceIcon(props: {
   readonly provider: string | null | undefined;
   readonly size?: number;
   readonly vendor?: ModelVendor | undefined;
+  readonly overlayProvider?: boolean;
   readonly displayName: string;
   readonly accentColor?: string;
   readonly showBadge?: boolean;
   readonly surfaceColor: string;
 }) {
+  const size = props.size ?? 16;
+  const showBadge = props.showBadge === true && props.overlayProvider !== true;
   return (
     <View style={{ position: "relative" }}>
       <View style={{ opacity: 0.6 }}>
-        <ProviderIcon provider={props.provider} size={props.size} vendor={props.vendor} />
+        <ProviderIcon provider={props.provider} size={size} vendor={props.vendor} />
+        {props.overlayProvider === true ? (
+          <ProviderGlyphOverlay
+            provider={props.provider}
+            size={size}
+            surfaceColor={props.surfaceColor}
+          />
+        ) : null}
       </View>
-      {props.showBadge ? (
+      {showBadge ? (
         <View
           className={props.accentColor ? undefined : "bg-card"}
           style={{

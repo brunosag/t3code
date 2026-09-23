@@ -86,9 +86,39 @@ export function resolveModelVendor(
 }
 
 /**
+ * How a model's row draws its glyph: the vendor mark that replaces the
+ * provider mark, and whether the provider mark overlays it.
+ *
+ * With a single usable provider its mark repeats on every row and identifies
+ * nothing, so the model's vendor is the useful signal instead. With several
+ * active providers the provider mark is normally what tells rows apart —
+ * except Pi, whose models would otherwise all carry the same mark: those keep
+ * the vendor mark with Pi stamped over its bottom-right corner, so a Pi row
+ * stays as distinguishable as it is when Pi is the only active provider.
+ *
+ * `overlayProvider` is only true alongside a `vendor`, so a model with no
+ * vendor rule keeps the plain provider mark rather than stamping it on itself.
+ */
+export function resolveModelVendorGlyph(input: {
+  readonly model: {
+    readonly slug?: string | undefined;
+    readonly name?: string | undefined;
+  } | null;
+  readonly driverKind: string | null | undefined;
+  readonly isSoleProviderInstance: boolean;
+}): { readonly vendor: ModelVendor | undefined; readonly overlayProvider: boolean } {
+  const vendor = resolveModelVendor(input.model);
+  if (input.isSoleProviderInstance) return { vendor, overlayProvider: false };
+  if (input.driverKind !== "pi" || vendor === undefined) {
+    return { vendor: undefined, overlayProvider: false };
+  }
+  return { vendor, overlayProvider: true };
+}
+
+/**
  * True when exactly one provider instance is usable, which makes the provider
- * glyph redundant on every row it appears in. That is the condition under which
- * clients swap it for the model's vendor glyph.
+ * glyph redundant on every row it appears in. One of the two conditions under
+ * which clients show the model's vendor glyph; see `resolveModelVendorGlyph`.
  */
 export function hasSoleProviderInstance(
   instances: Iterable<{ readonly enabled: boolean; readonly isAvailable: boolean }>,

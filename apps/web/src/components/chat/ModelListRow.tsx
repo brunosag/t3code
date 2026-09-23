@@ -5,9 +5,9 @@ import {
   getDisplayModelName,
   getTriggerDisplayModelLabel,
   type ModelEsque,
-  PROVIDER_ICON_BY_PROVIDER,
+  type ModelVendorGlyph,
 } from "./providerIconUtils";
-import type { Icon } from "../Icons";
+import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { ComboboxItem } from "../ui/combobox";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -30,8 +30,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
    */
   providerDisplayName: string;
   providerAccentColor?: string | undefined;
-  /** Model vendor glyph shown instead of the provider glyph, from `resolveModelVendorIcon`. */
-  vendorIcon?: Icon | undefined;
+  /** Model vendor glyph(s) shown instead of the provider glyph, from `resolveModelVendorIcon`. */
+  vendorGlyph?: ModelVendorGlyph | undefined;
   isFavorite: boolean;
   isSelected: boolean;
   showSelection?: boolean;
@@ -44,7 +44,6 @@ export const ModelListRow = memo(function ModelListRow(props: {
   disabledReason?: string | null;
   onToggleFavorite: () => void;
 }) {
-  const ProviderIcon = props.vendorIcon ?? PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
   const providerLabel = props.model.subProvider
     ? `${props.providerDisplayName} · ${props.model.subProvider}`
     : props.providerDisplayName;
@@ -89,7 +88,13 @@ export const ModelListRow = memo(function ModelListRow(props: {
         </div>
         {props.showProvider && (
           <div className="mt-1 flex items-center gap-1.5">
-            {ProviderIcon ? <ProviderIcon className="size-3 shrink-0" /> : null}
+            <ProviderInstanceIcon
+              driverKind={props.driverKind}
+              displayName={props.providerDisplayName}
+              vendorGlyph={props.vendorGlyph}
+              className="size-3 shrink-0"
+              iconClassName="size-3"
+            />
             <span className="truncate text-xs font-normal leading-snug text-muted-foreground/70">
               {providerLabel}
             </span>

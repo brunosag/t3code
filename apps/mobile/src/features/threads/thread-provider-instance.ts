@@ -7,7 +7,7 @@ import {
 import {
   hasSoleProviderInstance,
   type ModelVendor,
-  resolveModelVendor,
+  resolveModelVendorGlyph,
 } from "@t3tools/client-runtime/state/model-vendor";
 import type { EnvironmentId, ProviderDriverKind, ServerConfig } from "@t3tools/contracts";
 
@@ -17,8 +17,10 @@ export interface ThreadRowProviderInstance {
   readonly displayName: string;
   readonly accentColor?: string | undefined;
   readonly showBadge: boolean;
-  /** Model vendor glyph replacing the provider glyph; see `resolveModelVendor`. */
+  /** Model vendor glyph replacing the provider glyph; see `resolveModelVendorGlyph`. */
   readonly vendor: ModelVendor | undefined;
+  /** Provider mark stamped over the vendor mark's corner; see `resolveModelVendorGlyph`. */
+  readonly overlayProvider: boolean;
 }
 
 /**
@@ -40,19 +42,23 @@ export function resolveThreadProviderInstance(
     accentColor: normalizeProviderAccentColor(snapshot.accentColor),
   };
   const selectedModel = snapshot.models.find((model) => model.slug === thread.modelSelection.model);
+  const glyph = resolveModelVendorGlyph({
+    model: selectedModel ?? { slug: thread.modelSelection.model },
+    driverKind: snapshot.driver,
+    isSoleProviderInstance: hasSoleProviderInstance(
+      providers.map((provider) => ({
+        enabled: provider.enabled,
+        isAvailable: provider.availability !== "unavailable",
+      })),
+    ),
+  });
   return {
     ...entry,
     showBadge: shouldShowInstanceBadge(
       entry,
       providers.map((provider) => ({ driverKind: provider.driver })),
     ),
-    vendor: hasSoleProviderInstance(
-      providers.map((provider) => ({
-        enabled: provider.enabled,
-        isAvailable: provider.availability !== "unavailable",
-      })),
-    )
-      ? resolveModelVendor(selectedModel ?? { slug: thread.modelSelection.model })
-      : undefined,
+    vendor: glyph.vendor,
+    overlayProvider: glyph.overlayProvider,
   };
 }

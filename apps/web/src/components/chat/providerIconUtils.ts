@@ -1,5 +1,8 @@
 import { ProviderDriverKind } from "@t3tools/contracts";
-import { type ModelVendor, resolveModelVendor } from "@t3tools/client-runtime/state/model-vendor";
+import {
+  type ModelVendor,
+  resolveModelVendorGlyph,
+} from "@t3tools/client-runtime/state/model-vendor";
 import {
   AntigravityIcon,
   ClaudeAI,
@@ -45,22 +48,39 @@ const VENDOR_ICON_BY_VENDOR: Partial<Record<ModelVendor, Icon>> = {
   meituan: MeituanIcon,
 };
 
+/** Glyph(s) a model row draws instead of the plain provider glyph. */
+export type ModelVendorGlyph = {
+  /** Model vendor mark replacing the provider mark. */
+  readonly icon: Icon;
+  /** Provider mark stamped over the icon's bottom-right corner. */
+  readonly overlayIcon?: Icon | undefined;
+};
+
 /**
- * Glyph to show in place of the provider glyph, or `undefined` to keep the
- * provider glyph.
+ * Glyph(s) for a model row, or `undefined` to keep the plain provider glyph.
  *
- * When a single provider instance is configured, its mark repeats on every row
- * and identifies nothing; the model's vendor is the useful signal instead. With
- * several instances configured the provider mark is what tells them apart, so
- * it always wins. Vendors without a glyph fall back the same way.
+ * The vendor mark replaces the provider mark when a single provider instance
+ * is configured (its mark repeats on every row and identifies nothing), and —
+ * with several active providers — for Pi models, whose rows would otherwise
+ * all carry the same mark: those show the vendor mark with the Pi mark
+ * overlaid. Every other provider keeps its mark so it stays tellable apart
+ * from the rest. See `resolveModelVendorGlyph` for the shared rule.
  */
 export function resolveModelVendorIcon(
   model: { readonly slug?: string | undefined; readonly name?: string | undefined } | null,
+  driverKind: ProviderDriverKind | null | undefined,
   isSoleProviderInstance: boolean,
-): Icon | undefined {
-  if (!isSoleProviderInstance) return undefined;
-  const vendor = resolveModelVendor(model);
-  return vendor ? VENDOR_ICON_BY_VENDOR[vendor] : undefined;
+): ModelVendorGlyph | undefined {
+  const { vendor, overlayProvider } = resolveModelVendorGlyph({
+    model,
+    driverKind,
+    isSoleProviderInstance,
+  });
+  if (!vendor) return undefined;
+  const icon = VENDOR_ICON_BY_VENDOR[vendor];
+  if (!icon) return undefined;
+  const providerIcon = driverKind ? PROVIDER_ICON_BY_PROVIDER[driverKind] : undefined;
+  return overlayProvider && providerIcon ? { icon, overlayIcon: providerIcon } : { icon };
 }
 
 export type ModelEsque = {

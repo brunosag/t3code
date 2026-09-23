@@ -10,7 +10,7 @@ import {
 import {
   hasSoleProviderInstance,
   type ModelVendor,
-  resolveModelVendor,
+  resolveModelVendorGlyph,
 } from "@t3tools/client-runtime/state/model-vendor";
 
 export type ModelOption = {
@@ -21,11 +21,17 @@ export type ModelOption = {
   readonly providerLabel: string;
   readonly providerDriver: string;
   /**
-   * Model vendor glyph to draw instead of the provider glyph. Only set when a
-   * single provider instance is configured, where the provider mark repeats on
-   * every row and identifies nothing.
+   * Model vendor glyph to draw instead of the provider glyph, from
+   * `resolveModelVendorGlyph`: set when a single provider instance is
+   * configured, and for Pi models when several providers are active.
    */
   readonly vendor: ModelVendor | undefined;
+  /**
+   * Stamp the provider mark over the vendor mark's bottom-right corner so a
+   * multi-provider catalog still shows which provider serves the model. Only
+   * ever set together with `vendor`; see `resolveModelVendorGlyph`.
+   */
+  readonly overlayProvider: boolean;
   readonly isDefault: boolean;
   readonly isLegacy: boolean;
   readonly isUnavailable?: boolean;
@@ -169,8 +175,10 @@ export function buildModelOptions(
       isAvailable: provider.availability !== "unavailable",
     })),
   );
-  const vendorFor = (model: { slug?: string | undefined; name?: string | undefined } | null) =>
-    soleProvider ? resolveModelVendor(model) : undefined;
+  const glyphFor = (
+    driver: string,
+    model: { slug?: string | undefined; name?: string | undefined } | null,
+  ) => resolveModelVendorGlyph({ model, driverKind: driver, isSoleProviderInstance: soleProvider });
 
   for (const provider of config?.providers ?? []) {
     if (
@@ -185,6 +193,7 @@ export function buildModelOptions(
     const providerLabel = providerDisplayLabel(provider);
     for (const model of provider.models) {
       const key = `${provider.instanceId}:${model.slug}`;
+      const glyph = glyphFor(provider.driver, model);
       options.set(key, {
         key,
         label: model.name,
@@ -192,7 +201,8 @@ export function buildModelOptions(
         providerKey: provider.instanceId,
         providerLabel,
         providerDriver: provider.driver,
-        vendor: vendorFor(model),
+        vendor: glyph.vendor,
+        overlayProvider: glyph.overlayProvider,
         isDefault: model.isDefault === true,
         isLegacy: model.isLegacy === true,
         capabilities: model.capabilities,
@@ -233,6 +243,7 @@ export function buildModelOptions(
         displayName: provider?.displayName ?? instanceConfig?.displayName,
         instanceId: fallbackModelSelection.instanceId,
       });
+      const glyph = glyphFor(providerDriver, model ?? { slug: fallbackModelSelection.model });
       options.set(key, {
         key,
         label: model?.name ?? fallbackModelSelection.model,
@@ -240,7 +251,8 @@ export function buildModelOptions(
         providerKey: fallbackModelSelection.instanceId,
         providerLabel,
         providerDriver,
-        vendor: vendorFor(model ?? { slug: fallbackModelSelection.model }),
+        vendor: glyph.vendor,
+        overlayProvider: glyph.overlayProvider,
         isDefault: false,
         isLegacy: model?.isLegacy === true,
         ...(isModelSelectionUnavailable(config, fallbackModelSelection)

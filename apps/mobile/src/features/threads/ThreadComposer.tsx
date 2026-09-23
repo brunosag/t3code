@@ -955,6 +955,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                             provider={currentModelOption?.providerDriver}
                             size={16}
                             vendor={currentModelOption?.vendor}
+                            overlayProvider={currentModelOption?.overlayProvider}
                           />
                         }
                         label={currentModelOption?.label ?? currentModelSelection.model}

@@ -408,4 +408,55 @@ describe("mobile model options", () => {
       }),
     ).toBeNull();
   });
+
+  it("stamps the provider mark on Pi models while several providers are active", () => {
+    const config = {
+      providers: [
+        {
+          instanceId: "pi",
+          driver: "pi",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          models: [{ slug: "claude-sonnet-4", name: "Claude Sonnet 4", capabilities: null }],
+        },
+        {
+          instanceId: "codex",
+          driver: "codex",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          models: [{ slug: "gpt-5.4", name: "GPT-5.4", capabilities: null }],
+        },
+      ],
+    } as unknown as ServerConfig;
+
+    const [piModel, codexModel] = buildModelOptions(config, null);
+
+    expect(piModel?.vendor).toBe("anthropic");
+    expect(piModel?.overlayProvider).toBe(true);
+    // Other providers keep their plain provider mark with several active.
+    expect(codexModel?.vendor).toBeUndefined();
+    expect(codexModel?.overlayProvider).toBe(false);
+  });
+
+  it("shows Pi model marks plain while Pi is the only active provider", () => {
+    const config = {
+      providers: [
+        {
+          instanceId: "pi",
+          driver: "pi",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          models: [{ slug: "claude-sonnet-4", name: "Claude Sonnet 4", capabilities: null }],
+        },
+      ],
+    } as unknown as ServerConfig;
+
+    const [piModel] = buildModelOptions(config, null);
+
+    expect(piModel?.vendor).toBe("anthropic");
+    expect(piModel?.overlayProvider).toBe(false);
+  });
 });

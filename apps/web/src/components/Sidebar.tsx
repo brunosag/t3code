@@ -213,8 +213,11 @@ import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
-import { getTriggerDisplayModelLabel, resolveModelVendorIcon } from "./chat/providerIconUtils";
-import type { Icon } from "./Icons";
+import {
+  getTriggerDisplayModelLabel,
+  resolveModelVendorIcon,
+  type ModelVendorGlyph,
+} from "./chat/providerIconUtils";
 import {
   deriveProviderEntriesByEnvironment,
   hasSoleProviderInstance,
@@ -322,7 +325,7 @@ function SidebarThreadTooltip({
   environmentMachine,
   providerEntry,
   showInstanceBadge,
-  vendorIcon,
+  vendorGlyph,
   modelInstanceId,
   modelLabel,
   branchMismatch,
@@ -336,7 +339,7 @@ function SidebarThreadTooltip({
   environmentMachine: EnvironmentMachineKind;
   providerEntry: ProviderInstanceEntry | null;
   showInstanceBadge: boolean;
-  vendorIcon: Icon | undefined;
+  vendorGlyph: ModelVendorGlyph | undefined;
   modelInstanceId: string;
   modelLabel: string;
   branchMismatch: {
@@ -398,12 +401,13 @@ function SidebarThreadTooltip({
                   providerEntry?.displayName ?? thread.session?.providerName ?? modelInstanceId
                 }
                 accentColor={providerEntry?.accentColor}
-                vendorIcon={vendorIcon}
+                vendorGlyph={vendorGlyph}
                 // Initials would swallow a size-3 glyph: accent dot, name in label.
                 showBadge={showInstanceBadge && providerEntry?.accentColor !== undefined}
                 badgeContent="none"
                 badgeClassName="h-2 min-w-2 px-0"
-                iconClassName="size-3 shrink-0 grayscale opacity-60"
+                iconClassName="size-3"
+                glyphClassName="grayscale opacity-60"
               />
               <div className="min-w-0 truncate text-foreground/75">
                 {showInstanceBadge && providerEntry
@@ -1210,8 +1214,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const modelLabel = selectedModel
     ? getTriggerDisplayModelLabel(selectedModel)
     : thread.modelSelection.model;
-  const vendorIcon = resolveModelVendorIcon(
+  const vendorGlyph = resolveModelVendorIcon(
     selectedModel ?? { slug: thread.modelSelection.model },
+    driverKind,
     hasSoleProviderInstance(props.providerEntryByInstanceId.values()),
   );
 
@@ -1230,7 +1235,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       environmentMachine={props.environmentMachine}
       providerEntry={providerEntry}
       showInstanceBadge={showInstanceBadge}
-      vendorIcon={vendorIcon}
+      vendorGlyph={vendorGlyph}
       modelInstanceId={modelInstanceId}
       modelLabel={modelLabel}
       branchMismatch={branchMismatch}
@@ -1978,10 +1983,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                         modelInstanceId
                       }
                       accentColor={providerEntry?.accentColor}
-                      vendorIcon={vendorIcon}
+                      vendorGlyph={vendorGlyph}
                       showBadge={showInstanceBadge}
-                      // Glyph dims, badge stays saturated; offset matches the composer trigger.
-                      iconClassName="size-3.5 opacity-60"
+                      // Glyph and its overlay dim together, badge stays saturated;
+                      // offset matches the composer trigger.
+                      iconClassName="size-3.5"
+                      glyphClassName="opacity-60"
                       badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
                     />
                   </span>
@@ -2062,8 +2069,9 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   const modelLabel = selectedModel
     ? getTriggerDisplayModelLabel(selectedModel)
     : thread.modelSelection.model;
-  const vendorIcon = resolveModelVendorIcon(
+  const vendorGlyph = resolveModelVendorIcon(
     selectedModel ?? { slug: thread.modelSelection.model },
+    providerEntry?.driverKind ?? null,
     hasSoleProviderInstance(props.providerEntryByInstanceId.values()),
   );
   const runningTerminalIds = useThreadRunningTerminalIds({
@@ -2151,7 +2159,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
           environmentMachine={props.environmentMachine}
           providerEntry={providerEntry}
           showInstanceBadge={showInstanceBadge}
-          vendorIcon={vendorIcon}
+          vendorGlyph={vendorGlyph}
           modelInstanceId={modelInstanceId}
           modelLabel={modelLabel}
           branchMismatch={branchMismatch}

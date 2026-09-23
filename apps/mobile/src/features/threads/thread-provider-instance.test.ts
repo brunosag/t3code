@@ -5,6 +5,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type ServerConfig,
+  type ServerProviderModel,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -16,9 +17,13 @@ function makeConfig(
     readonly driver: string;
     readonly displayName?: string;
     readonly accentColor?: string;
+    readonly enabled?: boolean;
+    readonly models?: ServerProviderModel[];
   }>,
 ): ServerConfig {
-  return { providers } as unknown as ServerConfig;
+  return {
+    providers: providers.map((provider) => ({ ...provider, models: provider.models ?? [] })),
+  } as unknown as ServerConfig;
 }
 
 function makeThread(environmentId: EnvironmentId, instanceId: string): EnvironmentThreadShell {
@@ -94,5 +99,35 @@ describe("resolveThreadProviderInstance", () => {
     const thread = makeThread(environmentId, "codex");
 
     expect(resolveThreadProviderInstance(serverConfigs, thread)?.showBadge).toBe(false);
+  });
+
+  it("stamps the Pi mark on the vendor mark while another provider is active", () => {
+    const environmentId = EnvironmentId.make("environment-a");
+    const serverConfigs = new Map<EnvironmentId, ServerConfig>([
+      [
+        environmentId,
+        makeConfig([
+          { instanceId: "pi", driver: "pi", enabled: true },
+          { instanceId: "codex", driver: "codex", enabled: true },
+        ]),
+      ],
+    ]);
+
+    const instance = resolveThreadProviderInstance(serverConfigs, makeThread(environmentId, "pi"));
+
+    expect(instance?.vendor).toBe("openai");
+    expect(instance?.overlayProvider).toBe(true);
+  });
+
+  it("shows the vendor mark plain while Pi is the only active provider", () => {
+    const environmentId = EnvironmentId.make("environment-a");
+    const serverConfigs = new Map<EnvironmentId, ServerConfig>([
+      [environmentId, makeConfig([{ instanceId: "pi", driver: "pi", enabled: true }])],
+    ]);
+
+    const instance = resolveThreadProviderInstance(serverConfigs, makeThread(environmentId, "pi"));
+
+    expect(instance?.vendor).toBe("openai");
+    expect(instance?.overlayProvider).toBe(false);
   });
 });

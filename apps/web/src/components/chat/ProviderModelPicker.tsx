@@ -181,8 +181,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     return {
       ...selection,
       entry,
-      vendorIcon: resolveModelVendorIcon(
+      vendorGlyph: resolveModelVendorIcon(
         model ?? { slug: selection.model },
+        entry?.driverKind,
         isSoleProviderInstance,
       ),
       label: model
@@ -246,7 +247,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                       driverKind={selection.entry.driverKind}
                       displayName={selection.entry.displayName}
                       accentColor={selection.entry.accentColor}
-                      vendorIcon={selection.vendorIcon}
+                      vendorGlyph={selection.vendorGlyph}
                       className="size-4 rounded-full bg-[var(--chat-composer-glass-surface,var(--background))] ring-2 ring-[var(--chat-composer-glass-surface,var(--background))]"
                       iconClassName="size-4"
                     />
@@ -263,8 +264,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               driverKind={activeEntry.driverKind}
               displayName={activeEntry.displayName}
               accentColor={activeEntry.accentColor}
-              vendorIcon={resolveModelVendorIcon(
+              vendorGlyph={resolveModelVendorIcon(
                 selectedModel ?? { slug: props.model },
+                activeEntry?.driverKind,
                 isSoleProviderInstance,
               )}
               showBadge={showInstanceBadge}

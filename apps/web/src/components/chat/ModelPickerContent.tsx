@@ -1008,7 +1008,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         driverKind={model.driverKind}
                         providerDisplayName={model.instanceDisplayName}
                         providerAccentColor={model.instanceAccentColor}
-                        vendorIcon={resolveModelVendorIcon(model, isSoleProviderInstance)}
+                        vendorGlyph={resolveModelVendorIcon(
+                          model,
+                          model.driverKind,
+                          isSoleProviderInstance,
+                        )}
                         isFavorite={favoritesSet.has(
                           providerModelKey(model.instanceId, model.slug),
                         )}
