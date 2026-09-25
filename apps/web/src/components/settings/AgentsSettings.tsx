@@ -507,7 +507,6 @@ export function AgentsSettings() {
             activeEntry.instanceId,
             definition.model,
           )}
-          triggerVariant="outline"
           triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
           triggerAriaLabel={`Model for ${label}`}
           getModelDisabledReason={modelDisabledReason}
@@ -534,7 +533,6 @@ export function AgentsSettings() {
           }
           allowPromptInjectedEffort={false}
           planModeEnabled={false}
-          triggerVariant="outline"
           triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
           onModelOptionsChange={(options) =>
             commitPatchAt(index, {

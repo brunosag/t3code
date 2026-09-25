@@ -50,7 +50,7 @@ import {
 } from "~/components/Icons";
 import { RadioGroup } from "~/components/ui/radio-group";
 import { Spinner } from "~/components/ui/spinner";
-import { toggleVariants } from "~/components/ui/toggle";
+import { Toggle, ToggleGroup } from "~/components/ui/toggle-group";
 import { cn } from "~/lib/utils";
 import {
   buildGitActionProgressStages,
@@ -629,7 +629,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                 setPublishRepositoryOverride(null);
               }}
               aria-labelledby="publish-provider-cards-label"
-              className="grid grid-cols-2 gap-2.5"
+              className="grid grid-cols-2"
             >
               {sortedPublishProviderOptions.map((option) => {
                 const readiness = publishProviderReadiness[option.value];
@@ -638,7 +638,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                   return (
                     <div
                       key={option.value}
-                      className="relative flex cursor-not-allowed items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 text-left opacity-55 dark:border-transparent dark:bg-white/[0.035]"
+                      className="relative flex cursor-not-allowed items-center gap-3 rounded-lg border border-border bg-background px-3 py-3 text-left opacity-64 dark:border-transparent dark:bg-white/[0.035]"
                     >
                       <option.Icon className="size-5 shrink-0 text-muted-foreground" aria-hidden />
                       <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
@@ -648,9 +648,8 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                         <TooltipTrigger
                           render={
                             <Button
-                              variant="outline"
-                              size="xs"
-                              className="h-5 rounded-[.25rem] px-1.5 text-[10px] text-warning-foreground"
+                              variant="warning-outline"
+                              size="micro"
                               onClick={(event) => {
                                 event.preventDefault();
                                 event.stopPropagation();
@@ -661,7 +660,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                             </Button>
                           }
                         />
-                        <TooltipPopup side="top" align="end" className="max-w-72">
+                        <TooltipPopup side="top" align="end">
                           {readiness.hint ??
                             "Open Settings -> Source Control to configure this provider."}
                         </TooltipPopup>
@@ -739,7 +738,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                 }
                 aria-labelledby="publish-visibility-cards-label"
                 disabled={publishRepositoryAction.isPending}
-                className="grid grid-cols-2 gap-2.5"
+                className="grid grid-cols-2"
               >
                 {[
                   {
@@ -817,10 +816,10 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                     >
                       Protocol
                     </span>
-                    <RadioGroup
-                      className="w-fit flex-row gap-0.5 rounded-lg bg-input/40 p-0.5"
-                      value={publishProtocol}
-                      onValueChange={(protocol) => {
+                    <ToggleGroup
+                      value={[publishProtocol]}
+                      onValueChange={(next) => {
+                        const protocol = next[0];
                         if (protocol === "ssh" || protocol === "https") {
                           setPublishProtocol(protocol);
                         }
@@ -828,20 +827,9 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                       aria-labelledby="publish-protocol-label"
                       disabled={publishRepositoryAction.isPending}
                     >
-                      {(["ssh", "https"] as const).map((protocol) => (
-                        <RadioPrimitive.Root
-                          key={protocol}
-                          value={protocol}
-                          data-pressed={publishProtocol === protocol ? "" : undefined}
-                          className={toggleVariants({
-                            variant: "segmented",
-                            size: "segmented",
-                          })}
-                        >
-                          {protocol.toUpperCase()}
-                        </RadioPrimitive.Root>
-                      ))}
-                    </RadioGroup>
+                      <Toggle value="ssh">SSH</Toggle>
+                      <Toggle value="https">HTTPS</Toggle>
+                    </ToggleGroup>
                   </div>
                 </div>
               ) : null}
@@ -853,7 +841,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                 aria-live="polite"
                 className="flex items-center gap-2 rounded-md border border-input bg-muted/40 px-3 py-2 text-xs text-muted-foreground dark:border-transparent dark:bg-white/[0.035]"
               >
-                <Spinner className="size-3.5" aria-hidden />
+                <Spinner size="sm" aria-hidden />
                 Publishing repository to {publishProviderLabel}...
               </div>
             ) : null}
@@ -940,7 +928,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
                 <Button disabled={!canSubmitPublishRepository} onClick={submitPublishRepository}>
                   {publishRepositoryAction.isPending ? (
                     <>
-                      <Spinner className="size-3.5" aria-hidden />
+                      <Spinner size="sm" aria-hidden />
                       Publishing...
                     </>
                   ) : (
@@ -1818,7 +1806,7 @@ export default function GitActionsControl({
                 <SourceControlIcon className="size-4" />
                 <MenuItemLabel>Git actions</MenuItemLabel>
               </MenuSubTrigger>
-              <MenuSubPopup className="min-w-32 max-w-[calc(100vw-2rem)]">{gitItems}</MenuSubPopup>
+              <MenuSubPopup>{gitItems}</MenuSubPopup>
             </MenuSub>
           </>
         )
@@ -1835,14 +1823,7 @@ export default function GitActionsControl({
             <Popover>
               <PopoverTrigger
                 openOnHover
-                render={
-                  <Button
-                    aria-disabled="true"
-                    className="cursor-not-allowed rounded-e-none border-e-0 ps-[8.5px] opacity-64 before:rounded-e-none"
-                    size="xs"
-                    variant="outline"
-                  />
-                }
+                render={<Button aria-disabled="true" size="xs" variant="outline" />}
               >
                 <GitQuickActionIcon
                   quickAction={quickAction}
@@ -1860,7 +1841,6 @@ export default function GitActionsControl({
             <Button
               variant="outline"
               size="xs"
-              className="ps-[8.5px]"
               disabled={isGitActionRunning || quickAction.disabled}
               onClick={runQuickAction}
             >
@@ -1884,9 +1864,7 @@ export default function GitActionsControl({
             >
               <ChevronDownIcon aria-hidden="true" className="size-4" />
             </MenuTrigger>
-            <MenuPopup align="end" className="w-full">
-              {gitItems}
-            </MenuPopup>
+            <MenuPopup align="end">{gitItems}</MenuPopup>
           </Menu>
         </Group>
       )}
@@ -1907,7 +1885,7 @@ export default function GitActionsControl({
             <DialogTitle>{COMMIT_DIALOG_TITLE}</DialogTitle>
             <DialogDescription>{COMMIT_DIALOG_DESCRIPTION}</DialogDescription>
           </DialogHeader>
-          <DialogPanel className="space-y-4">
+          <DialogPanel>
             <div className="space-y-3 rounded-xl bg-zinc-25 p-3 text-sm ring-1 ring-black/5 dark:bg-white/[0.035] dark:ring-white/5">
               <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1">
                 <span className="text-muted-foreground">Branch</span>
@@ -1953,57 +1931,63 @@ export default function GitActionsControl({
                   <p className="font-medium">none</p>
                 ) : (
                   <div className="space-y-2">
-                    <ScrollArea className="h-44 rounded-lg bg-card ring-1 ring-black/5 dark:bg-white/[0.025] dark:ring-white/5">
-                      <div className="space-y-1 p-1">
-                        {allFiles.map((file) => {
-                          const isExcluded = excludedFiles.has(file.path);
-                          return (
-                            <div
-                              key={file.path}
-                              className="flex w-full items-center gap-2 rounded-md px-2 py-1 font-mono hover:bg-accent/50"
-                            >
-                              {isEditingFiles && (
-                                <Checkbox
-                                  checked={!excludedFiles.has(file.path)}
-                                  onCheckedChange={() => {
-                                    setExcludedFiles((prev) => {
-                                      const next = new Set(prev);
-                                      if (next.has(file.path)) {
-                                        next.delete(file.path);
-                                      } else {
-                                        next.add(file.path);
-                                      }
-                                      return next;
-                                    });
-                                  }}
-                                />
-                              )}
-                              <button
-                                type="button"
-                                className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
-                                onClick={() => openChangedFileInEditor(file.path)}
+                    <div className="h-44 rounded-lg bg-card ring-1 ring-black/5 dark:bg-white/[0.025] dark:ring-white/5">
+                      <ScrollArea>
+                        <div className="space-y-1 p-1">
+                          {allFiles.map((file) => {
+                            const isExcluded = excludedFiles.has(file.path);
+                            return (
+                              <div
+                                key={file.path}
+                                className="flex w-full items-center gap-2 rounded-md px-2 py-1 font-mono hover:bg-accent/50"
                               >
-                                <StartTruncatedPath
-                                  path={file.path}
-                                  className={`flex-1${isExcluded ? " text-muted-foreground" : ""}`}
-                                />
-                                <span className="shrink-0">
-                                  {isExcluded ? (
-                                    <span className="text-muted-foreground">Excluded</span>
-                                  ) : (
-                                    <>
-                                      <span className="text-diff-addition">+{file.insertions}</span>
-                                      <span className="text-muted-foreground"> / </span>
-                                      <span className="text-diff-deletion">-{file.deletions}</span>
-                                    </>
-                                  )}
-                                </span>
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </ScrollArea>
+                                {isEditingFiles && (
+                                  <Checkbox
+                                    checked={!excludedFiles.has(file.path)}
+                                    onCheckedChange={() => {
+                                      setExcludedFiles((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(file.path)) {
+                                          next.delete(file.path);
+                                        } else {
+                                          next.add(file.path);
+                                        }
+                                        return next;
+                                      });
+                                    }}
+                                  />
+                                )}
+                                <button
+                                  type="button"
+                                  className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left"
+                                  onClick={() => openChangedFileInEditor(file.path)}
+                                >
+                                  <StartTruncatedPath
+                                    path={file.path}
+                                    className={`flex-1${isExcluded ? " text-muted-foreground" : ""}`}
+                                  />
+                                  <span className="shrink-0">
+                                    {isExcluded ? (
+                                      <span className="text-muted-foreground">Excluded</span>
+                                    ) : (
+                                      <>
+                                        <span className="text-diff-addition">
+                                          +{file.insertions}
+                                        </span>
+                                        <span className="text-muted-foreground"> / </span>
+                                        <span className="text-diff-deletion">
+                                          -{file.deletions}
+                                        </span>
+                                      </>
+                                    )}
+                                  </span>
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </ScrollArea>
+                    </div>
                     <div className="flex justify-end font-mono">
                       <span className="text-diff-addition">
                         +{selectedFiles.reduce((sum, f) => sum + f.insertions, 0)}
@@ -2078,7 +2062,7 @@ export default function GitActionsControl({
             </DialogTitle>
             <DialogDescription>{pendingDefaultBranchActionCopy?.description}</DialogDescription>
           </DialogHeader>
-          <DialogFooter className="dark:border-transparent dark:bg-transparent sm:flex-wrap sm:items-center">
+          <DialogFooter variant="bare" className="sm:flex-wrap sm:items-center">
             <Button
               className="w-full sm:mr-auto sm:w-auto"
               variant="outline"
@@ -2088,16 +2072,16 @@ export default function GitActionsControl({
               Abort
             </Button>
             <Button
-              className="min-h-8 w-full max-w-full whitespace-normal py-1.5 leading-snug sm:min-h-7 sm:w-auto"
+              className="w-full max-w-full sm:w-auto"
               variant="outline"
-              size="sm"
+              size="sm-multiline"
               onClick={continuePendingDefaultBranchAction}
             >
               {pendingDefaultBranchActionCopy?.continueLabel ?? "Continue"}
             </Button>
             <Button
-              className="min-h-8 w-full max-w-full whitespace-normal py-1.5 leading-snug sm:min-h-7 sm:w-auto"
-              size="sm"
+              className="w-full max-w-full sm:w-auto"
+              size="sm-multiline"
               onClick={checkoutFeatureBranchAndContinuePendingAction}
             >
               Check out feature branch & continue
