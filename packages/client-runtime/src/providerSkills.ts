@@ -1,7 +1,8 @@
-import type {
-  ServerProvider,
-  ServerProviderSkill,
-  ServerProviderSlashCommand,
+import {
+  ProviderDriverKind,
+  type ServerProvider,
+  type ServerProviderSkill,
+  type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 
 export type ProviderSkillSourceKind = "app" | "repo" | "project" | "personal" | "system" | "other";
@@ -115,7 +116,33 @@ export function resolveProviderSkillsForCwd(
   provider: ServerProvider,
   cwd: string | null | undefined,
 ): ServerProvider["skills"] {
-  return resolveProviderWorkspaceSnapshot(provider, cwd)?.skills ?? provider.skills;
+  const workspaceSkills = resolveProviderWorkspaceSnapshot(provider, cwd)?.skills;
+  if (!workspaceSkills) return provider.skills;
+
+  if (provider.driver !== ProviderDriverKind.make("claudeAgent")) return workspaceSkills;
+
+  // Claude's workspace snapshot can outlive its provider-level user-skill
+  // inventory. Prefer freshly probed user skills, retain old user entries as
+  // a fallback until that probe runs, and keep project skills as overrides.
+  const providerSkillNames = new Set(
+    provider.skills.map((skill) => skill.name.trim().toLowerCase()),
+  );
+  const workspaceOverrides = workspaceSkills.filter((skill) => skill.scope !== "user");
+  const workspaceOverrideNames = new Set(
+    workspaceOverrides.map((skill) => skill.name.trim().toLowerCase()),
+  );
+  return dedupeProviderSkillsByName([
+    ...provider.skills.filter(
+      (skill) => !workspaceOverrideNames.has(skill.name.trim().toLowerCase()),
+    ),
+    ...workspaceSkills.filter(
+      (skill) =>
+        skill.scope === "user" &&
+        !providerSkillNames.has(skill.name.trim().toLowerCase()) &&
+        !workspaceOverrideNames.has(skill.name.trim().toLowerCase()),
+    ),
+    ...workspaceOverrides,
+  ]);
 }
 
 export function resolveProviderSlashCommandsForCwd(

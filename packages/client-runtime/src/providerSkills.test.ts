@@ -251,4 +251,61 @@ describe("workspace provider snapshots", () => {
     expect(resolveProviderSkillsForCwd(provider, "/workspace/project-b")).toEqual(provider.skills);
     expect(resolveProviderSlashCommandsForCwd(provider, null)).toEqual(provider.slashCommands);
   });
+
+  it("adds refreshed Claude user skills to an older workspace snapshot", () => {
+    const wayfinder = {
+      name: "wayfinder",
+      path: "/home/user/.claude/skills/wayfinder/SKILL.md",
+      enabled: true,
+      scope: "user",
+    };
+    const claudeProvider = {
+      ...provider,
+      driver: ProviderDriverKind.make("claudeAgent"),
+      skills: [wayfinder],
+      workspaceSnapshots: [
+        {
+          cwd: "/workspace/project-a",
+          checkedAt: "2026-01-01T00:01:00.000Z",
+          slashCommands: [],
+          skills: [],
+        },
+      ],
+    } satisfies ServerProvider;
+
+    expect(resolveProviderSkillsForCwd(claudeProvider, "/workspace/project-a")).toEqual([
+      wayfinder,
+    ]);
+  });
+
+  it("keeps Claude project skills ahead of same-named user skills", () => {
+    const userSkill = {
+      name: "wayfinder",
+      path: "/home/user/.claude/skills/wayfinder/SKILL.md",
+      enabled: true,
+      scope: "user",
+    };
+    const projectSkill = {
+      ...userSkill,
+      path: "/workspace/project-a/.claude/skills/wayfinder/SKILL.md",
+      scope: "project",
+    };
+    const claudeProvider = {
+      ...provider,
+      driver: ProviderDriverKind.make("claudeAgent"),
+      skills: [userSkill],
+      workspaceSnapshots: [
+        {
+          cwd: "/workspace/project-a",
+          checkedAt: "2026-01-01T00:01:00.000Z",
+          slashCommands: [],
+          skills: [userSkill, projectSkill],
+        },
+      ],
+    } satisfies ServerProvider;
+
+    expect(resolveProviderSkillsForCwd(claudeProvider, "/workspace/project-a")).toEqual([
+      projectSkill,
+    ]);
+  });
 });

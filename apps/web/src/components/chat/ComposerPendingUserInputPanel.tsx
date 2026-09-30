@@ -189,7 +189,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         }
         data-pending-user-input-toggle={isCollapsed ? "collapsed" : "expanded"}
       >
-        <ComposerBanner.Icon />
+        {/* Omitted on purpose: the row reserves the icon column even when it is
+            empty, which would indent the question past the header it aligns to. */}
         <ComposerBanner.Content>
           <span className="shrink-0 font-medium text-muted-foreground">
             {activeQuestion.header}
@@ -233,7 +234,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       </CollapsibleTrigger>
       <CollapsiblePanel>
         <ComposerBanner.Scroll>
-          <ComposerBanner.Body className="pe-1 pb-1 wrap-anywhere">
+          <ComposerBanner.Body className="ps-2 pe-1 pb-1 wrap-anywhere sm:ps-1.5">
             <p className="text-sm text-foreground/85">{activeQuestion.question}</p>
             {customAnswerActive && activeQuestion.options.length > 0 ? (
               <p className="mt-1 text-secondary-label text-xs">
