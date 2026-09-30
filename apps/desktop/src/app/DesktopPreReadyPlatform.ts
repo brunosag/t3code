@@ -70,6 +70,28 @@ export const make = Effect.gen(function* () {
           "applications",
         );
         NodeFS.mkdirSync(applicationsDir, { recursive: true });
+        const iconPath = Electron.app.isPackaged
+          ? NodePath.posix.join(
+              applicationsDir,
+              "..",
+              "icons",
+              `${linux.linuxDesktopEntryName}.png`,
+            )
+          : undefined;
+        if (iconPath !== undefined) {
+          try {
+            NodeFS.mkdirSync(NodePath.posix.dirname(iconPath), { recursive: true });
+            NodeFS.copyFileSync(
+              NodePath.posix.join(
+                Electron.app.getAppPath(),
+                "apps/desktop/prod-resources/icon.png",
+              ),
+              iconPath,
+            );
+          } catch {
+            // Icon installation is optional; registration retries after readiness.
+          }
+        }
         NodeFS.writeFileSync(
           NodePath.posix.join(applicationsDir, linux.linuxDesktopEntryName),
           renderLinuxDesktopEntry({
@@ -82,6 +104,7 @@ export const make = Effect.gen(function* () {
             wmClass: linux.linuxWmClass,
             isDevelopment: linux.isDevelopment,
             isPackaged: Electron.app.isPackaged,
+            ...(iconPath === undefined ? {} : { iconPath }),
           }),
           "utf8",
         );
