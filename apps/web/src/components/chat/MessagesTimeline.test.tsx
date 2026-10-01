@@ -707,11 +707,11 @@ describe("MessagesTimeline", () => {
         itemBounds: [{ top: 80, height: 20 }],
       }),
     ).toBeNull();
-    // Comfortable width: the column is capped at 768px.
+    // Default line width: the column is capped at 768px.
     expect(resolveTimelineMinimapHasPersistentGutter(832, 768)).toBe(false);
     expect(resolveTimelineMinimapHasPersistentGutter(863, 768)).toBe(false);
     expect(resolveTimelineMinimapHasPersistentGutter(864, 768)).toBe(true);
-    // Wider Chat width settings consume the gutter the minimap relies on.
+    // Wider Line width settings consume the gutter the minimap relies on.
     expect(resolveTimelineMinimapHasPersistentGutter(1400, 1152)).toBe(true);
     expect(resolveTimelineMinimapHasPersistentGutter(1200, 1152)).toBe(false);
     expect(resolveTimelineMinimapHasPersistentGutter(2560, 2560)).toBe(false);
@@ -726,10 +726,9 @@ describe("MessagesTimeline", () => {
     // Full gutter: unchanged 40px-wide strip.
     expect(resolveTimelineMinimapHitStripWidth(872, 768)).toBe(40);
     expect(resolveTimelineMinimapHitStripWidth(1400, 768)).toBe(40);
-    // Full Chat width: the column spans the viewport, so the strip is inert
-    // however wide the window gets.
+    // When the column fills the viewport, the strip is inert.
     expect(resolveTimelineMinimapHitStripWidth(2560, 2560)).toBe(0);
-    // Wide Chat width on a window just wider than the column: partial strip.
+    // A window just wider than the column: partial strip.
     expect(resolveTimelineMinimapHitStripWidth(1204, 1152)).toBe(14);
     expect(resolveTimelineMinimapHitStripWidth(0, 0)).toBe(0);
     expect(resolveTimelineMinimapHitStripWidth(Number.NaN, 768)).toBe(0);

@@ -301,20 +301,21 @@ describe("ClientSettings diff colors", () => {
   });
 });
 
-describe("ClientSettings chat width", () => {
-  it("keeps the comfortable width for existing settings without a saved width", () => {
-    expect(decodeClientSettings({}).chatWidth).toBe("comfortable");
+describe("ClientSettings line width", () => {
+  it("defaults to the standard chat column width", () => {
+    expect(decodeClientSettings({}).lineWidth).toBe(768);
   });
 
-  it.each(["comfortable", "wide", "full"])("round-trips the %s width", (chatWidth) => {
-    const settings = decodeClientSettings({ chatWidth });
-    expect(encodeClientSettings(settings).chatWidth).toBe(chatWidth);
-    expect(decodeClientSettingsPatch({ chatWidth }).chatWidth).toBe(chatWidth);
+  it.each([479, 1201, 768.5])("rejects an invalid line width: %s", (value) => {
+    expect(() => decodeClientSettings({ lineWidth: value })).toThrow();
+    expect(() => decodeClientSettingsPatch({ lineWidth: value })).toThrow();
   });
 
-  it("rejects unsupported widths", () => {
-    expect(() => decodeClientSettings({ chatWidth: "huge" })).toThrow();
-    expect(() => decodeClientSettingsPatch({ chatWidth: "huge" })).toThrow();
+  it.each([480, 768, 1200])("accepts a line width in range: %s", (value) => {
+    const settings = decodeClientSettings({ lineWidth: value });
+    expect(settings.lineWidth).toBe(value);
+    expect(encodeClientSettings(settings).lineWidth).toBe(value);
+    expect(decodeClientSettingsPatch({ lineWidth: value }).lineWidth).toBe(value);
   });
 });
 

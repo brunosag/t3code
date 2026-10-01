@@ -234,7 +234,7 @@ export function resolveTimelineMinimapCurrentIndex(input: {
 
 /**
  * Side gutter between the viewport edge and the centered content column.
- * `contentWidth` is the rendered column width, which follows the Chat width
+ * `contentWidth` is the rendered column width, which follows the Line width
  * setting, so callers measure it rather than assume a fixed maximum.
  */
 function resolveTimelineSideGutter(viewportWidth: number, contentWidth: number): number {
@@ -260,7 +260,7 @@ const TIMELINE_MINIMAP_EXPANDED_HIT_STRIP_WIDTH = "22rem";
 /**
  * The minimap overlays the viewport's left edge while the content column is
  * centered, so the side gutter between them shrinks under browser zoom, a
- * narrow pane, or a wider Chat width setting. A fixed-width hover strip would then sit on top of the message
+ * narrow pane, or a wider Line width setting. A fixed-width hover strip would then sit on top of the message
  * text and swallow its pointer events. Cap the strip's width so it never
  * extends past the gutter into the content column; 0 disables the strip.
  */

@@ -234,7 +234,7 @@ describe("versionSkew", () => {
     const descriptor = (serverUpdateUnavailable?: boolean) => ({
       environment: {
         environmentId: EnvironmentId.make("environment-fork"),
-        label: "tutor-prod",
+        label: "vps",
         platform: { os: "linux", arch: "x64" } as const,
         serverVersion: "0.0.41-pi.b4afb578a",
         capabilities: {

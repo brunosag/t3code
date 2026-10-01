@@ -74,6 +74,10 @@ The most common defect in this repo is a change that works on the path you teste
 - **Connection modes.** Local, remote/relay, and tunnel behave differently. Multi-device and multi-environment cases are real.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the [documentation rules](#documentation) before adding anything.
 
+## VPS deployment
+
+The fork deploys to `vps` over Tailscale as `bsag` (`ssh vps` from a configured tailnet device). `tutor-prod` remains a compatibility SSH alias and the Azure VM resource name. Repository variable `VPS_HOST` selects the private Tailscale address; see `FORK.md` and `.github/workflows/deploy-pi-vps.yml`. Preserve `~/local/t3-pi/userdata` and keep development state separate from that live install.
+
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.

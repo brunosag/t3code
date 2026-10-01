@@ -1,7 +1,7 @@
-name: Deploy Pi fork to tutor-prod
+name: Deploy Pi fork to vps
 
 # Fork-only pipeline: push pi-provider -> test, build, and install the server on
-# the tutor-prod VPS through the stock service launcher. The host details live in
+# the vps VPS through the stock service launcher. The host details live in
 # ~/local/t3-pi/DEPLOYMENT.md on the VPS (base dir, drop-in port, Tailscale Serve,
 # rollback recipe).
 on:
@@ -15,7 +15,7 @@ permissions:
 
 # Never run two deploys at once: both would install and restart the same service.
 concurrency:
-  group: deploy-pi-tutor-prod
+  group: deploy-pi-tutor-prod # Stable lock key shared with previously published workflows.
   cancel-in-progress: false
 
 jobs:
@@ -41,7 +41,7 @@ jobs:
             missing=1
           fi
           if [ -z "${{ secrets.VPS_DEPLOY_KEY }}" ]; then
-            echo "::error::Set VPS_DEPLOY_KEY (private half of the restricted ssh key in tutor-prod:~/.ssh/authorized_keys)."
+            echo "::error::Set VPS_DEPLOY_KEY (private half of the restricted ssh key in vps:~/.ssh/authorized_keys)."
             missing=1
           fi
           exit "$missing"
@@ -141,7 +141,7 @@ jobs:
           # propagation is eventually consistent, so an immediate ssh can race it.
           ping: ${{ vars.VPS_HOST }}
 
-      - name: Deploy to tutor-prod
+      - name: Deploy to vps
         env:
           DEPLOY_KEY: ${{ secrets.VPS_DEPLOY_KEY }}
           VPS_HOST: ${{ vars.VPS_HOST }}
@@ -323,7 +323,7 @@ jobs:
 
           To roll back explicitly, use one of the retained versions that is
           complete (its `t3` entry and .install-complete are present):
-            ssh tutor-prod
+            ssh vps
             BASE="$HOME/local/t3-pi"
             cat "$BASE/runtime/service-state.json"
             ls "$BASE/runtime/versions"

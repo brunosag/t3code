@@ -271,10 +271,10 @@ function ContrastAppearanceSync() {
     document.documentElement.dataset.diffColorScheme = diffColorScheme;
   }, [diffColorScheme]);
 
-  const chatWidth = useClientSettings((settings) => settings.chatWidth);
+  const lineWidth = useClientSettings((settings) => settings.lineWidth);
   useEffect(() => {
-    document.documentElement.dataset.chatWidth = chatWidth;
-  }, [chatWidth]);
+    document.documentElement.style.setProperty("--chat-max-width", `${lineWidth}px`);
+  }, [lineWidth]);
 
   useEffect(() => {
     applyAppearanceContrast(document.documentElement, appearanceContrast);
