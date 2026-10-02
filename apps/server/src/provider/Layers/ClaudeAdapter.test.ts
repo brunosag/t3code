@@ -4513,6 +4513,13 @@ describe("ClaudeAdapterLive", () => {
           uuid: "tu",
         },
         { type: "system", subtype: "commands_changed", session_id: "session", uuid: "cc" },
+        {
+          type: "system",
+          subtype: "session_title_changed",
+          title: "Isolated message-edit test (fork)",
+          session_id: "session",
+          uuid: "title",
+        },
         { type: "system", subtype: "local_command_output", session_id: "session", uuid: "lco" },
         { type: "system", subtype: "plugin_install", session_id: "session", uuid: "pi" },
         { type: "system", subtype: "memory_recall", session_id: "session", uuid: "mr" },
