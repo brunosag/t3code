@@ -3408,6 +3408,111 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       }),
   );
 
+  for (const tracking of ["base", "feature", "none"] as const) {
+    it.effect(
+      `commit and push from a linked worktree updates remote main with ${tracking} tracking`,
+      () =>
+        Effect.gen(function* () {
+          const repoDir = yield* makeTempDir("t3code-git-manager-");
+          yield* initRepo(repoDir);
+          const remoteDir = yield* createBareRemote();
+          yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+          yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+          const initialSha = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout.trim();
+          const worktreePath = NodePath.join(repoDir, "linked");
+          const branch = "feature/worktree-main";
+          yield* runGit(repoDir, ["worktree", "add", "-b", branch, worktreePath, "origin/main"]);
+          if (tracking === "feature") {
+            yield* runGit(worktreePath, ["push", "-u", "origin", branch]);
+          } else if (tracking === "none") {
+            yield* runGit(worktreePath, ["branch", "--unset-upstream"]);
+          }
+          NodeFS.writeFileSync(NodePath.join(worktreePath, "feature.txt"), "feature\n");
+
+          const { manager, ghCalls } = yield* makeManager();
+          const result = yield* runStackedAction(manager, {
+            cwd: worktreePath,
+            action: "commit_push",
+            commitMessage: "feat: push worktree to main",
+          });
+
+          expect(result.commit.status).toBe("created");
+          expect(result.push).toMatchObject({
+            status: "pushed",
+            branch,
+            upstreamBranch: "origin/main",
+            setUpstream: true,
+          });
+          expect((yield* runGit(remoteDir, ["rev-parse", "main"])).stdout.trim()).toBe(
+            result.commit.commitSha,
+          );
+          expect((yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout.trim()).toBe(initialSha);
+          expect((yield* runGit(worktreePath, ["branch", "--show-current"])).stdout.trim()).toBe(
+            branch,
+          );
+          expect(
+            (yield* runGit(worktreePath, [
+              "rev-parse",
+              "--abbrev-ref",
+              "@{upstream}",
+            ])).stdout.trim(),
+          ).toBe("origin/main");
+          const remoteFeature = yield* runGit(remoteDir, ["rev-parse", "--verify", branch], true);
+          if (tracking === "feature") {
+            expect(remoteFeature.stdout.trim()).toBe(initialSha);
+          } else {
+            expect(remoteFeature.exitCode).not.toBe(0);
+          }
+          expect(result.pr.status).toBe("skipped_not_requested");
+          expect(result.toast.title).toMatch(/^Pushed [0-9a-f]{7} to origin\/main$/);
+          expect(result.toast.cta.kind).toBe("none");
+          expect(ghCalls.some((call) => call.includes("pr create"))).toBe(false);
+        }),
+    );
+  }
+
+  it.effect("commit and push from a linked worktree rejects a diverged remote main", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      const remoteDir = yield* createBareRemote();
+      yield* runGit(repoDir, ["remote", "add", "origin", remoteDir]);
+      yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+      const worktreePath = NodePath.join(repoDir, "linked");
+      yield* runGit(repoDir, [
+        "worktree",
+        "add",
+        "-b",
+        "feature/worktree-main",
+        worktreePath,
+        "origin/main",
+      ]);
+      NodeFS.writeFileSync(NodePath.join(repoDir, "remote.txt"), "remote change\n");
+      yield* runGit(repoDir, ["add", "remote.txt"]);
+      yield* runGit(repoDir, ["commit", "-m", "Advance main"]);
+      yield* runGit(repoDir, ["push", "origin", "main"]);
+      const remoteSha = (yield* runGit(remoteDir, ["rev-parse", "main"])).stdout.trim();
+      NodeFS.writeFileSync(NodePath.join(worktreePath, "feature.txt"), "feature\n");
+
+      const { manager } = yield* makeManager();
+      const error = yield* runStackedAction(manager, {
+        cwd: worktreePath,
+        action: "commit_push",
+        commitMessage: "feat: keep rejected worktree commit",
+      }).pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "GitCommandError",
+        operation: "GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote",
+        exitCode: 1,
+      });
+      expect((yield* runGit(remoteDir, ["rev-parse", "main"])).stdout.trim()).toBe(remoteSha);
+      expect((yield* runGit(worktreePath, ["log", "-1", "--format=%s"])).stdout.trim()).toBe(
+        "feat: keep rejected worktree commit",
+      );
+    }),
+  );
+
   it.effect("skips push when branch is already up to date", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");

@@ -1686,6 +1686,7 @@ export const make = Effect.gen(function* () {
   const buildCompletionToast = Effect.fn("buildCompletionToast")(function* (
     cwd: string,
     result: Pick<GitRunStackedActionResult, "action" | "branch" | "commit" | "push" | "pr">,
+    pushedToMain = false,
   ) {
     const terms = yield* sourceControlProvider(cwd).pipe(
       Effect.map((provider) => getChangeRequestTerminologyForKind(provider.kind)),
@@ -1693,7 +1694,7 @@ export const make = Effect.gen(function* () {
     );
     const summary = summarizeGitActionResult(result, terms);
     let latestOpenPr: PullRequestInfo | null = null;
-    let currentBranchIsDefault = false;
+    let pushIsToDefaultBranch = pushedToMain;
     let finalBranchContext: {
       branch: string;
       upstreamRef: string | null;
@@ -1708,7 +1709,7 @@ export const make = Effect.gen(function* () {
           upstreamRef: finalStatus.upstreamRef,
           hasUpstream: finalStatus.hasUpstream,
         };
-        currentBranchIsDefault = finalStatus.isDefaultBranch;
+        pushIsToDefaultBranch = finalStatus.isDefaultBranch || pushedToMain;
       }
     }
 
@@ -1723,7 +1724,7 @@ export const make = Effect.gen(function* () {
       (result.action === "commit_push" || result.action === "push") &&
       result.push.status === "pushed" &&
       result.branch.status !== "created" &&
-      !currentBranchIsDefault &&
+      !pushIsToDefaultBranch &&
       explicitResultPr === null &&
       finalBranchContext?.hasUpstream === true;
 
@@ -1751,7 +1752,7 @@ export const make = Effect.gen(function* () {
               result.action === "commit_push" ||
               result.action === "commit_push_pr") &&
             openPr?.url &&
-            (!currentBranchIsDefault ||
+            (!pushIsToDefaultBranch ||
               result.pr.status === "created" ||
               result.pr.status === "opened_existing")
           ? {
@@ -1761,7 +1762,7 @@ export const make = Effect.gen(function* () {
             }
           : (result.action === "push" || result.action === "commit_push") &&
               result.push.status === "pushed" &&
-              !currentBranchIsDefault
+              !pushIsToDefaultBranch
             ? {
                 kind: "run_action" as const,
                 label: `Create ${terms.shortLabel}`,
@@ -2780,6 +2781,18 @@ export const make = Effect.gen(function* () {
             )
           : { status: "skipped_not_requested" as const };
 
+        let pushToMain = false;
+        if (input.action === "commit_push") {
+          const gitDirectories = yield* gitCore.execute({
+            operation: "runStackedAction.resolveWorktree",
+            cwd: input.cwd,
+            args: ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
+          });
+          const [gitDir, commonDir] = gitDirectories.stdout.trim().split("\n");
+          // Linked worktrees have their own Git directory inside the shared common directory.
+          pushToMain = !!gitDir && !!commonDir && gitDir !== commonDir;
+        }
+
         const push = wantsPush
           ? yield* progress
               .emit({
@@ -2789,7 +2802,13 @@ export const make = Effect.gen(function* () {
               })
               .pipe(
                 Effect.tap(() => Ref.set(currentPhase, Option.some("push"))),
-                Effect.flatMap(() => gitCore.pushCurrentBranch(input.cwd, currentBranch)),
+                Effect.flatMap(() =>
+                  gitCore.pushCurrentBranch(
+                    input.cwd,
+                    currentBranch,
+                    pushToMain ? { targetBranch: "main" } : undefined,
+                  ),
+                ),
               )
           : { status: "skipped_not_requested" as const };
 
@@ -2808,13 +2827,17 @@ export const make = Effect.gen(function* () {
               )
           : { status: "skipped_not_requested" as const };
 
-        const toast = yield* buildCompletionToast(input.cwd, {
-          action: input.action,
-          branch: branchStep,
-          commit,
-          push,
-          pr,
-        });
+        const toast = yield* buildCompletionToast(
+          input.cwd,
+          {
+            action: input.action,
+            branch: branchStep,
+            commit,
+            push,
+            pr,
+          },
+          pushToMain,
+        );
 
         const result = {
           action: input.action,

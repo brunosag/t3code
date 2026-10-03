@@ -2086,18 +2086,30 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
 
     const requestedRemoteName = options?.remoteName?.trim() || null;
-    if (requestedRemoteName) {
-      const publishBranch = yield* resolvePublishBranchName(cwd, branch);
+    const requestedBranchName = options?.targetBranch?.trim() || null;
+    if (requestedRemoteName || requestedBranchName) {
+      const remoteName = requestedRemoteName ?? (yield* resolvePushRemoteName(cwd, branch));
+      if (!remoteName) {
+        return yield* new GitCommandError({
+          ...gitCommandContext({
+            operation: "GitVcsDriver.pushCurrentBranch",
+            cwd,
+            args: ["push"],
+          }),
+          detail: "Cannot push because no git remote is configured for this repository.",
+        });
+      }
+      const publishBranch = requestedBranchName ?? (yield* resolvePublishBranchName(cwd, branch));
       yield* runGit(
         "GitVcsDriver.pushCurrentBranch.pushWithRequestedRemote",
         cwd,
-        ["push", "-u", requestedRemoteName, `HEAD:refs/heads/${publishBranch}`],
+        ["push", "-u", remoteName, `HEAD:refs/heads/${publishBranch}`],
         { timeoutMs: null },
       );
       return {
         status: "pushed" as const,
         branch,
-        upstreamBranch: `${requestedRemoteName}/${publishBranch}`,
+        upstreamBranch: `${remoteName}/${publishBranch}`,
         setUpstream: true,
       };
     }

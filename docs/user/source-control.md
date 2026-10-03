@@ -109,8 +109,13 @@ uses the project's instructions and recent commit subjects.
 
 The main Git action creates the pull request once a branch is ahead. Set **Create pull requests** to
 **From the menu only** to keep it as an explicit action, or **Never** to leave it out of Git
-actions entirely. Pushing to the repository's default branch asks for confirmation first; turn off
+actions entirely. When working directly on the repository's default branch, pushing asks for confirmation first; turn off
 **Confirm pushes to the default branch** to push directly.
+
+In a linked worktree, **Commit & push** sends the worktree's commits directly to remote `main` and
+sets the worktree branch to track it. Your local `main` checkout stays unchanged. If remote `main`
+has diverged, update your worktree branch before retrying. **Commit, push & PR** publishes the
+worktree branch separately for a pull request.
 
 ## Review and merge
 
