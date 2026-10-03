@@ -1,13 +1,13 @@
 name: Deploy Pi fork to vps
 
-# Fork-only pipeline: push pi-provider -> test, build, and install the server on
+# Fork-only pipeline: push bsag -> test, build, and install the server on
 # the vps VPS through the stock service launcher. The host details live in
 # ~/local/t3-pi/DEPLOYMENT.md on the VPS (base dir, drop-in port, Tailscale Serve,
 # rollback recipe).
 on:
   push:
     branches:
-      - pi-provider
+      - bsag
   workflow_dispatch:
 
 permissions:

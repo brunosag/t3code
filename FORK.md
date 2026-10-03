@@ -16,7 +16,7 @@ Upstream imports legacy conversation messages into V2. Continued imported thread
 
 ## Deployment
 
-Pushing `pi-provider` runs `.github/workflows/deploy-pi-vps.yml`, which tests the retained changes, builds the server with its web client, and installs the npm tarball on `vps` over Tailscale. `tutor-prod` remains a compatibility SSH alias and the Azure resource name. Secrets are `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, and `VPS_DEPLOY_KEY`; repository variables are `VPS_HOST` and `VPS_USER`.
+Pushing `bsag` runs `.github/workflows/deploy-pi-vps.yml`, which tests the retained changes, builds the server with its web client, and installs the npm tarball on `vps` over Tailscale. `tutor-prod` remains a compatibility SSH alias and the Azure resource name. Secrets are `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, and `VPS_DEPLOY_KEY`; repository variables are `VPS_HOST` and `VPS_USER`.
 
 The live installation is `~/local/t3-pi`; preserve its `userdata` and keep development state separate. Runtime versions use `-pi.<short-sha>`, with the core derived from the upstream release package. Installation retains previous complete runtimes and uses the stock service launcher through a Node shim at `runtime/versions/<version>/t3`. Host procedures live in `~/local/t3-pi/DEPLOYMENT.md`.
 
@@ -26,4 +26,4 @@ The npm-installed server loads `@ff-labs/fff-node` through an ESM import. Upstre
 
 ## Maintenance
 
-Merge upstream into a review worktree and run focused tests plus typechecks for affected packages before updating `pi-provider`. Pi transport and adapter tests live in `apps/server/src/orchestration-v2/Adapters`; retained extension tests live in `apps/server/src/provider/pi`. Do not restore the removed V1 adapter or permission layer.
+Merge upstream into a review worktree and run focused tests plus typechecks for affected packages before updating `bsag`. Pi transport and adapter tests live in `apps/server/src/orchestration-v2/Adapters`; retained extension tests live in `apps/server/src/provider/pi`. Do not restore the removed V1 adapter or permission layer.

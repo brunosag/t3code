@@ -1,6 +1,6 @@
 name: Build Pi fork desktop (Linux)
 
-# Fork-only pipeline: push pi-provider -> test, build an unsigned Linux AppImage,
+# Fork-only pipeline: push bsag -> test, build an unsigned Linux AppImage,
 # publish it as a prerelease on this fork. Installed AppImages update themselves
 # from these releases, so the developer's machine needs no poller or daemon.
 #
@@ -11,7 +11,7 @@ name: Build Pi fork desktop (Linux)
 on:
   push:
     branches:
-      - pi-provider
+      - bsag
   workflow_dispatch:
 
 permissions:
