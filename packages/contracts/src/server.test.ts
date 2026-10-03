@@ -13,7 +13,6 @@ import {
 import { ServerSettings } from "./settings.ts";
 
 const decodeServerProvider = Schema.decodeUnknownSync(ServerProvider);
-const encodeServerProvider = Schema.encodeSync(ServerProvider);
 const decodeServerProviders = Schema.decodeUnknownSync(ServerProviders);
 const decodeServerObservability = Schema.decodeUnknownSync(ServerObservability);
 const decodeUpsertKeybindingResult = Schema.decodeUnknownSync(ServerUpsertKeybindingResult);
@@ -32,16 +31,6 @@ const baseProviderSnapshot = {
 };
 
 describe("ServerProvider", () => {
-  it("round-trips provider-managed permissions while accepting older snapshots", () => {
-    expect(decodeServerProvider(baseProviderSnapshot).managesRuntimePermissions).toBeUndefined();
-    for (const managesRuntimePermissions of [true, false]) {
-      const parsed = decodeServerProvider({ ...baseProviderSnapshot, managesRuntimePermissions });
-      expect(decodeServerProvider(encodeServerProvider(parsed)).managesRuntimePermissions).toBe(
-        managesRuntimePermissions,
-      );
-    }
-  });
-
   it("defaults capability arrays when decoding provider snapshots", () => {
     const parsed = decodeServerProvider({
       instanceId: "codex",
@@ -54,11 +43,13 @@ describe("ServerProvider", () => {
         status: "authenticated",
       },
       checkedAt: "2026-04-10T00:00:00.000Z",
+      supportedRuntimeModes: ["approval-required", "future-mode", "full-access"],
       models: [],
     });
 
     expect(parsed.slashCommands).toEqual([]);
     expect(parsed.skills).toEqual([]);
+    expect(parsed.supportedRuntimeModes).toEqual(["approval-required", "full-access"]);
     expect(parsed.versionAdvisory).toBeUndefined();
     expect(parsed.updateState).toBeUndefined();
   });

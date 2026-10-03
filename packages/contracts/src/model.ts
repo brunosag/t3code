@@ -147,37 +147,9 @@ const CODEX_DRIVER_KIND = ProviderDriverKind.make("codex");
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
 const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
-const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 const PI_DRIVER_KIND = ProviderDriverKind.make("pi");
-
-/**
- * Driver kinds this build ships a driver for.
- *
- * `ProviderInstanceRegistryHydration` materializes a default-enabled instance
- * for every kind listed here even when `ServerSettings` carries no
- * `providerInstances` entry, so a model selection naming one of them is
- * routable. Guards that ask whether a selection's provider is enabled must
- * therefore read "no settings record" as "enabled", not as "disabled":
- * a fork-only driver such as `pi` has no legacy `providers` field to hold a
- * disable flag, and answering `false` rewrote its selections to the fallback
- * provider on every settings change.
- *
- * Keep in sync with `BUILT_IN_DRIVERS` in
- * `apps/server/src/provider/builtInDrivers.ts`.
- */
-export const BUILT_IN_PROVIDER_DRIVER_KINDS: ReadonlyArray<ProviderDriverKind> = [
-  ProviderDriverKind.make("antigravity"),
-  CODEX_DRIVER_KIND,
-  CLAUDE_DRIVER_KIND,
-  CURSOR_DRIVER_KIND,
-  GROK_DRIVER_KIND,
-  OPENCODE_DRIVER_KIND,
-  PI_DRIVER_KIND,
-];
-
-/** Whether this build ships a driver for `value`, rather than it naming a configured instance. */
-export const isBuiltInProviderDriverKind = (value: unknown): value is ProviderDriverKind =>
-  typeof value === "string" && BUILT_IN_PROVIDER_DRIVER_KINDS.some((kind) => kind === value);
+const ACP_REGISTRY_DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
+const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 
 export const DEFAULT_MODEL = "gpt-6-astra";
 
@@ -202,10 +174,11 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [CURSOR_DRIVER_KIND]: "auto",
   // Product slug, not an ACP model id. The Grok adapter treats it as "the session's current model".
   [GROK_DRIVER_KIND]: "grok-build",
+  [ACP_REGISTRY_DRIVER_KIND]: "default",
+  // "default" defers to the user's own Pi settings.json model selection.
+  [PI_DRIVER_KIND]: "default",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
   [ProviderDriverKind.make("antigravity")]: ANTIGRAVITY_DEFAULT_MODEL,
-  // Product slug, not a catalog id. The Pi adapter treats it as "the runtime's active default".
-  [PI_DRIVER_KIND]: "default",
 };
 
 /** Per-provider text generation model defaults. */
@@ -217,7 +190,6 @@ export const DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   [CLAUDE_DRIVER_KIND]: "claude-haiku-4-5",
   [CURSOR_DRIVER_KIND]: "composer-2",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
-  [PI_DRIVER_KIND]: "default",
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
@@ -254,6 +226,7 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [CLAUDE_DRIVER_KIND]: "Claude",
   [CURSOR_DRIVER_KIND]: "Cursor",
   [GROK_DRIVER_KIND]: "Grok",
-  [OPENCODE_DRIVER_KIND]: "OpenCode",
+  [ACP_REGISTRY_DRIVER_KIND]: "ACP Registry",
   [PI_DRIVER_KIND]: "Pi",
+  [OPENCODE_DRIVER_KIND]: "OpenCode",
 };

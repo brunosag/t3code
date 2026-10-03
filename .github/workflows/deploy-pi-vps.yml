@@ -59,12 +59,16 @@ jobs:
         run: |
           vp test run \
             apps/server/src/provider/pi \
-            apps/server/src/provider/Layers/ProviderInstanceRegistryHydration.test.ts \
+            apps/server/src/orchestration-v2/Adapters/PiAdapterV2.test.ts \
+            apps/server/src/provider/Layers/ProviderRegistry.test.ts \
+            apps/server/src/claudeHistoryWorker.test.ts \
+            apps/server/src/provider/providerMaintenance.test.ts \
             apps/web/src/providerInstances.test.ts \
             apps/web/src/components/settings/ProviderSettingsForm.test.ts \
-            packages/contracts/src/pi.test.ts \
             packages/contracts/src/server.test.ts \
-            packages/client-runtime/src/providerPermissions.test.ts \
+            packages/shared/src/serverSettings.test.ts \
+            packages/client-runtime/src/gitActions.test.ts \
+            apps/web/src/pendingUserInput.test.ts \
             apps/desktop/src/app/DesktopEnvironment.test.ts \
             apps/desktop/src/window/DesktopWindow.test.ts \
             scripts/dev-runner.test.ts

@@ -8,7 +8,6 @@ import { materializePiExtension } from "./PiExtensionFile.ts";
  */
 export const PI_USER_INPUT_EXTENSION_SOURCE = String.raw`
 import { createReadStream, writeSync } from "node:fs";
-import { Socket } from "node:net";
 import { Type } from "typebox";
 
 const CHANNEL_FD = 3;
@@ -52,27 +51,16 @@ function rejectPending(error) {
   pending.clear();
 }
 
-function openInput() {
-  try {
-    return createReadStream(null, { fd: CHANNEL_FD, autoClose: false });
-  } catch {
-    return new Socket({ fd: CHANNEL_FD, readable: true, writable: false });
-  }
-}
-
-function attachInput(stream, allowSocketFallback) {
+function attachInput(stream) {
   input = stream;
-  let sawData = false;
   stream.setEncoding("utf8");
   stream.on("data", (chunk) => {
-    sawData = true;
     try {
       buffer += chunk;
       let newlineIndex = buffer.indexOf("\n");
       while (newlineIndex !== -1) {
-        let line = buffer.slice(0, newlineIndex);
+        const line = buffer.slice(0, newlineIndex);
         buffer = buffer.slice(newlineIndex + 1);
-        if (line.endsWith("\r")) line = line.slice(0, -1);
         if (line.length > MAX_LINE_CHARS) throw new Error("T3 user-input response is too large");
         if (line.length > 0) settlePending(JSON.parse(line));
         newlineIndex = buffer.indexOf("\n");
@@ -81,24 +69,9 @@ function attachInput(stream, allowSocketFallback) {
     } catch (error) {
       rejectPending(error);
       stream.destroy();
-      if (input === stream) input = undefined;
     }
   });
-  stream.on("error", (error) => {
-    if (!sawData && allowSocketFallback) {
-      stream.removeAllListeners();
-      stream.destroy();
-      try {
-        attachInput(new Socket({ fd: CHANNEL_FD, readable: true, writable: false }), false);
-        return;
-      } catch (fallbackError) {
-        rejectPending(fallbackError);
-      }
-    } else {
-      rejectPending(error);
-    }
-    if (input === stream) input = undefined;
-  });
+  stream.on("error", rejectPending);
   stream.on("close", () => {
     if (input !== stream) return;
     rejectPending(new Error("T3 user-input channel closed"));
@@ -108,8 +81,7 @@ function attachInput(stream, allowSocketFallback) {
 
 function ensureInput() {
   if (input) return;
-  const stream = openInput();
-  attachInput(stream, !(stream instanceof Socket));
+  attachInput(createReadStream(null, { fd: 4, autoClose: false }));
 }
 
 function requestUserInput(requestId, questions, signal) {
@@ -188,7 +160,7 @@ export default function t3UserInput(pi) {
         const options = question.options.map((option) => ({
           ...option,
           label: option.label.trim(),
-          description: option.description ?? "",
+          description: option.description?.trim() || option.label.trim(),
         }));
         if (options.some((option) => !option.label)) {
           throw new Error("t3_ask_user option labels cannot be blank");

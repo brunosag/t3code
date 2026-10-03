@@ -1,66 +1,29 @@
-# Pi provider fork
+# T3 Code fork
 
-This fork adds [Pi](https://github.com/badlogic/pi-mono) as an external agent provider while retaining T3's projects, threads, terminals, Git, worktrees, and remote clients. Pi is not bundled or installed by T3.
+This fork follows upstream's V2 orchestrator and Pi provider. Pi is an external CLI: install and authenticate it on the machine running the T3 server, then configure its executable in Settings → Providers. Upstream owns Pi model discovery, permissions, sessions, compaction, MCP integration, and auxiliary text generation.
 
-## Run it
+## Retained changes
 
-Install and configure Pi on the **machine running the T3 server**, then verify that `pi` works there. T3 launches `pi --mode rpc` in the thread's project or worktree directory. Set a different executable path in Settings → Providers → Pi when necessary. Use an absolute path on remote machines whose service environment does not include Pi in `PATH`.
+- **Pi questions:** the T3-owned `t3_ask_user` extension supports batched questions, option descriptions, multiple selections, and written answers. It uses dedicated inherited pipes alongside Pi's RPC transport. Written question drafts survive web reloads and mobile app restarts; clear the written answer before choosing options.
+- **Pi agent roster:** Settings → Agents stores named definitions for compatible `pi-subagents` extensions, including prompts, models, thinking, tools, skills, extension access, and turn limits. Definitions apply when a Pi session next starts. A configured roster is exclusive; disabled entries are omitted. Registration failures appear as extension errors. Background completion events update the shared agent timeline.
+- **Git preferences:** automatic, manual, or disabled pull-request actions, plus confirmation before pushing to the default branch, are shared across clients and project overrides.
+- **Claude history:** the SDK 0.3.276 patch rewrites internal deferred tool references when forking a session. The real SDK fork regression test covers repeated forks and external references. Healthy Claude skill changes invalidate cached workspace inventories so clients rescan them.
+- **Installation and desktop fixes:** provider updates recognize npm ownership before native-looking layouts; Linux desktop entries match window identities. Development can omit Electron, open DevTools explicitly, and exit when its desktop window closes. Chat line width remains adjustable.
 
-Pi configuration, authentication, extensions, skills, tools, and system prompts remain Pi's responsibility. T3 does not read or rewrite Pi configuration, add a system prompt, or restrict Pi's own tools; the only tools it adds are the T3 MCP toolkits below, through its own extension. Existing provider-instance environment overrides are passed to the process; they are not interpreted as Pi configuration.
+## Migration
 
-For an explicitly configured instance, the server's existing `providerInstances` setting accepts:
-
-```json
-{
-  "providerInstances": {
-    "pi": {
-      "driver": "pi",
-      "enabled": true,
-      "config": { "binaryPath": "pi" }
-    }
-  }
-}
-```
-
-Models are listed exactly as Pi reports them and selected as `provider/modelId`, discovered through RPC. T3 overrides Pi's model only when it has a selection of its own to apply; a thread that still carries the removed synthetic `default` selection keeps running whatever model Pi already has. Pi's reasoning levels appear as the normal model trait picker, listing exactly the levels Pi reports for the selected model; a model that cannot reason shows no picker. T3 validates a level against Pi's own report before prompting, so a stale choice from another model fails the turn instead of being silently clamped. Leaving the picker untouched leaves Pi's configured level alone.
-
-Pi advertises the generic `managesRuntimePermissions` snapshot capability. Clients show no runtime-mode control for such a provider rather than offering T3 permission modes that are not enforced; permission and tool behavior come from the external runtime. Older snapshots without this capability retain the normal T3 selector.
-
-## Boundaries and intentional differences
-
-- Each active T3 thread owns a server-side RPC subprocess, independent of browser connections. T3's normal session lifecycle still applies; closing the server stops its processes.
-- Resume uses the session path returned by Pi and `--session`. T3 checks that the path exists rather than allowing Pi to silently create replacement history. Keep the session files on the same environment. T3 never edits them.
-- **Conversation rewind and tree navigation are unavailable.** Pi RPC does not expose the SDK's in-place `navigateTree()` operation. This fork does not emulate it by editing session files or creating replacement branches. T3's Git/diff/worktree features remain separate.
-- Streaming text, reasoning, tool activity, images, interrupt, steering, context-window usage, native compaction, and RPC extension input dialogs are translated into existing T3 events and controls. A turn completes on `agent_settled`, not `agent_end`, so retries and follow-up work are not prematurely marked finished.
-- **T3's MCP toolkits reach Pi through one T3-owned extension.** Pi ships no MCP client, so a thread's credential is handed to the Pi process as `T3_MCP_URL`, `T3_MCP_BEARER_TOKEN`, and `T3_MCP_CAPABILITIES`, and a second materialized extension (`stateDir/pi/t3-mcp-<digest>.mjs`) is loaded with `--extension`. It speaks Streamable HTTP to the same `/mcp` endpoint the built-in providers use and registers the tools the credential's capabilities grant, so preview browser, device, and pull-request tools need no per-provider schema. Names, descriptions, and input schemas come from the server's `tools/list`; a tool whose name matches no capability rule is never registered. The handshake is bounded to five seconds and a failure leaves the session with Pi's own tools plus a line on stderr rather than refusing to start, while a long-running turn aborts in-flight calls. Device access also puts the `agent-device` shim on Pi's PATH, exactly as it does for the built-in providers. When preview tools register, the session also deactivates the `frontend_*` browser tools a user-installed Playwright extension provides, so browser work drives the tab the user is watching instead of a second headless browser; a failed handshake leaves those tools active. Browser access changes apply when a session next starts, because the credential is read then.
-- Pi's custom terminal UI components and terminal-rendering extensions cannot appear in T3. RPC dialogs use T3's existing input UI; this is not a renderer for Pi's custom terminal UI.
-- T3 auxiliary text generation (such as titles and Git text) uses separate ordinary Pi sessions and T3's existing task prompts. These sessions use the configured runtime behavior too; interactive requests fail instead of granting consent. They are not tool-restricted or side-effect-free: configured extension startup hooks and tools can run, and Pi may persist their session history. Choose a different T3 auxiliary-generation provider if that behavior is unsuitable.
-- Existing Pi conversations are not imported. T3 records the events of conversations it starts; Pi retains its own native history.
-- **No in-app server update.** A fork build publishes no server artifacts, so the stock boot-service path would fetch release archives that do not exist for its versions, and the manual `npx t3@<version>` fallback would install stock upstream t3 over the Pi runtime. Non-desktop servers built here advertise `capabilities.serverUpdateUnavailable` and clients offer no update affordance at all for them: no update button, no copy-command, no update notice. `SERVER_RELEASES_PUBLISHED` in `apps/server/src/cloud/selfUpdate.ts` is the single switch to flip if the fork ever publishes server releases and points its hosts at them with `T3CODE_RELEASE_BASE_URL`. The desktop app is a separate path and still updates itself from the fork's releases.
-- **`@ff-labs/fff-node` loads through a plain ESM import.** Upstream loads it with `createRequire` for the Node single-executable build, which needs the `"require"` condition that `pnpm-workspace.yaml` adds to that package. An npm-installed runtime — how this fork's server is deployed — gets the unpatched package, and the bundle then exits before it can print its version, so no deploy can pass its own verification. The fork builds no single-executable, so `WorkspaceSearchIndex.ts` imports it directly; reverting that needs the install to apply the patch.
-
-## Verification
-
-The focused Pi and provider-regression suite passes 191 tests across 14 files, on both `pi-provider` and the upstream review branch described below. Server, web, mobile, contracts, and client-runtime typechecks pass on both branches. Local Chromium checks exercised provider discovery, enable/disable, model selection, the composer permission surfaces, and a real Pi turn in a T3-created worktree with a resulting Git diff. An active FIFO-gated tool call survived a full browser disconnect; after restarting the server, Pi resumed and recalled the prior result without tools.
-
-Browser layout was checked at 375, 768, and 1280 pixels. Native Electron/React Native clients and relay/tunnel deployments have not been exercised. No deployment was performed.
-
-## Compatibility and maintenance
-
-Development targets the installed Pi **0.85.1** RPC protocol, including `agent_settled`. Older versions that lack that event are not supported. Protocol and fixture tests live beside `apps/server/src/provider/pi/`; live runtime discovery and client verification are separate checks, not a substitute for those tests.
-
-The integration uses T3's open provider-driver SPI. Pi-specific server code lives in `provider/pi/` and `provider/Drivers/PiDriver.ts`; connection settings live in `packages/contracts/src/pi.ts`. Upstream conflict points are driver registration/bootstrap, the optional permission capability in the provider snapshot, client provider metadata/model defaults, the small generic permission presentation hooks in the web/mobile composers, and the `@ff-labs/fff-node` load in `apps/server/src/workspace/WorkspaceSearchIndex.ts`. No Pi dependency is added to T3.
-
-Upstream proposals considered include [#402](https://github.com/pingdotgg/t3code/issues/402), [#7211](https://github.com/pingdotgg/t3code/pull/7211), and [#10474](https://github.com/pingdotgg/t3code/pull/10474). This implementation deliberately keeps the external RPC boundary and defers tree navigation rather than replacing Pi startup with an SDK host.
-
-As a maintainability check, upstream `08463e2c4` was merged into the separate local `pi-provider-upstream-review` branch. There were no textual conflicts, including in `ChatComposer.tsx` and `ThreadSettingsSheet.tsx`. Inspection confirmed that upstream's composer-loading and Material You changes coexist with the generic permission hooks. Upstream `main` (`b1e223e2b`) is merged into `pi-provider`; that merge was also conflict-free, and the focused suite plus the affected package typechecks pass on the result.
-
-The fork branch is `pi-provider`; `upstream` points to `pingdotgg/t3code` and `origin` to `brunosag/t3code`. To update, fetch upstream, merge the desired upstream revision into a review branch, resolve the narrow integration points above, and rerun focused Pi tests plus server/web/mobile typechecks and local client verification before updating `pi-provider`.
+Upstream imports legacy conversation messages into V2. Continued imported threads receive a portable context handoff; old provider session bindings, checkpoints, and tool history are not imported. Native Pi session files remain separate from T3's database. Keep a database backup before deploying this migration; reverting the executable is not a database rollback.
 
 ## Deployment
 
-Pushing `pi-provider` deploys it. `.github/workflows/deploy-pi-vps.yml` runs the focused fork tests and the affected package typechecks, builds and packs the `t3` server package with the web client bundled, then installs it on the `vps` VPS through the stock service launcher over Tailscale. It needs the `TS_OAUTH_CLIENT_ID` and `TS_OAUTH_SECRET` secrets (a Tailscale OAuth client with the `auth_keys` scope and `tag:ci`), the `VPS_DEPLOY_KEY` secret (private half of a restricted key in the host's `authorized_keys`), and the `VPS_HOST`/`VPS_USER` variables.
+Pushing `pi-provider` runs `.github/workflows/deploy-pi-vps.yml`, which tests the retained changes, builds the server with its web client, and installs the npm tarball on `vps` over Tailscale. `tutor-prod` remains a compatibility SSH alias and the Azure resource name. Secrets are `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, and `VPS_DEPLOY_KEY`; repository variables are `VPS_HOST` and `VPS_USER`.
 
-The version directory the launcher selects is the CLI version inlined at build time, so the workflow sets `0.0.41-pi.<short-sha>` before building: one patch above the release package, the same core the fork's desktop builds carry, so the two compare on equal terms. The previous version stays installed and the launcher rolls back when a new version fails to start; host details, pairing commands, and the explicit rollback recipe are in `~/local/t3-pi/DEPLOYMENT.md` on that machine. The install runs under a host-side `timeout` and removes its own half-built runtime on failure, so a stalled `npm install` fails the deploy instead of holding the job open.
+The live installation is `~/local/t3-pi`; preserve its `userdata` and keep development state separate. Runtime versions use `-pi.<short-sha>`, with the core derived from the upstream release package. Installation retains previous complete runtimes and uses the stock service launcher through a Node shim at `runtime/versions/<version>/t3`. Host procedures live in `~/local/t3-pi/DEPLOYMENT.md`.
 
-The runtime itself stays the npm tarball. The merged CLI's pinned runtime is the archive layout — it looks for the executable at `runtime/versions/<version>/t3` and deletes a tree without one — so the deploy writes that entry as a two-line shim that runs the bundled CLI with the machine's node. That is what lets `service update` adopt the npm-installed runtime instead of trying to fetch a release archive no fork version publishes, and it is why the host's service moves from the older standalone launcher to the launcher the runtime hosts itself.
+Fork server releases are not published. Non-desktop environments advertise `serverUpdateUnavailable`, so clients do not offer the stock updater. `SERVER_RELEASES_PUBLISHED` in `apps/server/src/cloud/selfUpdate.ts` controls this; enable it only when matching release artifacts exist. Linux desktop builds publish fork prereleases through `.github/workflows/desktop-pi-linux.yml`.
+
+The npm-installed server loads `@ff-labs/fff-node` through an ESM import. Upstream's single-executable path needs a patched CommonJS export that the npm-installed package does not have; changing this import requires changing the installation layout too.
+
+## Maintenance
+
+Merge upstream into a review worktree and run focused tests plus typechecks for affected packages before updating `pi-provider`. Pi transport and adapter tests live in `apps/server/src/orchestration-v2/Adapters`; retained extension tests live in `apps/server/src/provider/pi`. Do not restore the removed V1 adapter or permission layer.

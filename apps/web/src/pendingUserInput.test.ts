@@ -5,6 +5,7 @@ import {
   carryDisplacedCustomAnswerIntoPrompt,
   countAnsweredPendingUserInputQuestions,
   derivePendingUserInputProgress,
+  findFirstUnansweredPendingUserInputQuestionIndex,
   resolvePendingUserInputAnswer,
   restorePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
@@ -256,6 +257,29 @@ describe("pending user input question progress", () => {
       countAnsweredPendingUserInputQuestions(questions, {
         scope: {
           selectedOptionValues: ["Orchestration-first"],
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it("finds the first unanswered question", () => {
+    expect(
+      findFirstUnansweredPendingUserInputQuestionIndex(questions, {
+        scope: {
+          selectedOptionValues: ["Orchestration-first"],
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it("returns the last question index when all answers are complete", () => {
+    expect(
+      findFirstUnansweredPendingUserInputQuestionIndex(questions, {
+        scope: {
+          selectedOptionValues: ["Orchestration-first"],
+        },
+        compat: {
+          customAnswer: "Keep it for one release window",
         },
       }),
     ).toBe(1);

@@ -284,9 +284,8 @@ export function toPiAgentDefinitions(
 }
 
 /**
- * Write the definitions file. A torn write would only make the extension read
- * nothing for one session, and writes happen on settings changes while reads
- * happen at session start, so a plain write is enough here.
+ * Write the definitions file. Each session gets its own definitions directory; replace
+ * the file atomically before starting Pi so it never sees partial JSON.
  */
 export async function writePiAgentDefinitions(
   stateDir: string,
@@ -294,10 +293,16 @@ export async function writePiAgentDefinitions(
 ): Promise<void> {
   const path = piAgentDefinitionsPath(stateDir);
   await NodeFSP.mkdir(NodePath.dirname(path), { recursive: true });
-  await NodeFSP.writeFile(path, `${JSON.stringify(toPiAgentDefinitions(definitions), null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
+  const temporaryPath = `${path}.${process.pid}.tmp`;
+  await NodeFSP.writeFile(
+    temporaryPath,
+    `${JSON.stringify(toPiAgentDefinitions(definitions), null, 2)}\n`,
+    {
+      encoding: "utf8",
+      mode: 0o600,
+    },
+  );
+  await NodeFSP.rename(temporaryPath, path);
 }
 
 /** A Pi process environment that points the extension at the definitions file. */

@@ -1,13 +1,13 @@
 import {
-  isBuiltInProviderDriverKind,
+  isProviderDriverKind,
   isProviderAvailable,
   resolveProviderInstanceEnabled,
+  isProviderTextGenerationCapable,
   type ModelSelection,
   type ProjectId,
   type ProjectScopedServerSettingKey,
   type ProjectSettingsOverrides,
   type ProviderDriverKind,
-  type ProviderInstanceId,
   type ServerProvider,
   ServerSettings,
   type ServerSettingsPatch,
@@ -63,8 +63,7 @@ type LegacyProviderSettings = ServerSettings["providers"][keyof ServerSettings["
 
 const getLegacyProviderSettings = (
   settings: ServerSettings,
-  // Legacy single-instance-per-driver settings: the instance id IS the driver kind.
-  provider: ProviderDriverKind | ProviderInstanceId,
+  provider: ProviderDriverKind,
 ): LegacyProviderSettings | undefined =>
   (settings.providers as Record<string, LegacyProviderSettings | undefined>)[provider];
 
@@ -77,17 +76,10 @@ export function isModelSelectionProviderEnabled(
     return resolveProviderInstanceEnabled(instanceConfig);
   }
 
-  const legacy = getLegacyProviderSettings(settings, selection.instanceId);
-  if (legacy !== undefined) {
-    return legacy.enabled === true;
-  }
-
-  // A built-in driver kind with no settings record is materialized by the
-  // provider registry from the driver's own defaults, enabled by default.
-  // Returns false for ids that name an explicitly configured instance
-  // (which the caller would have found above) or a provider this build
-  // cannot materialize at all.
-  return isBuiltInProviderDriverKind(selection.instanceId);
+  return (
+    isProviderDriverKind(selection.instanceId) &&
+    getLegacyProviderSettings(settings, selection.instanceId)?.enabled === true
+  );
 }
 
 export function resolveSourceControlWriterModelSelection(
@@ -103,7 +95,9 @@ export function resolveSourceControlWriterModelSelection(
   }
 
   const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
-  return provider?.enabled === true && isProviderAvailable(provider)
+  return provider?.enabled === true &&
+    isProviderAvailable(provider) &&
+    isProviderTextGenerationCapable(provider)
     ? selection
     : settings.textGenerationModelSelection;
 }

@@ -1,16 +1,68 @@
 import { type CSSProperties, memo } from "react";
-import { type ProviderDriverKind } from "@t3tools/contracts";
+
 import { providerInstanceInitials } from "@t3tools/client-runtime/state/provider-instance-display";
 
-import { type ModelVendorGlyph, PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
-import { cn } from "~/lib/utils";
+import { ProviderDriverKind } from "@t3tools/contracts";
+import {
+  AntigravityIcon,
+  ClaudeAI,
+  CursorIcon,
+  GrokIcon,
+  Icon,
+  OpenAI,
+  OpenCodeIcon,
+  PiAgentIcon,
+} from "../Icons";
 
-export { providerInstanceInitials };
+import { cn } from "~/lib/utils";
+import {
+  AcpRegistryAgentIcon,
+  officialAcpRegistryIconUrlForAgentId,
+  resolveOfficialAcpRegistryIconUrl,
+} from "../settings/AcpRegistryIcon";
+
+const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
+  [ProviderDriverKind.make("codex")]: OpenAI,
+  [ProviderDriverKind.make("claudeAgent")]: ClaudeAI,
+  [ProviderDriverKind.make("opencode")]: OpenCodeIcon,
+  [ProviderDriverKind.make("cursor")]: CursorIcon,
+  [ProviderDriverKind.make("grok")]: GrokIcon,
+  [ProviderDriverKind.make("antigravity")]: AntigravityIcon,
+  [ProviderDriverKind.make("pi")]: PiAgentIcon,
+};
+
+const PROVIDER_TEXT_COLOR_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
+  [ProviderDriverKind.make("codex")]: "text-black dark:text-white",
+  [ProviderDriverKind.make("claudeAgent")]: "text-[#d97757]",
+  [ProviderDriverKind.make("cursor")]: "text-[#26251E] dark:text-[#EDECEC]",
+  [ProviderDriverKind.make("grok")]: "text-[#0F0F0F] dark:text-[#F5F5F5]",
+  [ProviderDriverKind.make("pi")]: "text-[#0F0F0F] dark:text-[#F5F5F5]",
+  [ProviderDriverKind.make("opencode")]: "text-[#211E1E] dark:text-[#F1ECEC]",
+  [ProviderDriverKind.make("antigravity")]: "text-[#5b87bf]",
+};
+
+export function providerTextColorClassName(driverKind: ProviderDriverKind): string | undefined {
+  return PROVIDER_TEXT_COLOR_BY_PROVIDER[driverKind];
+}
+
+export function resolveProviderInstanceAcpRegistryIconUrl(input: {
+  readonly driverKind: ProviderDriverKind;
+  readonly agentId?: string | undefined;
+  readonly iconUrl?: string | undefined;
+}): string | null {
+  if (input.driverKind !== "acpRegistry") return null;
+  return (
+    resolveOfficialAcpRegistryIconUrl(input.iconUrl ?? null) ??
+    officialAcpRegistryIconUrlForAgentId(input.agentId?.trim() || null)
+  );
+}
 
 export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   driverKind: ProviderDriverKind;
   displayName: string;
   accentColor?: string | undefined;
+  acpRegistryAgentId?: string | undefined;
+  acpRegistryIconUrl?: string | undefined;
   showBadge?: boolean;
   badgeContent?: "initials" | "none";
   className?: string;
@@ -18,22 +70,19 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   badgeClassName?: string;
   statusDotClassName?: string;
   indicatorBackground?: string;
-  /** Model vendor glyph(s) shown instead of the provider glyph, from `resolveModelVendorIcon`. */
-  vendorGlyph?: ModelVendorGlyph | undefined;
 }) {
-  const Icon = props.vendorGlyph?.icon ?? PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
-  const OverlayIcon = props.vendorGlyph?.overlayIcon ?? null;
+  const Icon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
   const indicatorBackground = props.indicatorBackground ?? "var(--card)";
   const accentStyle = props.accentColor
     ? ({ "--provider-accent": props.accentColor } as CSSProperties)
     : undefined;
   const badgeContent = props.badgeContent ?? "initials";
-  // B³ chip: a 55%-black scrim keeps the white provider mark readable while
-  // the vendor glyph shows through it.
-  const overlayBackground = "rgba(0, 0, 0, 0.55)";
-  // The provider overlay claims the bottom-right corner the account badge
-  // would sit in; the instance stays named by the row's label and tooltip.
-  const showBadge = props.showBadge === true && OverlayIcon === null;
+  const isAcpRegistry = props.driverKind === "acpRegistry";
+  const acpRegistryIconUrl = resolveProviderInstanceAcpRegistryIconUrl({
+    driverKind: props.driverKind,
+    agentId: props.acpRegistryAgentId,
+    iconUrl: props.acpRegistryIconUrl,
+  });
 
   return (
     <span
@@ -44,25 +93,21 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
       style={accentStyle}
       data-provider-accent-color={props.accentColor}
     >
-      {Icon ? (
+      {isAcpRegistry ? (
+        <AcpRegistryAgentIcon
+          // The search-tile radius would crop most of the glyph at these
+          // inline sizes.
+          className={cn("size-5 rounded-none bg-transparent", props.iconClassName)}
+          fallbackClassName="size-full"
+          icon={acpRegistryIconUrl}
+        />
+      ) : Icon ? (
         <Icon className={cn("size-5 shrink-0", props.iconClassName)} aria-hidden />
       ) : (
         <span className={cn("text-3xs font-semibold leading-none", props.iconClassName)}>
           {providerInstanceInitials(props.displayName)}
         </span>
       )}
-      {OverlayIcon ? (
-        <span
-          className={cn(
-            "pointer-events-none absolute -bottom-[8%] -right-[8%] z-10 flex aspect-square w-[64%] min-w-2 items-center justify-center rounded-[27%]",
-            "text-white",
-          )}
-          style={{ backgroundColor: overlayBackground }}
-          aria-hidden
-        >
-          <OverlayIcon className="size-[67%] text-white" />
-        </span>
-      ) : null}
       {props.statusDotClassName ? (
         <span
           className={cn(
@@ -73,7 +118,7 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
           aria-hidden
         />
       ) : null}
-      {showBadge ? (
+      {props.showBadge ? (
         <span
           className={cn(
             "pointer-events-none absolute right-0 bottom-0 z-10 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border px-0.5 text-4xs font-semibold leading-none shadow-sm",

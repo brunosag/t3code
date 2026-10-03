@@ -5,9 +5,7 @@ import {
   getDisplayModelName,
   getTriggerDisplayModelLabel,
   type ModelEsque,
-  type ModelVendorGlyph,
 } from "./providerIconUtils";
-import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { ComboboxItem } from "../ui/combobox";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -15,6 +13,7 @@ import { Kbd } from "../ui/kbd";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
+import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number;
@@ -30,8 +29,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
    */
   providerDisplayName: string;
   providerAccentColor?: string | undefined;
-  /** Model vendor glyph(s) shown instead of the provider glyph, from `resolveModelVendorIcon`. */
-  vendorGlyph?: ModelVendorGlyph | undefined;
+  acpRegistryAgentId?: string | undefined;
+  acpRegistryIconUrl?: string | undefined;
   isFavorite: boolean;
   isSelected: boolean;
   showSelection?: boolean;
@@ -89,9 +88,10 @@ export const ModelListRow = memo(function ModelListRow(props: {
             <ProviderInstanceIcon
               driverKind={props.driverKind}
               displayName={props.providerDisplayName}
-              vendorGlyph={props.vendorGlyph}
-              className="size-3.5 shrink-0"
-              iconClassName="size-3.5"
+              acpRegistryAgentId={props.acpRegistryAgentId}
+              acpRegistryIconUrl={props.acpRegistryIconUrl}
+              className="size-3"
+              iconClassName="size-3"
             />
             <span className="truncate text-xs font-normal leading-snug text-muted-foreground/70">
               {providerLabel}

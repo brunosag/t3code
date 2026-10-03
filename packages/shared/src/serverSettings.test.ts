@@ -24,6 +24,18 @@ import {
 const FOLDED_SERVER_SETTINGS = { ...DEFAULT_SERVER_SETTINGS, projectSettingsFolded: true };
 
 describe("serverSettings helpers", () => {
+  it("replaces the entire configured agent roster, including removals", () => {
+    const first = { name: "scout", systemPrompt: "Inspect source.", enabled: true };
+    const second = { name: "reviewer", systemPrompt: "Review changes.", enabled: true };
+    const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      agentDefinitions: [first, second],
+    });
+    const edited = applyServerSettingsPatch(saved, {
+      agentDefinitions: [{ ...second, enabled: false }],
+    });
+    expect(edited.agentDefinitions).toEqual([{ ...second, enabled: false }]);
+    expect(applyServerSettingsPatch(edited, { agentDefinitions: [] }).agentDefinitions).toEqual([]);
+  });
   it("changes a cleanup rule without replacing the machine's other rules", () => {
     const enabled = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       storageCleanup: { worktreeAfterDays: 8, worktreeOnMerge: true, logsAfterDays: 30 },
@@ -407,50 +419,6 @@ describe("serverSettings helpers", () => {
     ).toBeNull();
   });
 
-  it("enables a built-in driver kind that has no settings record", () => {
-    // Pi is shipped by this build without a legacy `providers` field, so no
-    // settings key can disable it by omission; the provider registry
-    // materializes its default-enabled instance from the driver itself.
-    expect(
-      isModelSelectionProviderEnabled(
-        DEFAULT_SERVER_SETTINGS,
-        createModelSelection(
-          ProviderInstanceId.make("pi"),
-          "opencode-go/muse-spark-1.3-contributor",
-        ),
-      ),
-    ).toBe(true);
-  });
-
-  it("keeps an explicit disable, a configured instance id, and an opted-out kind disabled", () => {
-    const pi = ProviderInstanceId.make("pi");
-    const piDisabled = {
-      ...DEFAULT_SERVER_SETTINGS,
-      providerInstances: {
-        [pi]: { driver: ProviderDriverKind.make("pi"), enabled: false, config: {} },
-      },
-    };
-
-    expect(isModelSelectionProviderEnabled(piDisabled, createModelSelection(pi, "default"))).toBe(
-      false,
-    );
-    // A configured instance id is not a driver kind: it is only routable when
-    // settings carry its record.
-    expect(
-      isModelSelectionProviderEnabled(
-        DEFAULT_SERVER_SETTINGS,
-        createModelSelection(ProviderInstanceId.make("pi_personal"), "default"),
-      ),
-    ).toBe(false);
-    // Legacy-backed kinds keep their schema default; Cursor is opt-in.
-    expect(
-      isModelSelectionProviderEnabled(
-        DEFAULT_SERVER_SETTINGS,
-        createModelSelection(ProviderInstanceId.make("cursor"), "composer-2"),
-      ),
-    ).toBe(false);
-  });
-
   it("falls back from a disabled source control writer provider without clearing its selection", () => {
     const instanceId = ProviderInstanceId.make("codex_writer");
     const sourceControlWriterModelSelection = createModelSelection(instanceId, "gpt-5.4-mini");
@@ -505,6 +473,41 @@ describe("serverSettings helpers", () => {
     } satisfies ServerProvider;
 
     expect(resolveSourceControlWriterModelSelection(settings, [unavailableProvider])).toBe(
+      settings.textGenerationModelSelection,
+    );
+    expect(settings.sourceControlWriterModelSelection).toBe(sourceControlWriterModelSelection);
+  });
+
+  it("falls back from a writer provider that cannot generate application text", () => {
+    const instanceId = ProviderInstanceId.make("acp_writer");
+    const sourceControlWriterModelSelection = createModelSelection(instanceId, "default");
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      providerInstances: {
+        [instanceId]: {
+          driver: ProviderDriverKind.make("acpRegistry"),
+          enabled: true,
+          config: {},
+        },
+      },
+      sourceControlWriterModelSelection,
+    };
+    const incapableProvider = {
+      instanceId,
+      driver: ProviderDriverKind.make("acpRegistry"),
+      supportsTextGeneration: false,
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-07-27T00:00:00.000Z",
+      models: [],
+      slashCommands: [],
+      skills: [],
+    } satisfies ServerProvider;
+
+    expect(resolveSourceControlWriterModelSelection(settings, [incapableProvider])).toBe(
       settings.textGenerationModelSelection,
     );
     expect(settings.sourceControlWriterModelSelection).toBe(sourceControlWriterModelSelection);
@@ -802,25 +805,5 @@ describe("serverSettings helpers", () => {
     });
 
     expect(resolved.pauseWhenOnBattery).toBe(false);
-  });
-});
-
-describe("agentDefinitions patching", () => {
-  const scout = { name: "scout", systemPrompt: "You scout.", enabled: true };
-  const reviewer = { name: "reviewer", systemPrompt: "You review.", enabled: false };
-
-  it("replaces the whole list rather than deep-merging entries", () => {
-    const first = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
-      agentDefinitions: [scout, reviewer],
-    });
-    expect(first.agentDefinitions.map((definition) => definition.name)).toEqual([
-      "scout",
-      "reviewer",
-    ]);
-
-    // Removing an entry must survive the round trip; an element-wise merge
-    // would keep `reviewer` alive.
-    const second = applyServerSettingsPatch(first, { agentDefinitions: [scout] });
-    expect(second.agentDefinitions.map((definition) => definition.name)).toEqual(["scout"]);
   });
 });
