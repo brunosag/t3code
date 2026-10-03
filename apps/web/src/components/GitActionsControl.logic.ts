@@ -242,10 +242,7 @@ export function buildMenuItems(
       dialogAction: "create_pr",
     },
   ];
-  // "off" hides creation, but an open change request stays viewable.
-  return items.filter(
-    (item) => !(item.id === "pr" && !hasOpenPr && !showsCreateChangeRequest(options)),
-  );
+  return items.filter((item) => item.id !== "pr" || showsCreateChangeRequest(options));
 }
 
 export function resolveQuickAction(

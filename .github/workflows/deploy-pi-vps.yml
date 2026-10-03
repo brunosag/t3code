@@ -67,14 +67,19 @@ jobs:
             apps/web/src/components/settings/ProviderSettingsForm.test.ts \
             packages/contracts/src/server.test.ts \
             packages/shared/src/serverSettings.test.ts \
-            packages/client-runtime/src/gitActions.test.ts \
+            packages/client-runtime/src/state/gitActions.test.ts \
+            apps/web/src/components/GitActionsControl.logic.test.ts \
             apps/web/src/pendingUserInput.test.ts \
+            apps/web/src/versionSkew.test.ts \
+            apps/mobile/src/lib/threadActivity.test.ts \
+            apps/mobile/src/state/use-selected-thread-requests.test.tsx \
+            packages/contracts/src/settings.test.ts \
             apps/desktop/src/app/DesktopEnvironment.test.ts \
             apps/desktop/src/window/DesktopWindow.test.ts \
             scripts/dev-runner.test.ts
 
       - name: Typecheck fork-affected packages
-        run: vp run --filter t3 --filter @t3tools/web --filter @t3tools/mobile --filter @t3tools/contracts --filter @t3tools/client-runtime typecheck
+        run: vp run --filter t3 --filter @t3tools/web --filter @t3tools/mobile --filter @t3tools/desktop --filter @t3tools/shared --filter @t3tools/contracts --filter @t3tools/client-runtime --concurrency-limit 2 typecheck
 
       # The version has to be set before the build: bin.mjs reports it from a
       # build-time inline, and the service launcher keys runtime/versions/<version>

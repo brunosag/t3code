@@ -10,6 +10,7 @@ import {
   RunAttemptId,
   RunId,
   ThreadId,
+  type AgentDefinition,
   type ChatAttachment,
   type ModelSelection,
   type OrchestrationV2AppThread,
@@ -334,7 +335,12 @@ const makeFakePi: Effect.Effect<FakePi> = Effect.gen(function* () {
   } satisfies FakePi;
 });
 
-const makeAdapter = Effect.fnUntraced(function* (fake: FakePi, launchArgs = "", forkFake?: FakePi) {
+const makeAdapter = Effect.fnUntraced(function* (
+  fake: FakePi,
+  launchArgs = "",
+  forkFake?: FakePi,
+  getAgentDefinitions?: Effect.Effect<ReadonlyArray<AgentDefinition>>,
+) {
   const idAllocator = yield* IdAllocator.IdAllocatorV2;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -353,6 +359,7 @@ const makeAdapter = Effect.fnUntraced(function* (fake: FakePi, launchArgs = "", 
     fileSystem,
     idAllocator,
     serverConfig,
+    ...(getAgentDefinitions === undefined ? {} : { getAgentDefinitions }),
   });
 });
 
@@ -541,6 +548,91 @@ describe("PiAdapterV2", () => {
     }).pipe(Effect.scoped, Effect.provide(testLayer)),
   );
 
+  it.effect("refreshes the roster for new sessions and keeps all-disabled rosters exclusive", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakePi;
+      const fs = yield* FileSystem.FileSystem;
+      let definitions: ReadonlyArray<AgentDefinition> = [
+        { name: "scout", systemPrompt: "Inspect", enabled: false },
+      ];
+      const adapter = yield* makeAdapter(
+        fake,
+        "",
+        undefined,
+        Effect.sync(() => definitions),
+      );
+      const open = (providerSessionId: ProviderSessionId) =>
+        adapter.openSession({
+          threadId: THREAD_ID,
+          providerSessionId,
+          modelSelection: modelSelection("default"),
+          runtimePolicy,
+        });
+      const definitionsPath = () => fake.lastSpawn().env["T3_PI_AGENTS_PATH"];
+      yield* open(SESSION_ID);
+      const disabledPath = definitionsPath();
+      assert.isDefined(disabledPath);
+      assert.deepEqual(decodeJsonLine(yield* fs.readFileString(disabledPath!)), []);
+      definitions = [{ name: "scout", systemPrompt: "Inspect", enabled: true }];
+      yield* open(ProviderSessionId.make("next-roster-session"));
+      const refreshedPath = definitionsPath();
+      assert.isDefined(refreshedPath);
+      assert.notEqual(refreshedPath, disabledPath);
+      assert.deepEqual(decodeJsonLine(yield* fs.readFileString(refreshedPath!)), [
+        { name: "scout", systemPrompt: "Inspect" },
+      ]);
+      assert.deepEqual(decodeJsonLine(yield* fs.readFileString(disabledPath!)), []);
+      definitions = [];
+      yield* open(ProviderSessionId.make("native-roster-session"));
+      assert.isUndefined(definitionsPath());
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
+  it.effect("reconciles agent completion arriving before the tool result on the other pipe", () =>
+    Effect.gen(function* () {
+      const fake = yield* makeFakePi;
+      const { runtime, takeEvent } = yield* openRuntime(fake);
+      const providerThread = yield* runtime.ensureThread({
+        threadId: THREAD_ID,
+        modelSelection: modelSelection("default"),
+        runtimePolicy,
+      });
+      yield* startTurn(runtime, providerThread);
+      yield* fake.emitExtension({
+        type: "subagent.activity",
+        agentId: "early-agent",
+        event: "completed",
+        result: "Finished early",
+      });
+      yield* fake.emitExtension({
+        type: "extension_ui_request",
+        id: "early-barrier",
+        method: "notify",
+        message: "Completion delivered",
+      });
+      yield* takeEvent(
+        (event) =>
+          event.type === "turn_item.updated" &&
+          event.turnItem.type === "dynamic_tool" &&
+          event.turnItem.toolName === "notify",
+      );
+      yield* fake.emit({
+        type: "tool_execution_end",
+        toolCallId: "call-early-agent",
+        toolName: "Agent",
+        result: {
+          details: { agentId: "early-agent", subagentType: "researcher", status: "background" },
+        },
+      });
+      const done = yield* takeEvent((event) => event.type === "subagent.updated");
+      assert.isTrue(
+        done.type === "subagent.updated" &&
+          done.subagent.status === "completed" &&
+          done.subagent.result === "Finished early",
+      );
+    }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
   it.effect("tracks configured background agents through completion without reopening them", () =>
     Effect.gen(function* () {
       const fake = yield* makeFakePi;
@@ -568,6 +660,9 @@ describe("PiAdapterV2", () => {
       });
       const running = yield* takeEvent((event) => event.type === "subagent.updated");
       assert.isTrue(running.type === "subagent.updated" && running.subagent.status === "running");
+      yield* fake.emit({ type: "agent_settled" });
+      yield* takeEvent((event) => event.type === "turn.terminal");
+      yield* startTurn(runtime, providerThread, "default", [], "Next task", undefined, 2);
       yield* fake.emitExtension({
         type: "subagent.activity",
         agentId: "agent-1",
@@ -579,6 +674,11 @@ describe("PiAdapterV2", () => {
         done.type === "subagent.updated" &&
           done.subagent.status === "completed" &&
           done.subagent.result === "Found the answer",
+      );
+      assert.isTrue(
+        done.type === "subagent.updated" &&
+          running.type === "subagent.updated" &&
+          done.subagent.runId === running.subagent.runId,
       );
       yield* fake.emit({
         type: "tool_execution_update",
@@ -2378,6 +2478,56 @@ describe("PiAdapterV2", () => {
 });
 
 describe("PiRpc framing", () => {
+  it.live("exchanges RPC and extension records through real child-process descriptors", () =>
+    Effect.gen(function* () {
+      const connection = yield* makePiRpcConnection({
+        command: process.execPath,
+        args: [
+          "--input-type=module",
+          "--eval",
+          String.raw`
+          import { createReadStream, writeSync } from "node:fs";
+          function readLines(stream, onLine) {
+            let buffer = "";
+            stream.setEncoding("utf8");
+            stream.on("data", (chunk) => {
+              buffer += chunk;
+              let newline;
+              while ((newline = buffer.indexOf("\n")) !== -1) {
+                const line = buffer.slice(0, newline);
+                buffer = buffer.slice(newline + 1);
+                onLine(line);
+              }
+            });
+          }
+          readLines(process.stdin, (line) => {
+            const request = JSON.parse(line);
+            process.stdout.write(JSON.stringify({
+              type: "response", id: request.id, success: true, data: "rpc-ok"
+            }) + "\n");
+          });
+          readLines(createReadStream(null, { fd: 4 }), (line) => {
+            const response = JSON.parse(line);
+            writeSync(3, JSON.stringify({ type: "extension-answer", response }) + "\n");
+          });
+          writeSync(3, '{"type":"extension-ready"}\r\n');
+        `,
+        ],
+        cwd: undefined,
+        env: process.env,
+        extensionChannel: true,
+      });
+      assert.equal((yield* Queue.take(connection.events))["type"], "extension-ready");
+      assert.equal(yield* connection.request({ type: "get_state" }), "rpc-ok");
+      const answer = { requestId: "question-1", answer: "Português\u2028日本語" };
+      yield* connection.sendExtension(answer);
+      assert.deepEqual(yield* Queue.take(connection.events), {
+        type: "extension-answer",
+        response: answer,
+      });
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("reassembles records across chunk boundaries and strips CR", () =>
     Effect.gen(function* () {
       const stdout = yield* Queue.unbounded<Uint8Array>();

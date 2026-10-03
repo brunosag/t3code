@@ -28,6 +28,7 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import {
   defaultInstanceIdForDriver,
   type AgentDefinition,
+  type ServerSettingsError,
   PiSettings,
   ProviderDriverKind,
   type ChatAttachment,
@@ -237,7 +238,7 @@ export interface PiAdapterV2Options {
   readonly fileSystem: FileSystem.FileSystem;
   readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
   readonly serverConfig: ServerConfig.ServerConfig["Service"];
-  readonly getAgentDefinitions?: Effect.Effect<ReadonlyArray<AgentDefinition>, unknown>;
+  readonly getAgentDefinitions?: Effect.Effect<ReadonlyArray<AgentDefinition>, ServerSettingsError>;
 }
 
 /** Concatenate the `text` fields of a Pi content-block array. */
@@ -433,7 +434,12 @@ export function makePiAdapterV2(
       const userInputExtensionPath = yield* provideCacheFs(
         Effect.tryPromise({
           try: () => materializePiUserInputExtension(options.serverConfig.providerStatusCacheDir),
-          catch: (cause) => cause,
+          catch: (cause) =>
+            new ProviderAdapter.ProviderAdapterOpenSessionError({
+              driver: PI_PROVIDER,
+              providerSessionId: input.providerSessionId,
+              cause,
+            }),
         }),
       );
       const extensionArgs = ["--extension", userInputExtensionPath];
@@ -447,7 +453,12 @@ export function makePiAdapterV2(
               await writePiAgentDefinitions(agentsStateDir, definitions);
               return materializePiAgentsExtension(options.serverConfig.providerStatusCacheDir);
             },
-            catch: (cause) => cause,
+            catch: (cause) =>
+              new ProviderAdapter.ProviderAdapterOpenSessionError({
+                driver: PI_PROVIDER,
+                providerSessionId: input.providerSessionId,
+                cause,
+              }),
           }),
         );
         extensionArgs.push("--extension", agentsExtensionPath);
@@ -503,12 +514,8 @@ export function makePiAdapterV2(
       const sessionApprovals = new Set<string>();
       const configuredAgents = new Map<
         string,
-        {
-          turn: ActivePiTurn;
-          toolCallId: string;
-          details: unknown;
-          terminal: boolean;
-        }
+        | { terminal: true }
+        | { turn: ActivePiTurn; toolCallId: string; details: unknown; terminal: false }
       >();
       const configuredAgentCalls = new Map<string, string>();
       const earlyAgentCompletions = new Map<string, PiRpcRecord>();
@@ -1200,11 +1207,16 @@ export function makePiAdapterV2(
           interrupted ||
           status === "completed" ||
           status === "steered";
-        const entry = { turn: previous?.turn ?? turn, toolCallId, details, terminal: finished };
+        const owner = previous?.turn ?? turn;
+        // Keep a terminal marker against late updates, without retaining the
+        // completed agent's entire turn for the rest of this session.
+        const entry = finished
+          ? ({ terminal: true } as const)
+          : ({ turn: owner, toolCallId, details, terminal: false } as const);
         configuredAgents.set(key, entry);
         if (reportedId) configuredAgents.set(reportedId, entry);
         yield* emitSubagentTasks(
-          entry.turn,
+          owner,
           toolCallId,
           {
             details: {
@@ -1934,9 +1946,17 @@ export function makePiAdapterV2(
             const agentId = recordString(event, "agentId");
             if (!agentId) return;
             const entry = configuredAgents.get(agentId);
-            if (entry)
+            if (entry && !entry.terminal)
               yield* emitConfiguredAgent(entry.turn, entry.toolCallId, entry.details, "", event);
-            else earlyAgentCompletions.set(agentId, event);
+            else if (!entry) {
+              // The independent pipes can deliver completion before the tool
+              // result. Bound unmatched events from other Pi agent activity.
+              if (earlyAgentCompletions.size >= 128) {
+                const oldest = earlyAgentCompletions.keys().next().value;
+                if (oldest !== undefined) earlyAgentCompletions.delete(oldest);
+              }
+              earlyAgentCompletions.set(agentId, event);
+            }
             return;
           }
           case "subagent.registration":

@@ -61,8 +61,13 @@ jobs:
             apps/web/src/components/settings/ProviderSettingsForm.test.ts \
             packages/contracts/src/server.test.ts \
             packages/shared/src/serverSettings.test.ts \
-            packages/client-runtime/src/gitActions.test.ts \
+            packages/client-runtime/src/state/gitActions.test.ts \
+            apps/web/src/components/GitActionsControl.logic.test.ts \
             apps/web/src/pendingUserInput.test.ts \
+            apps/web/src/versionSkew.test.ts \
+            apps/mobile/src/lib/threadActivity.test.ts \
+            apps/mobile/src/state/use-selected-thread-requests.test.tsx \
+            packages/contracts/src/settings.test.ts \
             apps/desktop/src/app/DesktopEnvironment.test.ts \
             apps/desktop/src/window/DesktopWindow.test.ts \
             scripts/dev-runner.test.ts

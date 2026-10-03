@@ -2294,11 +2294,29 @@ it.each(["provider_error", "usage_limit"] as const)(
 
 describe("persisted question text", () => {
   it("restores written answers and respects an explicitly cleared answer", () => {
-    expect(restorePendingUserInputAnswer(undefined, "My answer")).toEqual({ customAnswer: "My answer" });
-    expect(restorePendingUserInputAnswer({ customAnswer: "" }, "Old answer")).toEqual({ customAnswer: "" });
-    const question = { id: "q", header: "Scope", question: "Choose", options: [{ label: "Web", description: "Web" }] };
-    expect(togglePendingUserInputOptionSelection(question, restorePendingUserInputAnswer(undefined, "My answer"), "Web"))
-      .toEqual({ customAnswer: "My answer" });
-    expect(togglePendingUserInputOptionSelection(question, { customAnswer: "" }, "Web")).toEqual({ customAnswer: "", selectedOptionValues: ["Web"] });
+    expect(restorePendingUserInputAnswer(undefined, "My answer")).toEqual({
+      customAnswer: "My answer",
+    });
+    expect(restorePendingUserInputAnswer({ customAnswer: "" }, "Old answer")).toEqual({
+      customAnswer: "",
+    });
+    const question = {
+      id: "q",
+      header: "Scope",
+      question: "Choose",
+      multiSelect: false,
+      options: [{ label: "Web", description: "Web" }],
+    };
+    expect(
+      togglePendingUserInputOptionSelection(
+        question,
+        restorePendingUserInputAnswer(undefined, "My answer"),
+        "Web",
+      ),
+    ).toEqual({ customAnswer: "My answer" });
+    expect(togglePendingUserInputOptionSelection(question, { customAnswer: "" }, "Web")).toEqual({
+      customAnswer: "",
+      selectedOptionValues: ["Web"],
+    });
   });
 });

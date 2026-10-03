@@ -1015,7 +1015,7 @@ describe("changeRequestActionMode", () => {
     );
   });
 
-  it("off keeps an already-open change request viewable", () => {
+  it("off does not add a duplicate action for an already-open change request", () => {
     const items = buildMenuItems(
       status({
         pr: {
@@ -1031,10 +1031,7 @@ describe("changeRequestActionMode", () => {
       true,
       { changeRequestActionMode: "off" },
     );
-    assert.deepInclude(
-      items.find((item) => item.id === "pr"),
-      { kind: "open_pr" },
-    );
+    assert.isFalse(items.some((item) => item.id === "pr"));
   });
 
   it("auto keeps change request creation in the primary action", () => {
