@@ -124,11 +124,13 @@ jobs:
           test -f "$tgz"
           # Guard the trap this pipeline exists to avoid: if the inlined version
           # did not match the version directory, the stock launcher would install
-          # the registry t3 package and silently replace the fork. Extract first:
+          # the registry t3 package and silently replace the fork. The thin entry
+          # loads the CLI from a separate chunk, so inspect all runtime modules.
+          # Extract first:
           # piping into `grep -q` closes the pipe early, and `set -o pipefail`
           # would then fail the step on tar's SIGPIPE even when the match is good.
-          tar -xzOf "$tgz" package/dist/bin.mjs > "$RUNNER_TEMP/t3-bin.mjs"
-          if ! grep -q -- "$version" "$RUNNER_TEMP/t3-bin.mjs"; then
+          tar -xzOf "$tgz" --wildcards 'package/dist/*.mjs' > "$RUNNER_TEMP/t3-runtime.mjs"
+          if ! grep -Fq -- "$version" "$RUNNER_TEMP/t3-runtime.mjs"; then
             echo "::error::packed bundle does not contain the inlined version $version"
             exit 1
           fi
