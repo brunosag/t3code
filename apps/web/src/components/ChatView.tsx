@@ -3199,7 +3199,9 @@ export default function ChatView(props: ChatViewProps) {
     ),
   );
   useEffect(() => {
-    if (!activeThread) return;
+    // The shell can arrive before pending requests. Keep persisted answers until
+    // thread details establish which questions are still open.
+    if (!activeThread || serverProjection === null) return;
     const questionThread = activeThread;
     const currentRequests = pendingUserInputs;
     const prefix = questionAttachmentDraftPrefix(environmentId, questionThread.id);
@@ -3223,7 +3225,7 @@ export default function ChatView(props: ChatViewProps) {
       if (key.startsWith(prefix) && !retained.has(DraftId.make(key)))
         clearQuestionAttachmentDraft(DraftId.make(key));
     }
-  }, [environmentId, activeThread, pendingUserInputs]);
+  }, [environmentId, activeThread, serverProjection, pendingUserInputs]);
   const activePendingDraftAnswers = useMemo(() => {
     if (!activePendingUserInput || !activeThreadId) return EMPTY_PENDING_USER_INPUT_ANSWERS;
     return Object.fromEntries(
