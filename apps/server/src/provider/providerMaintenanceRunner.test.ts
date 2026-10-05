@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { ServerProviderUpdateError } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -244,6 +245,40 @@ const makeTestRunner = (
   );
 
 describe("providerMaintenanceRunner", () => {
+  it.effect("records a terminal state when a running update is interrupted", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      let blockRefresh = true;
+      const { registry, providersRef } = yield* makeRegistry(baseNativeCliProvider);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: (instanceId, provider, options) =>
+          options?.fresh && blockRefresh
+            ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+            : registry.getProviderMaintenanceCapabilitiesForInstance(instanceId, provider),
+      });
+      const update = yield* updater.updateProvider(NATIVE_CLI_DRIVER).pipe(Effect.forkScoped);
+      yield* Deferred.await(started);
+      assert.strictEqual((yield* Ref.get(providersRef))[0]?.updateState?.status, "running");
+      yield* Fiber.interrupt(update);
+      const state = (yield* Ref.get(providersRef))[0]?.updateState;
+      assert.strictEqual(state?.status, "failed");
+      assert.isNotNull(state?.finishedAt);
+      assert.include(state?.message ?? "", "interrupted");
+      blockRefresh = false;
+      const retry = yield* updater.updateProvider(NATIVE_CLI_DRIVER);
+      assert.strictEqual(retry.providers[0]?.updateState?.status, "succeeded");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          NonWindowsPlatform,
+          latestVersionHttpClient("0.0.0"),
+          mockSpawnerLayer(() => ({ stdout: "updated" })),
+        ),
+      ),
+    ),
+  );
+
   it.effect("runs the allowlisted provider update command and records success", () => {
     const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
     return Effect.gen(function* () {

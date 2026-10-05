@@ -63,6 +63,7 @@ jobs:
             apps/server/src/provider/Layers/ProviderRegistry.test.ts \
             apps/server/src/claudeHistoryWorker.test.ts \
             apps/server/src/provider/providerMaintenance.test.ts \
+            apps/server/src/provider/providerMaintenanceRunner.test.ts \
             apps/web/src/providerInstances.test.ts \
             apps/web/src/components/settings/ProviderSettingsForm.test.ts \
             packages/contracts/src/server.test.ts \

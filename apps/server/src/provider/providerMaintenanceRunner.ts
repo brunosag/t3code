@@ -493,7 +493,23 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
           },
         );
 
-        return yield* runCommandAndVerify().pipe(Effect.catchCause(recordFailedUpdate));
+        return yield* runCommandAndVerify().pipe(
+          Effect.catchCause(recordFailedUpdate),
+          // RPC disconnection interrupts the update. Finalizers still run when
+          // the ordinary error handler cannot publish a terminal state.
+          Effect.onInterrupt(() =>
+            Effect.gen(function* () {
+              return yield* finish(
+                makeUpdateState({
+                  status: "failed",
+                  startedAt: yield* Ref.get(startedAtRef),
+                  finishedAt: yield* nowIso,
+                  message: "Update interrupted. Refresh provider settings before retrying.",
+                }),
+              );
+            }),
+          ),
+        );
       },
     );
 
