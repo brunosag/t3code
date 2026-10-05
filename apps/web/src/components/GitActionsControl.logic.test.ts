@@ -3,6 +3,7 @@ import { assert, describe, it } from "vite-plus/test";
 import {
   buildGitActionProgressStages,
   buildMenuItems,
+  buildWorkspaceGitActions,
   formatGitActionElapsed,
   requiresDefaultBranchConfirmation,
   resolveAutoFeatureBranchName,
@@ -34,6 +35,171 @@ function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
     ...overrides,
   };
 }
+
+describe("Workspace's last-used Git action", () => {
+  it.each(["commit", "push", "commit_push", "pr"] as const)(
+    "keeps %s primary and the other actions in the menu",
+    (preferredAction) => {
+      const actions = buildWorkspaceGitActions(
+        status({ hasWorkingTreeChanges: true, aheadCount: 1 }),
+        false,
+        preferredAction,
+      );
+      assert.equal(actions.primary.id, preferredAction);
+      assert.notInclude(
+        actions.menu.map((item) => item.id),
+        preferredAction,
+      );
+      assert.sameMembers(
+        [actions.primary.id, ...actions.menu.map((item) => item.id)],
+        ["commit", "push", "commit_push", "pr"],
+      );
+    },
+  );
+
+  it("offers both commit-and-push workflows with uncommitted changes", () => {
+    const actions = buildWorkspaceGitActions(
+      status({ hasWorkingTreeChanges: true }),
+      false,
+      "commit_push",
+    );
+    assert.deepInclude(actions.primary, {
+      label: "Commit & push",
+      action: "commit_push",
+      disabled: false,
+    });
+    assert.deepInclude(
+      actions.menu.find((item) => item.id === "pr"),
+      {
+        label: "Commit, push & PR",
+        action: "commit_push_pr",
+        disabled: false,
+      },
+    );
+  });
+
+  it("keeps the PR workflow selected as the worktree becomes clean", () => {
+    const dirty = buildWorkspaceGitActions(status({ hasWorkingTreeChanges: true }), false, "pr");
+    const ahead = buildWorkspaceGitActions(status({ aheadCount: 1 }), false, dirty.primary.id);
+    const pushed = buildWorkspaceGitActions(
+      status({ aheadOfDefaultCount: 1 }),
+      false,
+      ahead.primary.id,
+    );
+    assert.equal(dirty.primary.action, "commit_push_pr");
+    assert.deepInclude(ahead.primary, {
+      id: "pr",
+      label: "Push & create PR",
+      action: "create_pr",
+      disabled: false,
+    });
+    assert.deepInclude(pushed.primary, {
+      id: "pr",
+      label: "Create PR",
+      action: "create_pr",
+      disabled: false,
+    });
+  });
+
+  it("keeps commit-and-push selected when only a push remains", () => {
+    const actions = buildWorkspaceGitActions(status({ aheadCount: 2 }), false, "commit_push");
+    assert.deepInclude(actions.primary, {
+      id: "commit_push",
+      action: "commit_push",
+      disabled: false,
+    });
+  });
+
+  it("preserves committing before a push needs synchronization", () => {
+    const actions = buildWorkspaceGitActions(
+      status({ hasWorkingTreeChanges: true, behindCount: 1 }),
+      false,
+      "commit_push",
+    );
+    assert.deepInclude(actions.primary, { action: "commit_push", disabled: false });
+    assert.isTrue(actions.menu.find((item) => item.id === "push")?.disabled);
+  });
+
+  it("offers the PR workflow on the default ref through the existing confirmation", () => {
+    const actions = buildWorkspaceGitActions(
+      status({ isDefaultRef: true, hasWorkingTreeChanges: true }),
+      false,
+      "pr",
+    );
+    assert.deepInclude(actions.primary, { action: "commit_push_pr", disabled: false });
+    assert.isTrue(requiresDefaultBranchConfirmation(actions.primary.action!, true));
+  });
+
+  it("opens an existing PR even when the branch is behind upstream", () => {
+    const actions = buildWorkspaceGitActions(
+      status({
+        behindCount: 1,
+        pr: {
+          number: 10,
+          title: "Open PR",
+          url: "https://example.com/pr/10",
+          baseRef: "main",
+          headRef: "feature/test",
+          state: "open",
+        },
+      }),
+      false,
+      "pr",
+    );
+    assert.deepInclude(actions.primary, { label: "View PR", kind: "open_pr", disabled: false });
+  });
+
+  it.each([
+    { gitStatus: null, isBusy: false, hasPrimaryRemote: true },
+    { gitStatus: status({ hasWorkingTreeChanges: true }), isBusy: true, hasPrimaryRemote: true },
+    { gitStatus: status({ refName: null }), isBusy: false, hasPrimaryRemote: true },
+    {
+      gitStatus: status({ hasWorkingTreeChanges: true, hasUpstream: false }),
+      isBusy: false,
+      hasPrimaryRemote: false,
+    },
+    { gitStatus: status({ aheadCount: 1, behindCount: 1 }), isBusy: false, hasPrimaryRemote: true },
+    { gitStatus: status(), isBusy: false, hasPrimaryRemote: true },
+  ])("disables unavailable workflows without replacing the selected action: %j", (input) => {
+    for (const preferredAction of ["commit_push", "pr"] as const) {
+      const actions = buildWorkspaceGitActions(
+        input.gitStatus,
+        input.isBusy,
+        preferredAction,
+        input.hasPrimaryRemote,
+      );
+      assert.equal(actions.primary.id, preferredAction);
+      assert.isTrue(actions.primary.disabled);
+      assert.isString(actions.primary.hint);
+    }
+  });
+
+  it("still permits local commits without a remote", () => {
+    const actions = buildWorkspaceGitActions(
+      status({ hasWorkingTreeChanges: true, hasUpstream: false }),
+      false,
+      "commit",
+      false,
+    );
+    assert.deepInclude(actions.primary, { kind: "open_commit", disabled: false });
+  });
+
+  it("uses the source control provider's change-request terminology", () => {
+    const actions = buildWorkspaceGitActions(
+      status({
+        hasWorkingTreeChanges: true,
+        sourceControlProvider: {
+          kind: "gitlab",
+          name: "GitLab",
+          baseUrl: "https://gitlab.com",
+        },
+      }),
+      false,
+      "pr",
+    );
+    assert.equal(actions.primary.label, "Commit, push & MR");
+  });
+});
 
 describe("git action progress presentation", () => {
   it("keeps the phase on the first row and hook output on the second", () => {

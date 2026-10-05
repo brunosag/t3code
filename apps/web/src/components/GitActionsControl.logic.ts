@@ -27,7 +27,7 @@ export interface GitActionMenuItem {
 export interface GitQuickAction {
   label: string;
   disabled: boolean;
-  kind: "run_action" | "run_pull" | "open_publish" | "show_hint";
+  kind: "run_action" | "run_pull" | "open_commit" | "open_pr" | "open_publish" | "show_hint";
   action?: GitStackedAction;
   hint?: string;
 }
@@ -406,6 +406,105 @@ export function resolveQuickAction(
     disabled: true,
     kind: "show_hint",
     hint: "Branch is up to date. No action needed.",
+  };
+}
+
+export type WorkspaceGitActionId = "commit" | "push" | "commit_push" | "pr";
+
+export interface WorkspaceGitAction extends GitQuickAction {
+  id: WorkspaceGitActionId;
+  icon: GitActionIconName;
+}
+
+export function buildWorkspaceGitActions(
+  gitStatus: VcsStatusResult | null,
+  isBusy: boolean,
+  preferredAction: WorkspaceGitActionId,
+  hasPrimaryRemote = true,
+): { primary: WorkspaceGitAction; menu: WorkspaceGitAction[] } {
+  const terminology = resolveChangeRequestTerminology(gitStatus);
+  const hasChanges = gitStatus?.hasWorkingTreeChanges ?? false;
+  const isAhead = (gitStatus?.aheadCount ?? 0) > 0;
+  const hasDefaultBranchDelta = (gitStatus?.aheadOfDefaultCount ?? gitStatus?.aheadCount ?? 0) > 0;
+  const hasOpenPr = gitStatus?.pr?.state === "open";
+  const unavailableReason = isBusy
+    ? "Git action in progress."
+    : !gitStatus
+      ? "Git status is unavailable."
+      : null;
+  const branchDisabledReason =
+    unavailableReason ??
+    (gitStatus?.refName === null
+      ? "Detached HEAD: check out a ref before pushing."
+      : !hasPrimaryRemote && !gitStatus?.hasUpstream
+        ? "Add a remote before pushing."
+        : null);
+  const pushDisabledReason =
+    branchDisabledReason ??
+    ((gitStatus?.behindCount ?? 0) > 0
+      ? "Ref is behind upstream. Pull/rebase before pushing."
+      : null);
+  // Preserve the existing stacked action's ability to commit before a push needs syncing.
+  const stackedActionDisabledReason = hasChanges ? branchDisabledReason : pushDisabledReason;
+
+  const withReason = (action: WorkspaceGitAction, reason: string | null): WorkspaceGitAction =>
+    reason ? { ...action, disabled: true, hint: reason } : action;
+
+  const commit = withReason(
+    { id: "commit", icon: "commit", label: "Commit", disabled: false, kind: "open_commit" },
+    unavailableReason ?? (hasChanges ? null : "Worktree is clean. Make changes before committing."),
+  );
+  const push = withReason(
+    {
+      id: "push",
+      icon: "push",
+      label: "Push",
+      disabled: false,
+      kind: "run_action",
+      action: "push",
+    },
+    pushDisabledReason ?? (isAhead ? null : "No local commits to push."),
+  );
+  const commitPush = withReason(
+    {
+      id: "commit_push",
+      icon: "push",
+      label: "Commit & push",
+      disabled: false,
+      kind: "run_action",
+      action: "commit_push",
+    },
+    stackedActionDisabledReason ??
+      (hasChanges || isAhead ? null : "No changes or local commits to push."),
+  );
+  const pr = withReason(
+    {
+      id: "pr",
+      icon: "pr",
+      label: hasChanges
+        ? `Commit, push & ${terminology.shortLabel}`
+        : isAhead
+          ? `Push & create ${terminology.shortLabel}`
+          : hasOpenPr
+            ? `View ${terminology.shortLabel}`
+            : `Create ${terminology.shortLabel}`,
+      disabled: false,
+      kind: !hasChanges && !isAhead && hasOpenPr ? "open_pr" : "run_action",
+      ...(!hasChanges && !isAhead && hasOpenPr
+        ? {}
+        : { action: hasChanges ? ("commit_push_pr" as const) : ("create_pr" as const) }),
+    },
+    !hasChanges && !isAhead && hasOpenPr
+      ? unavailableReason
+      : (stackedActionDisabledReason ??
+          (hasChanges || isAhead || (hasDefaultBranchDelta && !gitStatus?.isDefaultRef)
+            ? null
+            : `No local commits to include in a ${terminology.singular}.`)),
+  );
+  const actions = { commit, push, commit_push: commitPush, pr };
+  return {
+    primary: actions[preferredAction],
+    menu: Object.values(actions).filter((action) => action.id !== preferredAction),
   };
 }
 
