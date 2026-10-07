@@ -12,6 +12,7 @@ import {
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import {
+  effectiveShortcutsForCommand,
   formatShortcutLabel,
   isDiffToggleShortcut,
   isRichTextBoldShortcut,
@@ -179,6 +180,40 @@ const DEFAULT_BINDINGS = compile([
     whenAst: whenIdentifier("modelPickerOpen"),
   },
 ]);
+
+describe("effectiveShortcutsForCommand", () => {
+  it("passes only effective preview shortcuts to the desktop bridge", () => {
+    const reopen = modShortcut("t", { shiftKey: true });
+    const second = modShortcut("y", { shiftKey: true });
+    const keybindings = compile([
+      { shortcut: reopen, command: "view.reopenClosed" },
+      {
+        shortcut: second,
+        command: "view.reopenClosed",
+        whenAst: whenIdentifier("previewFocus"),
+      },
+      {
+        shortcut: reopen,
+        command: "preview.toggle",
+        whenAst: whenIdentifier("previewFocus"),
+      },
+    ]);
+    assert.deepEqual(
+      effectiveShortcutsForCommand(keybindings, "view.reopenClosed", {
+        platform: "MacIntel",
+        context: { previewFocus: true, previewOpen: true },
+      }),
+      [second],
+    );
+    assert.deepEqual(
+      effectiveShortcutsForCommand(keybindings, "view.reopenClosed", {
+        platform: "MacIntel",
+        context: { previewFocus: false },
+      }),
+      [reopen],
+    );
+  });
+});
 
 describe("isTerminalToggleShortcut", () => {
   it("matches Cmd+J on macOS", () => {
@@ -1279,14 +1314,15 @@ describe("composer and pull request shortcuts", () => {
     ["Enter", "thread.steerQueuedMessage"],
   ] as const;
 
-  for (const platform of ["MacIntel", "Win32", "Linux"]) {
-    it(`separates queued steering and background start on ${platform}`, () => {
+  it.each(["MacIntel", "Win32", "Linux"])(
+    "separates queued steering and background start on %s",
+    (platform) => {
       const modifier = {
         metaKey: platform === "MacIntel",
         ctrlKey: platform !== "MacIntel",
       };
       const queuedKey = event({ key: "Enter", shiftKey: true, ...modifier });
-      const backgroundKey = event({ key: "Enter", altKey: true, ...modifier });
+      const backgroundKey = event({ key: "Enter", ...modifier });
       assert.strictEqual(
         resolveShortcutCommand(queuedKey, DEFAULT_RESOLVED_KEYBINDINGS, {
           platform,
@@ -1301,8 +1337,8 @@ describe("composer and pull request shortcuts", () => {
         }),
         "composer.sendBackground",
       );
-    });
-  }
+    },
+  );
 
   for (const platform of ["MacIntel", "Win32", "Linux"]) {
     it.each(shortcuts)(
@@ -1331,8 +1367,9 @@ describe("composer and pull request shortcuts", () => {
     );
   }
 
-  for (const platform of ["MacIntel", "Win32", "Linux"]) {
-    it(`edits the last queued message with Alt+ArrowUp from the composer on ${platform}`, () => {
+  it.each(["MacIntel", "Win32", "Linux"])(
+    "edits the last queued message with Alt+ArrowUp from the composer on %s",
+    (platform) => {
       const input = event({ key: "ArrowUp", altKey: true });
       assert.strictEqual(
         resolveShortcutCommand(input, DEFAULT_RESOLVED_KEYBINDINGS, {
@@ -1347,8 +1384,8 @@ describe("composer and pull request shortcuts", () => {
           context: { composerFocus: false },
         }),
       );
-    });
-  }
+    },
+  );
 
   for (const platform of ["MacIntel", "Win32", "Linux"]) {
     it.each([
