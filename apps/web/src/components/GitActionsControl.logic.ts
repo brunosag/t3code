@@ -3,7 +3,6 @@ import type {
   GitStackedAction,
   VcsStatusResult,
 } from "@t3tools/contracts";
-import type { GitActionOptions } from "@t3tools/client-runtime/state/vcs";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 import {
   DEFAULT_CHANGE_REQUEST_TERMINOLOGY,
@@ -27,7 +26,7 @@ export interface GitActionMenuItem {
 export interface GitQuickAction {
   label: string;
   disabled: boolean;
-  kind: "run_action" | "run_pull" | "open_commit" | "open_pr" | "open_publish" | "show_hint";
+  kind: "run_action" | "run_pull" | "open_publish" | "show_hint";
   action?: GitStackedAction;
   hint?: string;
 }
@@ -54,16 +53,6 @@ export type DefaultBranchConfirmableAction =
   | "create_pr"
   | "commit_push"
   | "commit_push_pr";
-
-/** Whether the menu may offer an explicit create-change-request action. */
-function showsCreateChangeRequest(options: GitActionOptions): boolean {
-  return options.changeRequestActionMode !== "off";
-}
-
-/** Whether the primary action may pick change-request creation on its own. */
-function quickActionCreatesChangeRequest(options: GitActionOptions): boolean {
-  return (options.changeRequestActionMode ?? "auto") === "auto";
-}
 
 export const GIT_ACTION_SUCCESS_VISIBLE_MS = 10_000;
 
@@ -175,7 +164,6 @@ export function buildMenuItems(
   gitStatus: VcsStatusResult | null,
   isBusy: boolean,
   hasPrimaryRemote = true,
-  options: GitActionOptions = {},
 ): GitActionMenuItem[] {
   if (!gitStatus) return [];
   const terminology = resolveChangeRequestTerminology(gitStatus);
@@ -230,7 +218,7 @@ export function buildMenuItems(
     return [commitItem, pushItem];
   }
 
-  const items: GitActionMenuItem[] = [
+  return [
     commitItem,
     pushItem,
     {
@@ -242,7 +230,6 @@ export function buildMenuItems(
       dialogAction: "create_pr",
     },
   ];
-  return items.filter((item) => item.id !== "pr" || showsCreateChangeRequest(options));
 }
 
 export function resolveQuickAction(
@@ -250,7 +237,6 @@ export function resolveQuickAction(
   isBusy: boolean,
   isDefaultRef = false,
   hasPrimaryRemote = true,
-  options: GitActionOptions = {},
 ): GitQuickAction {
   if (isBusy) {
     return { label: "Commit", disabled: true, kind: "show_hint", hint: "Git action in progress." };
@@ -288,9 +274,6 @@ export function resolveQuickAction(
       return { label: "Commit", disabled: false, kind: "run_action", action: "commit" };
     }
     if (hasOpenPr || isDefaultRef) {
-      return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
-    }
-    if (!quickActionCreatesChangeRequest(options)) {
       return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
     }
     return {
@@ -333,9 +316,6 @@ export function resolveQuickAction(
         action: isDefaultRef ? "commit_push" : "push",
       };
     }
-    if (!quickActionCreatesChangeRequest(options)) {
-      return { label: "Push", disabled: false, kind: "run_action", action: "push" };
-    }
     return {
       label: `Push & create ${terminology.shortLabel}`,
       disabled: false,
@@ -370,9 +350,6 @@ export function resolveQuickAction(
         action: isDefaultRef ? "commit_push" : "push",
       };
     }
-    if (!quickActionCreatesChangeRequest(options)) {
-      return { label: "Push", disabled: false, kind: "run_action", action: "push" };
-    }
     return {
       label: `Push & create ${terminology.shortLabel}`,
       disabled: false,
@@ -392,7 +369,7 @@ export function resolveQuickAction(
     };
   }
 
-  if (hasDefaultBranchDelta && !isDefaultRef && quickActionCreatesChangeRequest(options)) {
+  if (hasDefaultBranchDelta && !isDefaultRef) {
     return {
       label: `Create ${terminology.shortLabel}`,
       disabled: false,
@@ -409,111 +386,10 @@ export function resolveQuickAction(
   };
 }
 
-export type WorkspaceGitActionId = "commit" | "push" | "commit_push" | "pr";
-
-export interface WorkspaceGitAction extends GitQuickAction {
-  id: WorkspaceGitActionId;
-  icon: GitActionIconName;
-}
-
-export function buildWorkspaceGitActions(
-  gitStatus: VcsStatusResult | null,
-  isBusy: boolean,
-  preferredAction: WorkspaceGitActionId,
-  hasPrimaryRemote = true,
-): { primary: WorkspaceGitAction; menu: WorkspaceGitAction[] } {
-  const terminology = resolveChangeRequestTerminology(gitStatus);
-  const hasChanges = gitStatus?.hasWorkingTreeChanges ?? false;
-  const isAhead = (gitStatus?.aheadCount ?? 0) > 0;
-  const hasDefaultBranchDelta = (gitStatus?.aheadOfDefaultCount ?? gitStatus?.aheadCount ?? 0) > 0;
-  const hasOpenPr = gitStatus?.pr?.state === "open";
-  const unavailableReason = isBusy
-    ? "Git action in progress."
-    : !gitStatus
-      ? "Git status is unavailable."
-      : null;
-  const branchDisabledReason =
-    unavailableReason ??
-    (gitStatus?.refName === null
-      ? "Detached HEAD: check out a ref before pushing."
-      : !hasPrimaryRemote && !gitStatus?.hasUpstream
-        ? "Add a remote before pushing."
-        : null);
-  const pushDisabledReason =
-    branchDisabledReason ??
-    ((gitStatus?.behindCount ?? 0) > 0
-      ? "Ref is behind upstream. Pull/rebase before pushing."
-      : null);
-  // Preserve the existing stacked action's ability to commit before a push needs syncing.
-  const stackedActionDisabledReason = hasChanges ? branchDisabledReason : pushDisabledReason;
-
-  const withReason = (action: WorkspaceGitAction, reason: string | null): WorkspaceGitAction =>
-    reason ? { ...action, disabled: true, hint: reason } : action;
-
-  const commit = withReason(
-    { id: "commit", icon: "commit", label: "Commit", disabled: false, kind: "open_commit" },
-    unavailableReason ?? (hasChanges ? null : "Worktree is clean. Make changes before committing."),
-  );
-  const push = withReason(
-    {
-      id: "push",
-      icon: "push",
-      label: "Push",
-      disabled: false,
-      kind: "run_action",
-      action: "push",
-    },
-    pushDisabledReason ?? (isAhead ? null : "No local commits to push."),
-  );
-  const commitPush = withReason(
-    {
-      id: "commit_push",
-      icon: "push",
-      label: "Commit & push",
-      disabled: false,
-      kind: "run_action",
-      action: "commit_push",
-    },
-    stackedActionDisabledReason ??
-      (hasChanges || isAhead ? null : "No changes or local commits to push."),
-  );
-  const pr = withReason(
-    {
-      id: "pr",
-      icon: "pr",
-      label: hasChanges
-        ? `Commit, push & ${terminology.shortLabel}`
-        : isAhead
-          ? `Push & create ${terminology.shortLabel}`
-          : hasOpenPr
-            ? `View ${terminology.shortLabel}`
-            : `Create ${terminology.shortLabel}`,
-      disabled: false,
-      kind: !hasChanges && !isAhead && hasOpenPr ? "open_pr" : "run_action",
-      ...(!hasChanges && !isAhead && hasOpenPr
-        ? {}
-        : { action: hasChanges ? ("commit_push_pr" as const) : ("create_pr" as const) }),
-    },
-    !hasChanges && !isAhead && hasOpenPr
-      ? unavailableReason
-      : (stackedActionDisabledReason ??
-          (hasChanges || isAhead || (hasDefaultBranchDelta && !gitStatus?.isDefaultRef)
-            ? null
-            : `No local commits to include in a ${terminology.singular}.`)),
-  );
-  const actions = { commit, push, commit_push: commitPush, pr };
-  return {
-    primary: actions[preferredAction],
-    menu: Object.values(actions).filter((action) => action.id !== preferredAction),
-  };
-}
-
 export function requiresDefaultBranchConfirmation(
   action: GitStackedAction,
   isDefaultRef: boolean,
-  options: GitActionOptions = {},
 ): boolean {
-  if (options.confirmPushToDefaultBranch === false) return false;
   if (!isDefaultRef) return false;
   return (
     action === "push" ||

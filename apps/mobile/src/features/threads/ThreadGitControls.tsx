@@ -1,7 +1,6 @@
 import { createNativeHeaderMenu } from "../../components/nativeHeaderMenu.ios";
 import type { ScreenHeaderMenu } from "../../components/ScreenHeader.types";
 import {
-  DEFAULT_SERVER_SETTINGS,
   AuthSourceControlWriteScope,
   EnvironmentId,
   type GitRunStackedActionResult,
@@ -10,19 +9,15 @@ import {
   type VcsStatusResult,
 } from "@t3tools/contracts";
 import {
-  type GitActionOptions,
   type GitActionRequestInput,
   requiresDefaultBranchConfirmation,
   resolveQuickAction,
 } from "@t3tools/client-runtime/state/vcs";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigation } from "@react-navigation/native";
 import { NativeHeaderToolbar } from "../../native/StackHeader";
 import { useCallback, useMemo } from "react";
 import { Alert } from "react-native";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
-import { useEnvironmentServerConfig, useProject, useThreadShell } from "../../state/entities";
 import { useEnvironmentScope } from "../../state/session";
 import {
   basename,
@@ -134,29 +129,6 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
   const isDefaultRef = gitStatus?.isDefaultRef ?? false;
 
-  // Source-control behavior is a project setting; mobile only reads it.
-  const scopedEnvironmentId = useMemo(
-    () => EnvironmentId.make(String(environmentId)),
-    [environmentId],
-  );
-  const scopedThreadId = useMemo(() => ThreadId.make(String(threadId)), [threadId]);
-  const serverConfig = useEnvironmentServerConfig(scopedEnvironmentId);
-  const threadShell = useThreadShell(scopeThreadRef(scopedEnvironmentId, scopedThreadId));
-  const threadProject = useProject(
-    threadShell === null ? null : scopeProjectRef(scopedEnvironmentId, threadShell.projectId),
-  );
-  const gitActionOptions = useMemo<GitActionOptions>(() => {
-    const resolved = resolveProjectSettings(
-      serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
-      threadProject?.id ?? null,
-      threadProject ?? undefined,
-    ).settings;
-    return {
-      changeRequestActionMode: resolved.changeRequestActionMode,
-      confirmPushToDefaultBranch: resolved.confirmPushToDefaultBranch,
-    };
-  }, [serverConfig, threadProject]);
-
   const quickAction = useMemo(() => {
     if (!isRepo) {
       return {
@@ -166,13 +138,7 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
         hint: "This workspace is not a git repository.",
       };
     }
-    const action = resolveQuickAction(
-      gitStatus,
-      busy,
-      isDefaultRef,
-      hasPrimaryRemote,
-      gitActionOptions,
-    );
+    const action = resolveQuickAction(gitStatus, busy, isDefaultRef, hasPrimaryRemote);
     return !canWriteSourceControl && (action.kind === "run_pull" || action.kind === "run_action")
       ? {
           ...action,
@@ -180,15 +146,7 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
           hint: "This connection cannot change source control.",
         }
       : action;
-  }, [
-    busy,
-    canWriteSourceControl,
-    gitStatus,
-    hasPrimaryRemote,
-    isDefaultRef,
-    isRepo,
-    gitActionOptions,
-  ]);
+  }, [busy, canWriteSourceControl, gitStatus, hasPrimaryRemote, isDefaultRef, isRepo]);
 
   const quickActionHint = quickAction.disabled
     ? (quickAction.hint ?? "This action is unavailable.")
@@ -231,7 +189,7 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
         branchName &&
         confirmableAction &&
         !input.featureBranch &&
-        requiresDefaultBranchConfirmation(input.action, isDefaultRef, gitActionOptions)
+        requiresDefaultBranchConfirmation(input.action, isDefaultRef)
       ) {
         navigation.navigate("GitConfirm", {
           environmentId: String(environmentId),
@@ -250,7 +208,6 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
     [
       canWriteSourceControl,
       environmentId,
-      gitActionOptions,
       gitStatus,
       isDefaultRef,
       onRunAction,

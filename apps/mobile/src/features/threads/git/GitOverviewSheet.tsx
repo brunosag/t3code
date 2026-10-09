@@ -1,17 +1,14 @@
 import {
-  type GitActionOptions,
   type GitActionRequestInput,
   buildMenuItems,
   getGitActionDisabledReason,
   requiresDefaultBranchConfirmation,
 } from "@t3tools/client-runtime/state/vcs";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   resolveThreadPullRequestChains,
   threadPullRequestKeyOf,
 } from "@t3tools/shared/threadPullRequests";
-import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { DEFAULT_SERVER_SETTINGS, EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import {
   CommonActions,
   StackActions,
@@ -39,7 +36,6 @@ import {
 } from "../../../native/StackHeader";
 import { tryOpenExternalUrl } from "../../../lib/openExternalUrl";
 import { useEnvironmentQuery } from "../../../state/query";
-import { useEnvironmentServerConfig, useProject, useThreadShell } from "../../../state/entities";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
@@ -114,27 +110,9 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
   const hasPrimaryRemote = gitStatus.data?.hasPrimaryRemote ?? false;
   const isDefaultRef = gitStatus.data?.isDefaultRef ?? false;
 
-  // Source-control behavior is a project setting; mobile only reads it.
-  const serverConfig = useEnvironmentServerConfig(environmentId);
-  const threadShell = useThreadShell(scopeThreadRef(environmentId, threadId));
-  const threadProject = useProject(
-    threadShell === null ? null : scopeProjectRef(environmentId, threadShell.projectId),
-  );
-  const gitActionOptions = useMemo<GitActionOptions>(() => {
-    const resolved = resolveProjectSettings(
-      serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
-      threadProject?.id ?? null,
-      threadProject ?? undefined,
-    ).settings;
-    return {
-      changeRequestActionMode: resolved.changeRequestActionMode,
-      confirmPushToDefaultBranch: resolved.confirmPushToDefaultBranch,
-    };
-  }, [serverConfig, threadProject]);
-
   const menuItems = useMemo(
-    () => (isRepo ? buildMenuItems(gitStatus.data, busy, hasPrimaryRemote, gitActionOptions) : []),
-    [busy, gitStatus.data, hasPrimaryRemote, isRepo, gitActionOptions],
+    () => (isRepo ? buildMenuItems(gitStatus.data, busy, hasPrimaryRemote) : []),
+    [busy, gitStatus.data, hasPrimaryRemote, isRepo],
   );
 
   const sheetMenuItems = useMemo(
@@ -183,7 +161,7 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         branchName &&
         confirmableAction &&
         !input.featureBranch &&
-        requiresDefaultBranchConfirmation(input.action, isDefaultRef, gitActionOptions)
+        requiresDefaultBranchConfirmation(input.action, isDefaultRef)
       ) {
         navigation.navigate("GitConfirm", {
           environmentId: String(environmentId),
@@ -205,7 +183,6 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
     [
       canWriteSourceControl,
       environmentId,
-      gitActionOptions,
       gitActions,
       gitStatus.data,
       isDefaultRef,

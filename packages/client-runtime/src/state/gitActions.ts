@@ -1,5 +1,4 @@
 import type {
-  ChangeRequestActionMode,
   GitRunStackedActionInput,
   GitStackedAction,
   VcsStatusResult,
@@ -43,32 +42,10 @@ export type GitActionRequestInput = Pick<
   "action" | "commitMessage" | "featureBranch" | "filePaths"
 >;
 
-/**
- * Client preferences that shape which git action a control offers, but never
- * change what the action itself does. Omitted fields keep today's behavior.
- */
-export interface GitActionOptions {
-  /** How the primary action treats creating a change request. */
-  readonly changeRequestActionMode?: ChangeRequestActionMode | undefined;
-  /** Whether pushing to the default ref asks for confirmation first. */
-  readonly confirmPushToDefaultBranch?: boolean | undefined;
-}
-
-/** Whether the menu may offer an explicit create-change-request action. */
-function showsCreateChangeRequest(options: GitActionOptions): boolean {
-  return options.changeRequestActionMode !== "off";
-}
-
-/** Whether the primary action may pick change-request creation on its own. */
-function quickActionCreatesChangeRequest(options: GitActionOptions): boolean {
-  return (options.changeRequestActionMode ?? "auto") === "auto";
-}
-
 export function buildMenuItems(
   gitStatus: VcsStatusResult | null,
   isBusy: boolean,
   hasOriginRemote = true,
-  options: GitActionOptions = {},
 ): GitActionMenuItem[] {
   if (!gitStatus) return [];
 
@@ -95,7 +72,7 @@ export function buildMenuItems(
     (gitStatus.hasUpstream || canPushWithoutUpstream);
   const canOpenPr = !isBusy && hasOpenPr;
 
-  const items: GitActionMenuItem[] = [
+  return [
     {
       id: "commit",
       label: "Commit",
@@ -129,10 +106,6 @@ export function buildMenuItems(
           dialogAction: "create_pr",
         },
   ];
-  // "off" hides creation, but an open change request stays viewable.
-  return items.filter(
-    (item) => !(item.id === "pr" && !hasOpenPr && !showsCreateChangeRequest(options)),
-  );
 }
 
 export function resolveQuickAction(
@@ -140,7 +113,6 @@ export function resolveQuickAction(
   isBusy: boolean,
   isDefaultBranch = false,
   hasOriginRemote = true,
-  options: GitActionOptions = {},
 ): GitQuickAction {
   if (isBusy) {
     return { label: "Commit", disabled: true, kind: "show_hint", hint: "Git action in progress." };
@@ -176,9 +148,6 @@ export function resolveQuickAction(
       return { label: "Commit", disabled: false, kind: "run_action", action: "commit" };
     }
     if (hasOpenPr || isDefaultBranch) {
-      return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
-    }
-    if (!quickActionCreatesChangeRequest(options)) {
       return { label: "Commit & push", disabled: false, kind: "run_action", action: "commit_push" };
     }
     return {
@@ -220,14 +189,6 @@ export function resolveQuickAction(
         action: isDefaultBranch ? "commit_push" : "push",
       };
     }
-    if (!quickActionCreatesChangeRequest(options)) {
-      return {
-        label: "Push",
-        disabled: false,
-        kind: "run_action",
-        action: "push",
-      };
-    }
     return {
       label: "Push & create PR",
       disabled: false,
@@ -260,14 +221,6 @@ export function resolveQuickAction(
         disabled: false,
         kind: "run_action",
         action: isDefaultBranch ? "commit_push" : "push",
-      };
-    }
-    if (!quickActionCreatesChangeRequest(options)) {
-      return {
-        label: "Push",
-        disabled: false,
-        kind: "run_action",
-        action: "push",
       };
     }
     return {
@@ -357,9 +310,7 @@ export function getGitActionDisabledReason(input: {
 export function requiresDefaultBranchConfirmation(
   action: GitStackedAction,
   isDefaultBranch: boolean,
-  options: GitActionOptions = {},
 ): boolean {
-  if (options.confirmPushToDefaultBranch === false) return false;
   if (!isDefaultBranch) return false;
   return (
     action === "push" ||

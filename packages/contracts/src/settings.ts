@@ -915,15 +915,6 @@ export const SourceControlWritingStyleSettings = Schema.Struct({
 });
 export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyleSettings.Type;
 
-/**
- * How the primary source-control action treats creating a change request.
- * `auto` offers one whenever the ref has commits to ship, `manual` keeps the
- * affordance in the menu only, and `off` removes it so nothing ever creates
- * one. Creation only: a change request opened elsewhere stays viewable.
- */
-export const ChangeRequestActionMode = Schema.Literals(["auto", "manual", "off"]);
-export type ChangeRequestActionMode = typeof ChangeRequestActionMode.Type;
-export const DEFAULT_CHANGE_REQUEST_ACTION_MODE: ChangeRequestActionMode = "auto";
 export const BranchNamingMode = Schema.Literals(["static", "semantic", "custom"]);
 export type BranchNamingMode = typeof BranchNamingMode.Type;
 
@@ -1028,8 +1019,6 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "branchNamePrefix",
   "branchNameInstructions",
   "pullRequestMergeMethod",
-  "changeRequestActionMode",
-  "confirmPushToDefaultBranch",
   "sidebarAutoSettleOnMerge",
   "sidebarAutoSettleAfterDays",
   "continueThreadsAfterServerUpdate",
@@ -1061,8 +1050,6 @@ export const ProjectSettingsOverrides = Schema.Struct({
   branchNamePrefix: Schema.optionalKey(TrimmedString),
   branchNameInstructions: Schema.optionalKey(TrimmedString),
   pullRequestMergeMethod: Schema.optionalKey(Schema.NullOr(PullRequestMergeMethod)),
-  changeRequestActionMode: Schema.optionalKey(ChangeRequestActionMode),
-  confirmPushToDefaultBranch: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
@@ -1311,14 +1298,6 @@ export const ServerSettings = Schema.Struct({
   pullRequestMergeMethod: Schema.NullOr(PullRequestMergeMethod).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
-  changeRequestActionMode: ChangeRequestActionMode.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_CHANGE_REQUEST_ACTION_MODE)),
-  ),
-  /**
-   * Whether pushing to a repository's default ref asks first. Off is for
-   * people who deliberately work directly on the default ref.
-   */
-  confirmPushToDefaultBranch: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 
   // New driver-agnostic instance map. Keyed by `ProviderInstanceId`; values
   // are `ProviderInstanceConfig` envelopes. The driver-specific config blob
@@ -1570,8 +1549,6 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   pullRequestMergeMethod: Schema.optionalKey(Schema.NullOr(PullRequestMergeMethod)),
-  changeRequestActionMode: Schema.optionalKey(ChangeRequestActionMode),
-  confirmPushToDefaultBranch: Schema.optionalKey(Schema.Boolean),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
