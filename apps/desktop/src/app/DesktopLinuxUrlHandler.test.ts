@@ -189,29 +189,27 @@ describe("DesktopLinuxUrlHandler", () => {
     assert.include(entry, "Icon=/home/al ice/icons/T3\\\\x.png");
   });
 
-  for (const scenario of [
+  it.each([
     { name: "development", isDevelopment: true, isPackaged: false },
     { name: "unpackaged", isDevelopment: false, isPackaged: false },
     { name: "dev-server packaged", isDevelopment: true, isPackaged: true },
-  ]) {
-    it(`keeps ${scenario.name} runs as hidden URL handlers`, () => {
-      const entry = DesktopLinuxUrlHandler.renderLinuxDesktopEntry({
-        displayName: "T3 Code (Dev)",
-        execTarget: "/repo/node_modules/electron/dist/electron",
-        scheme: "t3code-dev",
-        wmClass: "t3code-dev",
-        isDevelopment: scenario.isDevelopment,
-        isPackaged: scenario.isPackaged,
-      });
-
-      assert.include(entry, "NoDisplay=true");
-      assert.include(entry, "StartupNotify=false");
-      assert.include(entry, "StartupWMClass=t3code-dev");
-      assert.notInclude(entry, "Icon=");
-      assert.notInclude(entry, "Categories=");
-      assert.include(entry, "MimeType=x-scheme-handler/t3code-dev;");
+  ])("keeps $name runs as hidden URL handlers", (scenario) => {
+    const entry = DesktopLinuxUrlHandler.renderLinuxDesktopEntry({
+      displayName: "T3 Code (Dev)",
+      execTarget: "/repo/node_modules/electron/dist/electron",
+      scheme: "t3code-dev",
+      wmClass: "t3code-dev",
+      isDevelopment: scenario.isDevelopment,
+      isPackaged: scenario.isPackaged,
     });
-  }
+
+    assert.include(entry, "NoDisplay=true");
+    assert.include(entry, "StartupNotify=false");
+    assert.include(entry, "StartupWMClass=t3code-dev");
+    assert.notInclude(entry, "Icon=");
+    assert.notInclude(entry, "Categories=");
+    assert.include(entry, "MimeType=x-scheme-handler/t3code-dev;");
+  });
 
   it("carries structured context on registration errors", () => {
     const writeError = new DesktopLinuxUrlHandler.DesktopLinuxUrlHandlerRegistrationError({

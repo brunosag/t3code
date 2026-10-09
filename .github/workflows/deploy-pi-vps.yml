@@ -58,11 +58,10 @@ jobs:
       - name: Focused fork tests
         run: |
           vp test run \
-            apps/server/src/provider/pi \
-            apps/server/src/orchestration-v2/Adapters/PiAdapterV2.test.ts \
-            apps/server/src/provider/Layers/ProviderRegistry.test.ts \
+            packages/provider-pi/src/server \
+            apps/server/src/provider/ProviderRegistry.test.ts \
             apps/server/src/claudeHistoryWorker.test.ts \
-            apps/server/src/provider/providerMaintenance.test.ts \
+            packages/provider-core/src/server/maintenanceResolver.test.ts \
             apps/server/src/provider/providerMaintenanceRunner.test.ts \
             apps/web/src/providerInstances.test.ts \
             apps/web/src/components/settings/ProviderSettingsForm.test.ts \
@@ -80,7 +79,7 @@ jobs:
             scripts/dev-runner.test.ts
 
       - name: Typecheck fork-affected packages
-        run: vp run --filter t3 --filter @t3tools/web --filter @t3tools/mobile --filter @t3tools/desktop --filter @t3tools/shared --filter @t3tools/contracts --filter @t3tools/client-runtime --concurrency-limit 2 typecheck
+        run: vp run --filter t3 --filter @t3tools/web --filter @t3tools/mobile --filter @t3tools/desktop --filter @t3tools/shared --filter @t3tools/contracts --filter @t3tools/client-runtime --filter @t3tools/provider-pi --filter @t3tools/provider-core --concurrency-limit 2 typecheck
 
       # The version has to be set before the build: bin.mjs reports it from a
       # build-time inline, and the service launcher keys runtime/versions/<version>

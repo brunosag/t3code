@@ -95,6 +95,7 @@ function layerTray(platform: NodeJS.Platform, activate = Effect.void, quit = Eff
         handleBackendNotReady: Effect.void,
         flushMainWindowBounds: Effect.void,
         prepareCaptureReveal: Effect.void,
+        runMainContentsCommand: () => Effect.void,
         dispatchMenuAction: () => Effect.void,
         dispatchSnapShotEvent: () => Effect.void,
         zoomMain: () => Effect.void,

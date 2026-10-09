@@ -26,4 +26,4 @@ The npm-installed server loads `@ff-labs/fff-node` through an ESM import. Upstre
 
 ## Maintenance
 
-Merge upstream into a review worktree and run focused tests plus typechecks for affected packages before updating `bsag`. Pi transport and adapter tests live in `apps/server/src/orchestration-v2/Adapters`; retained extension tests live in `apps/server/src/provider/pi`. Do not restore the removed V1 adapter or permission layer.
+Merge upstream into a review worktree and run focused tests plus typechecks for affected packages before updating `bsag`. Pi transport, adapter, and retained extension tests live in `packages/provider-pi/src/server`. Do not restore the removed V1 adapter or permission layer.

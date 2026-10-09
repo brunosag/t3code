@@ -52,11 +52,10 @@ jobs:
       - name: Focused fork tests
         run: |
           vp test run \
-            apps/server/src/provider/pi \
-            apps/server/src/orchestration-v2/Adapters/PiAdapterV2.test.ts \
-            apps/server/src/provider/Layers/ProviderRegistry.test.ts \
+            packages/provider-pi/src/server \
+            apps/server/src/provider/ProviderRegistry.test.ts \
             apps/server/src/claudeHistoryWorker.test.ts \
-            apps/server/src/provider/providerMaintenance.test.ts \
+            packages/provider-core/src/server/maintenanceResolver.test.ts \
             apps/web/src/providerInstances.test.ts \
             apps/web/src/components/settings/ProviderSettingsForm.test.ts \
             packages/contracts/src/server.test.ts \
