@@ -29,6 +29,18 @@ at the end, leave the block. **Backspace** at the start of a code block turns it
 back into plain lines. Choose the language in a code block's corner to change
 it. Very large code blocks are shown without syntax highlighting.
 
+## Listen to a response
+
+On web and desktop, choose **Read aloud** beneath a completed agent response.
+The player stays available while you scroll, with pause, resume, stop, a seek bar,
+and playback speed from 0.5× to 2×. Starting another response stops the current one.
+Switching threads stops playback.
+
+The first use downloads an English voice; speech is generated on your device and
+response text is not sent to a speech service. The download is cached when your
+browser supports it. Long responses take longer to prepare before playback starts.
+Read aloud skips code, tool activity, tables, images, equations, and citation metadata.
+
 ## Attach files
 
 Attach up to 100 files per message. Each image can be up to 10 MiB, with at most

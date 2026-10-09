@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./read-aloud": {
+      "types": "./src/readAloud.ts",
+      "default": "./src/readAloud.ts"
+    },
     "./composerThreadItems": {
       "types": "./src/composerThreadItems.ts",
       "default": "./src/composerThreadItems.ts"
@@ -400,7 +404,11 @@
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "effect": "catalog:",
-    "three": "0.180.0"
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-parse": "^11.0.0",
+    "three": "0.180.0",
+    "unified": "^11.0.5"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

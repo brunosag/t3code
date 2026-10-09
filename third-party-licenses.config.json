@@ -153,6 +153,64 @@
   ],
   "packageOverrides": [
     {
+      "name": "onnxruntime-node",
+      "version": "1.21.0",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) Microsoft Corporation"]
+      }
+    },
+    {
+      "name": "onnxruntime-common",
+      "version": "1.21.0",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) Microsoft Corporation"]
+      }
+    },
+    {
+      "name": "onnxruntime-common",
+      "version": "1.22.0-dev.20250409-89f8206ba4",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) Microsoft Corporation"]
+      }
+    },
+    {
+      "name": "onnxruntime-web",
+      "version": "1.22.0-dev.20250409-89f8206ba4",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) Microsoft Corporation"]
+      }
+    },
+    {
+      "name": "guid-typescript",
+      "version": "1.0.9",
+      "generatedNotice": {
+        "licenseId": "ISC",
+        "preamble": ["Package author: nicolas (as declared in the upstream package metadata)."]
+      }
+    },
+    {
+      "name": "remark-math",
+      "version": "6.0.0",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": ["Copyright (c) 2017 Junyoung Choi <fluke8259@gmail.com>"]
+      }
+    },
+    {
+      "name": "@img/sharp-libvips-linux-x64",
+      "version": "1.2.4",
+      "generatedNotice": {
+        "licenseId": "LGPL-3.0-or-later",
+        "preamble": [
+          "libvips and its dependencies are distributed under various licenses:\nhttps://github.com/lovell/sharp-libvips/blob/v1.2.4/THIRD-PARTY-NOTICES.md\n\nSource and build scripts: https://github.com/lovell/sharp-libvips/tree/v1.2.4"
+        ]
+      }
+    },
+    {
       "name": "@bufbuild/protobuf",
       "version": "1.10.0",
       "generatedNotices": [

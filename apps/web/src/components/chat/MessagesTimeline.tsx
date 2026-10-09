@@ -185,6 +185,7 @@ import {
   timelineContentOverflowsViewport,
 } from "./timelineScrollAnchoring";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { ReadAloudButton, ReadAloudPlayer } from "./ReadAloud";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { inferEntryKindFromPath } from "../../pierre-icons";
 import { AssistantSelectionToolbar } from "./AssistantSelectionToolbar";
@@ -1567,7 +1568,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         <TimelineRowActivityCtx value={activityState}>
           <TooltipScrollDismissArea
             ref={setTimelineViewportElement}
-            className="relative h-full min-h-0"
+            className="relative flex h-full min-h-0 flex-col"
             data-assistant-citation-viewport="true"
           >
             {onCiteAssistantText && citationThreadRef ? (
@@ -1577,6 +1578,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 onCite={onCiteAssistantText}
               />
             ) : null}
+            <ReadAloudPlayer threadKey={routeThreadKey} />
             <LegendList<MessagesTimelineRow>
               ref={setTimelineList}
               data={rows}
@@ -1617,7 +1619,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               onScroll={handleScroll}
               onItemSizeChanged={reportContentOverflow}
               className={cn(
-                "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+                "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 flex-1 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
                 topFadeEnabled && "topbar-scroll-fade",
               )}
               ListHeaderComponent={listHeader}
@@ -2778,15 +2780,22 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           resolvedTheme={ctx.resolvedTheme}
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
-        {row.showAssistantMeta ? (
-          <AssistantMessageMeta
-            className="mt-1.5"
-            projectedItem={row.projectedItem}
-            message={row.message}
-            showCopyButton={row.showAssistantCopyButton}
-            copyStreaming={row.assistantCopyStreaming}
+        <div className="mt-1.5 flex items-center gap-2">
+          <ReadAloudButton
+            threadKey={ctx.routeThreadKey}
+            messageId={row.message.id}
+            text={row.message.text}
+            streaming={Boolean(row.message.streaming)}
           />
-        ) : null}
+          {row.showAssistantMeta ? (
+            <AssistantMessageMeta
+              projectedItem={row.projectedItem}
+              message={row.message}
+              showCopyButton={row.showAssistantCopyButton}
+              copyStreaming={row.assistantCopyStreaming}
+            />
+          ) : null}
+        </div>
       </div>
     </>
   );
