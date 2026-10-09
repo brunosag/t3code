@@ -188,14 +188,7 @@ export const make = Effect.gen(function* () {
         if (startProviderAuthHandoff(url) || resumeProviderAuth(url)) event.preventDefault();
       });
       yield* electronApp.on("second-instance", (_event: unknown, argv: readonly string[]) => {
-        if (argv?.some((value) => startProviderAuthHandoff(value) || resumeProviderAuth(value)))
-          return;
-        void runPromise(
-          Effect.gen(function* () {
-            const mainWindow = yield* electronWindow.currentMainOrFirst;
-            if (Option.isSome(mainWindow)) yield* electronWindow.reveal(mainWindow.value);
-          }),
-        );
+        argv?.some((value) => startProviderAuthHandoff(value) || resumeProviderAuth(value));
       });
     }).pipe(Effect.withSpan("desktop.clerk.configure")),
   });

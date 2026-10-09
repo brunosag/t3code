@@ -1,5 +1,19 @@
 # Running T3 Code in the background
 
+## Desktop app
+
+Closing the desktop window keeps T3 Code and its local environment running in
+the system tray, so active threads and remote connections can continue. Choose
+**Open T3 Code** from the tray menu, or launch the app again, to reopen it.
+**Quit T3 Code** in the tray or application menu shuts down the app and its
+local environment.
+
+The tray requires support from your desktop environment. If T3 Code cannot
+create its tray icon, closing the last window keeps the usual platform behavior:
+it quits on Linux and Windows, and stays running on macOS.
+
+## Command-line service
+
 On Linux and macOS, T3 Code can run as a service for your user so you do not need
 to keep a terminal open.
 
