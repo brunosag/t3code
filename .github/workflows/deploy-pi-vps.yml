@@ -115,9 +115,22 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ steps.version.outputs.version }}"
-          # The published manifest needs no devDependencies, and their
-          # workspace: specs cannot resolve outside this checkout.
-          node -e 'const fs = require("node:fs"); const file = "apps/server/package.json"; const pkg = JSON.parse(fs.readFileSync(file, "utf8")); delete pkg.devDependencies; delete pkg.scripts; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");'
+          # Workspace providers are bundled into the CLI. Their private package
+          # versions cannot be resolved by pnpm pack or installed from npm.
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import { shouldBundleCliDependency } from "./scripts/lib/cli-external-packages.ts";
+          const file = "apps/server/package.json";
+          const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
+          for (const [name, version] of Object.entries(pkg.dependencies ?? {})) {
+            if (!version.startsWith("workspace:")) continue;
+            if (!shouldBundleCliDependency(name)) throw new Error(`External workspace dependency: ${name}`);
+            delete pkg.dependencies[name];
+          }
+          delete pkg.devDependencies;
+          delete pkg.scripts;
+          fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");
+          NODE
           mkdir -p "$RUNNER_TEMP/t3-release"
           (cd apps/server && vp pm pack --pack-destination "$RUNNER_TEMP/t3-release")
           tgz="$RUNNER_TEMP/t3-release/t3-$version.tgz"
