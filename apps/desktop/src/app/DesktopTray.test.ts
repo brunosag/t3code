@@ -1,6 +1,8 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { beforeEach, vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
@@ -20,28 +22,12 @@ const native = vi.hoisted(() => ({
   themeListeners: new Set<() => void>(),
   dark: false,
   systemDark: false,
-  portalPreference: 2,
-  portalChanged: undefined as
-    | ((namespace: string, key: string, value: { value: number }) => void)
-    | undefined,
-  portalCall: vi.fn(),
-  disconnect: vi.fn(),
+  startStatusNotifier: vi.fn(),
+  closeStatusNotifier: vi.fn(),
 }));
 
-vi.mock("dbus-next", async (original) => ({
-  ...(await original<typeof import("dbus-next")>()),
-  sessionBus: () => ({
-    on: vi.fn(),
-    disconnect: native.disconnect,
-    call: native.portalCall,
-    getProxyObject: async () => ({
-      getInterface: () => ({
-        on: (_event: string, listener: typeof native.portalChanged) => {
-          native.portalChanged = listener;
-        },
-      }),
-    }),
-  }),
+vi.mock("./LinuxStatusNotifierItem.ts", () => ({
+  startStatusNotifierItem: native.startStatusNotifier,
 }));
 
 vi.mock("electron", () => ({
@@ -83,6 +69,7 @@ import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopTray from "./DesktopTray.ts";
+import type { StatusNotifierItemOptions } from "./LinuxStatusNotifierItem.ts";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -91,13 +78,7 @@ beforeEach(() => {
   native.themeListeners.clear();
   native.dark = false;
   native.systemDark = false;
-  native.portalPreference = 2;
-  native.portalChanged = undefined;
-  native.portalCall.mockImplementation(async () => ({
-    body: [
-      { "org.freedesktop.appearance": { "color-scheme": { value: native.portalPreference } } },
-    ],
-  }));
+  native.startStatusNotifier.mockRejectedValue(new Error("No StatusNotifierWatcher"));
   native.createFromPath.mockImplementation((path: string) => {
     const icon = {
       path,
@@ -125,7 +106,12 @@ function layerTray(platform: NodeJS.Platform, activate = Effect.void, quit = Eff
           png: Option.some("icon.png"),
           icns: Option.none(),
         }),
-        resolveResourcePath: (fileName) => Effect.succeedSome(fileName),
+        resolveResourcePath: (fileName) =>
+          Effect.succeedSome(
+            fileName.endsWith(".svg")
+              ? new URL(`../../resources/${fileName}`, import.meta.url).pathname
+              : fileName,
+          ),
       }),
     ),
     Layer.provide(
@@ -153,6 +139,7 @@ function layerTray(platform: NodeJS.Platform, activate = Effect.void, quit = Eff
         syncAppearance: Effect.void,
       }),
     ),
+    Layer.provideMerge(NodeServices.layer),
   );
 }
 
@@ -202,7 +189,6 @@ it.effect.each([
     assert.isFalse(yield* tray.isActive);
     assert.equal(native.destroy.mock.calls.length, 1);
     assert.equal(native.themeListeners.size, 0);
-    assert.equal(native.disconnect.mock.calls.length, platform === "linux" ? 1 : 0);
   }).pipe(
     Effect.provide(
       layerTray(
@@ -284,31 +270,61 @@ it.effect.each([false, true])("follows the Windows taskbar theme (dark=%s)", (da
   ).pipe(Effect.provide(layerTray("win32")));
 });
 
-it.effect.each([0, 1, 2, 99])("follows the Linux system color scheme %s", (preference) => {
-  native.portalPreference = preference;
-  native.dark = preference !== 1;
-  return Effect.scoped(
-    Effect.gen(function* () {
-      const tray = yield* DesktopTray.DesktopTray;
-      yield* tray.configure;
-      assert.equal(currentIconPath(), preference === 1 ? "trayWhite.png" : "trayTemplate.png");
-      for (const update of native.themeListeners) update();
-      assert.equal(currentIconPath(), preference === 1 ? "trayWhite.png" : "trayTemplate.png");
-      native.portalChanged!("org.freedesktop.appearance", "color-scheme", { value: 1 });
-      assert.equal(currentIconPath(), "trayWhite.png");
-      native.portalChanged!("org.freedesktop.appearance", "contrast", { value: 2 });
-      assert.equal(currentIconPath(), "trayWhite.png");
-      native.portalChanged!("org.freedesktop.appearance", "color-scheme", { value: 2 });
-      assert.equal(currentIconPath(), "trayTemplate.png");
-      assert.equal(native.createTray.mock.calls.length, 1);
-      assert.deepEqual(native.createTray.mock.calls[0]![0].resize.mock.calls, [[{ width: 24 }]]);
-    }),
-  ).pipe(Effect.provide(layerTray("linux")));
+it.effect("publishes a symbolic StatusNotifierItem on Linux", () => {
+  let opened = 0;
+  let quit = 0;
+  native.startStatusNotifier.mockResolvedValue(native.closeStatusNotifier);
+  return Effect.gen(function* () {
+    const tray = yield* DesktopTray.DesktopTray;
+    const fileSystem = yield* FileSystem.FileSystem;
+    let iconThemePath = "";
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* tray.configure;
+        yield* tray.configure;
+        assert.isTrue(yield* tray.isActive);
+        assert.equal(native.createTray.mock.calls.length, 0);
+        assert.equal(native.startStatusNotifier.mock.calls.length, 1);
+        const options: StatusNotifierItemOptions = native.startStatusNotifier.mock.calls[0]![0];
+        iconThemePath = options.iconThemePath;
+        assert.equal(options.iconName, "t3code-tray-symbolic");
+        assert.include(
+          yield* fileSystem.readFileString(`${iconThemePath}/t3code-tray-symbolic.svg`),
+          "<svg",
+        );
+        options.activate();
+        const [openEntry, separator, quitEntry] = options.menu;
+        assert.deepEqual(separator, { type: "separator" });
+        assert.isTrue(openEntry !== undefined && "click" in openEntry);
+        assert.isTrue(quitEntry !== undefined && "click" in quitEntry);
+        if (openEntry && "click" in openEntry) openEntry.click();
+        if (quitEntry && "click" in quitEntry) quitEntry.click();
+        yield* Effect.yieldNow;
+        assert.equal(opened, 2);
+        assert.equal(quit, 1);
+        assert.equal(native.closeStatusNotifier.mock.calls.length, 0);
+      }),
+    );
+    assert.isFalse(yield* tray.isActive);
+    assert.equal(native.closeStatusNotifier.mock.calls.length, 1);
+    assert.isFalse(yield* fileSystem.exists(iconThemePath));
+  }).pipe(
+    Effect.provide(
+      layerTray(
+        "linux",
+        Effect.sync(() => {
+          opened += 1;
+        }),
+        Effect.sync(() => {
+          quit += 1;
+        }),
+      ),
+    ),
+  );
 });
 
-it.effect("keeps the tray available when the Linux appearance portal is unavailable", () => {
+it.effect("falls back to an Electron tray that follows the native theme on Linux", () => {
   native.dark = true;
-  native.portalCall.mockRejectedValue(new Error("Portal unavailable"));
   return Effect.scoped(
     Effect.gen(function* () {
       const tray = yield* DesktopTray.DesktopTray;
@@ -318,16 +334,7 @@ it.effect("keeps the tray available when the Linux appearance portal is unavaila
       native.dark = false;
       for (const update of native.themeListeners) update();
       assert.equal(currentIconPath(), "trayTemplate.png");
+      assert.deepEqual(native.createTray.mock.calls[0]![0].resize.mock.calls, [[{ width: 24 }]]);
     }),
   ).pipe(Effect.provide(layerTray("linux")));
 });
-
-it.effect("ignores late portal signals after the tray is disposed", () =>
-  Effect.gen(function* () {
-    const tray = yield* DesktopTray.DesktopTray;
-    yield* Effect.scoped(tray.configure);
-    const updates = native.setImage.mock.calls.length;
-    native.portalChanged!("org.freedesktop.appearance", "color-scheme", { value: 1 });
-    assert.equal(native.setImage.mock.calls.length, updates);
-  }).pipe(Effect.provide(layerTray("linux"))),
-);
