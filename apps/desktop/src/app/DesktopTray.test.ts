@@ -16,6 +16,32 @@ const native = vi.hoisted(() => ({
   setTemplateImage: vi.fn(),
   createFromPath: vi.fn(),
   createTray: vi.fn(),
+  setImage: vi.fn(),
+  themeListeners: new Set<() => void>(),
+  dark: false,
+  systemDark: false,
+  portalPreference: 2,
+  portalChanged: undefined as
+    | ((namespace: string, key: string, value: { value: number }) => void)
+    | undefined,
+  portalCall: vi.fn(),
+  disconnect: vi.fn(),
+}));
+
+vi.mock("dbus-next", async (original) => ({
+  ...(await original<typeof import("dbus-next")>()),
+  sessionBus: () => ({
+    on: vi.fn(),
+    disconnect: native.disconnect,
+    call: native.portalCall,
+    getProxyObject: async () => ({
+      getInterface: () => ({
+        on: (_event: string, listener: typeof native.portalChanged) => {
+          native.portalChanged = listener;
+        },
+      }),
+    }),
+  }),
 }));
 
 vi.mock("electron", () => ({
@@ -26,11 +52,23 @@ vi.mock("electron", () => ({
     destroy = native.destroy;
     setToolTip = native.setToolTip;
     setContextMenu = native.setContextMenu;
+    setImage = native.setImage;
     on(event: string, listener: () => void) {
       native.listeners.set(event, listener);
     }
   },
   nativeImage: { createFromPath: native.createFromPath },
+  nativeTheme: {
+    get shouldUseDarkColors() {
+      return native.dark;
+    },
+    get shouldUseDarkColorsForSystemIntegratedUI() {
+      return native.systemDark;
+    },
+    on: (_event: string, listener: () => void) => native.themeListeners.add(listener),
+    removeListener: (_event: string, listener: () => void) =>
+      native.themeListeners.delete(listener),
+  },
   Menu: {
     buildFromTemplate: (menu: Electron.MenuItemConstructorOptions[]) => {
       native.menu = menu;
@@ -50,12 +88,25 @@ beforeEach(() => {
   vi.resetAllMocks();
   native.menu = [];
   native.listeners.clear();
-  const icon = {
-    isEmpty: () => false,
-    setTemplateImage: native.setTemplateImage,
-    resize: () => icon,
-  };
-  native.createFromPath.mockReturnValue(icon);
+  native.themeListeners.clear();
+  native.dark = false;
+  native.systemDark = false;
+  native.portalPreference = 2;
+  native.portalChanged = undefined;
+  native.portalCall.mockImplementation(async () => ({
+    body: [
+      { "org.freedesktop.appearance": { "color-scheme": { value: native.portalPreference } } },
+    ],
+  }));
+  native.createFromPath.mockImplementation((path: string) => {
+    const icon = {
+      path,
+      isEmpty: () => false,
+      setTemplateImage: native.setTemplateImage,
+      resize: vi.fn(() => icon),
+    };
+    return icon;
+  });
 });
 
 function layerTray(platform: NodeJS.Platform, activate = Effect.void, quit = Effect.void) {
@@ -74,7 +125,7 @@ function layerTray(platform: NodeJS.Platform, activate = Effect.void, quit = Eff
           png: Option.some("icon.png"),
           icns: Option.none(),
         }),
-        resolveResourcePath: () => Effect.succeedSome("trayTemplate.png"),
+        resolveResourcePath: (fileName) => Effect.succeedSome(fileName),
       }),
     ),
     Layer.provide(
@@ -112,8 +163,8 @@ function click(label: string) {
 }
 
 it.effect.each([
-  { platform: "linux", icon: "icon.png" },
-  { platform: "win32", icon: "icon.ico" },
+  { platform: "linux", icon: "trayTemplate.png" },
+  { platform: "win32", icon: "trayTemplate.png" },
   { platform: "darwin", icon: "trayTemplate.png" },
 ] as const)("can reopen and quit from the tray on $platform", ({ platform, icon }) => {
   let opened = 0;
@@ -128,7 +179,10 @@ it.effect.each([
         yield* tray.configure;
         assert.isTrue(yield* tray.isActive);
         assert.equal(native.createTray.mock.calls.length, 1);
-        assert.deepEqual(native.createFromPath.mock.calls, [[icon]]);
+        assert.deepEqual(
+          native.createFromPath.mock.calls,
+          platform === "darwin" ? [[icon]] : [[icon], ["trayWhite.png"]],
+        );
         assert.deepEqual(native.setTemplateImage.mock.calls, platform === "darwin" ? [[true]] : []);
 
         click("Open T3 Code");
@@ -147,6 +201,8 @@ it.effect.each([
     );
     assert.isFalse(yield* tray.isActive);
     assert.equal(native.destroy.mock.calls.length, 1);
+    assert.equal(native.themeListeners.size, 0);
+    assert.equal(native.disconnect.mock.calls.length, platform === "linux" ? 1 : 0);
   }).pipe(
     Effect.provide(
       layerTray(
@@ -201,3 +257,77 @@ it.effect("does not enter background mode with an empty icon", () => {
     }),
   ).pipe(Effect.provide(layerTray("linux")));
 });
+
+function currentIconPath() {
+  const calls = native.setImage.mock.calls;
+  const image =
+    calls.length > 0 ? calls[calls.length - 1]![0] : native.createTray.mock.calls[0]![0];
+  return image.path as string;
+}
+
+it.effect.each([false, true])("follows the Windows taskbar theme (dark=%s)", (dark) => {
+  native.systemDark = dark;
+  native.dark = !dark;
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const tray = yield* DesktopTray.DesktopTray;
+      yield* tray.configure;
+      assert.equal(currentIconPath(), dark ? "trayWhite.png" : "trayTemplate.png");
+      native.systemDark = !dark;
+      for (const update of native.themeListeners) update();
+      assert.equal(currentIconPath(), dark ? "trayTemplate.png" : "trayWhite.png");
+      assert.equal(native.createTray.mock.calls.length, 1);
+      const updates = native.setImage.mock.calls.length;
+      for (const update of native.themeListeners) update();
+      assert.equal(native.setImage.mock.calls.length, updates);
+    }),
+  ).pipe(Effect.provide(layerTray("win32")));
+});
+
+it.effect.each([0, 1, 2, 99])("follows the Linux system color scheme %s", (preference) => {
+  native.portalPreference = preference;
+  native.dark = preference !== 1;
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const tray = yield* DesktopTray.DesktopTray;
+      yield* tray.configure;
+      assert.equal(currentIconPath(), preference === 1 ? "trayWhite.png" : "trayTemplate.png");
+      for (const update of native.themeListeners) update();
+      assert.equal(currentIconPath(), preference === 1 ? "trayWhite.png" : "trayTemplate.png");
+      native.portalChanged!("org.freedesktop.appearance", "color-scheme", { value: 1 });
+      assert.equal(currentIconPath(), "trayWhite.png");
+      native.portalChanged!("org.freedesktop.appearance", "contrast", { value: 2 });
+      assert.equal(currentIconPath(), "trayWhite.png");
+      native.portalChanged!("org.freedesktop.appearance", "color-scheme", { value: 2 });
+      assert.equal(currentIconPath(), "trayTemplate.png");
+      assert.equal(native.createTray.mock.calls.length, 1);
+      assert.deepEqual(native.createTray.mock.calls[0]![0].resize.mock.calls, [[{ width: 24 }]]);
+    }),
+  ).pipe(Effect.provide(layerTray("linux")));
+});
+
+it.effect("keeps the tray available when the Linux appearance portal is unavailable", () => {
+  native.dark = true;
+  native.portalCall.mockRejectedValue(new Error("Portal unavailable"));
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const tray = yield* DesktopTray.DesktopTray;
+      yield* tray.configure;
+      assert.isTrue(yield* tray.isActive);
+      assert.equal(currentIconPath(), "trayWhite.png");
+      native.dark = false;
+      for (const update of native.themeListeners) update();
+      assert.equal(currentIconPath(), "trayTemplate.png");
+    }),
+  ).pipe(Effect.provide(layerTray("linux")));
+});
+
+it.effect("ignores late portal signals after the tray is disposed", () =>
+  Effect.gen(function* () {
+    const tray = yield* DesktopTray.DesktopTray;
+    yield* Effect.scoped(tray.configure);
+    const updates = native.setImage.mock.calls.length;
+    native.portalChanged!("org.freedesktop.appearance", "color-scheme", { value: 1 });
+    assert.equal(native.setImage.mock.calls.length, updates);
+  }).pipe(Effect.provide(layerTray("linux"))),
+);

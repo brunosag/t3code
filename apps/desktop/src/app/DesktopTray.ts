@@ -14,6 +14,7 @@ import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
 import * as DesktopState from "./DesktopState.ts";
+import { watchSystemAppearance } from "./DesktopTrayTheme.ts";
 
 class DesktopTrayCreateError extends Schema.TaggedError<DesktopTrayCreateError>()(
   "DesktopTrayCreateError",
@@ -53,31 +54,34 @@ const make = Effect.gen(function* () {
 
   const configure = Effect.gen(function* () {
     if (yield* Ref.get(active)) return;
-    const iconPaths = yield* assets.iconPaths;
-    const iconPath =
+    const iconPath = yield* assets.resolveResourcePath("trayTemplate.png");
+    const whiteIconPath =
       environment.platform === "darwin"
-        ? yield* assets.resolveResourcePath("trayTemplate.png")
-        : environment.platform === "win32"
-          ? Option.orElse(iconPaths.ico, () => iconPaths.png)
-          : iconPaths.png;
-    if (Option.isNone(iconPath)) {
+        ? iconPath
+        : yield* assets.resolveResourcePath("trayWhite.png");
+    if (Option.isNone(iconPath) || Option.isNone(whiteIconPath)) {
       yield* logWarning("tray icon unavailable; keeping the normal window close behavior");
       return;
     }
 
-    yield* Effect.acquireRelease(
+    const { tray, lightIcon, darkIcon } = yield* Effect.acquireRelease(
       Effect.try({
         try: () => {
-          const sourceIcon = Electron.nativeImage.createFromPath(iconPath.value);
-          // Linux sends the pixels to the panel over D-Bus; keep that payload
-          // small rather than publishing the full-size application icon.
-          const icon =
-            environment.platform === "linux"
-              ? sourceIcon.resize({ width: 24, height: 24 })
-              : sourceIcon;
-          if (icon.isEmpty()) throw new Error("The tray icon is empty.");
-          if (environment.platform === "darwin") icon.setTemplateImage(true);
-          const tray = new Electron.Tray(icon);
+          const loadIcon = (path: string) => {
+            const source = Electron.nativeImage.createFromPath(path);
+            if (source.isEmpty()) throw new Error("The tray icon is empty.");
+            // Preserve the wordmark's proportions and keep the D-Bus payload small.
+            return environment.platform === "linux" ? source.resize({ width: 24 }) : source;
+          };
+          const lightIcon = loadIcon(iconPath.value);
+          const darkIcon =
+            environment.platform === "darwin" ? lightIcon : loadIcon(whiteIconPath.value);
+          if (environment.platform === "darwin") lightIcon.setTemplateImage(true);
+          const dark =
+            environment.platform === "win32"
+              ? Electron.nativeTheme.shouldUseDarkColorsForSystemIntegratedUI
+              : Electron.nativeTheme.shouldUseDarkColors;
+          const tray = new Electron.Tray(dark ? darkIcon : lightIcon);
           try {
             tray.setToolTip(environment.displayName);
             tray.setContextMenu(
@@ -90,7 +94,7 @@ const make = Effect.gen(function* () {
             // macOS opens the context menu on click; other platforms emit an
             // activation that can reopen the main window directly.
             if (environment.platform !== "darwin") tray.on("click", open);
-            return tray;
+            return { tray, lightIcon, darkIcon };
           } catch (cause) {
             tray.destroy();
             throw cause;
@@ -98,9 +102,18 @@ const make = Effect.gen(function* () {
         },
         catch: (cause) => new DesktopTrayCreateError({ platform: environment.platform, cause }),
       }),
-      (tray) => Effect.sync(() => tray.destroy()).pipe(Effect.ensuring(Ref.set(active, false))),
+      ({ tray }) => Effect.sync(() => tray.destroy()).pipe(Effect.ensuring(Ref.set(active, false))),
     );
     yield* Ref.set(active, true);
+    if (environment.platform !== "darwin") {
+      yield* watchSystemAppearance(environment.platform, (dark) => {
+        try {
+          tray.setImage(dark ? darkIcon : lightIcon);
+        } catch (cause) {
+          void runPromise(logWarning("failed to update the tray icon", { cause }));
+        }
+      });
+    }
   }).pipe(
     Effect.catchCause((cause) =>
       logWarning("tray unavailable; keeping normal window close behavior", { cause }),
