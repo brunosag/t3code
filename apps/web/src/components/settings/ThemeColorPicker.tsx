@@ -250,15 +250,15 @@ function ThemeColorPicker({
   label,
   value,
   onChange,
-  onInteract,
+  onOpenChange,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  onInteract?: () => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
   return (
-    <Popover>
+    <Popover onOpenChange={onOpenChange}>
       <Tooltip>
         <TooltipTrigger
           render={
@@ -267,8 +267,6 @@ function ThemeColorPicker({
                 <button
                   aria-label={`Choose ${label} color`}
                   className="relative flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-foreground/30 transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                  onFocus={onInteract}
-                  onPointerDown={onInteract}
                   type="button"
                 >
                   <span
@@ -299,7 +297,7 @@ export const ThemeColorField = memo(function ThemeColorField({
   role,
   value,
   onChange,
-  onSelect,
+  onPickerOpenChange,
   onToggleSelected,
   selected = false,
   label: customLabel,
@@ -307,7 +305,7 @@ export const ThemeColorField = memo(function ThemeColorField({
   role: ThemeColorRole;
   value: string;
   onChange: (role: ThemeColorRole, value: string) => void;
-  onSelect?: (role: ThemeColorRole) => void;
+  onPickerOpenChange?: (role: ThemeColorRole, open: boolean) => void;
   onToggleSelected?: (role: ThemeColorRole) => void;
   selected?: boolean;
   label?: string;
@@ -347,7 +345,7 @@ export const ThemeColorField = memo(function ThemeColorField({
         <ThemeColorPicker
           label={label}
           onChange={(nextValue) => onChange(role, nextValue)}
-          onInteract={() => onSelect?.(role)}
+          onOpenChange={(open) => onPickerOpenChange?.(role, open)}
           value={swatchValue}
         />
         <Input
@@ -358,8 +356,6 @@ export const ThemeColorField = memo(function ThemeColorField({
           id={`${role}-hex`}
           nativeInput
           onChange={(event) => onChange(role, event.currentTarget.value)}
-          onFocus={() => onSelect?.(role)}
-          onPointerDown={() => onSelect?.(role)}
           size="compact"
           value={editorValue}
         />

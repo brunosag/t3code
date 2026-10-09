@@ -328,6 +328,7 @@ export function ThemeEditorPanel({
   const [roleQuery, setRoleQuery] = useState("");
   const [isInspecting, setIsInspecting] = useState(false);
   const [selectedRole, setSelectedRole] = useState<ThemeColorRole | null>(null);
+  const [pickingRole, setPickingRole] = useState<ThemeColorRole | null>(null);
   const [usageCount, setUsageCount] = useState<number | null>(null);
   // Null parks the panel at its default corner; a value is a dragged spot,
   // kept clamped so the header can always be grabbed again.
@@ -422,6 +423,7 @@ export function ThemeEditorPanel({
       setShouldRegenerateGuidedColors(sourceTheme !== null && sourceTheme.managed !== true);
       setColorsByAppearance(nextColors);
       setSelectedRole(null);
+      setPickingRole(null);
       setUsageCount(null);
       setIsInspecting(false);
       setError(null);
@@ -541,6 +543,12 @@ export function ThemeEditorPanel({
     setSelectedRole((current) => (current === role ? null : role));
   }, []);
 
+  // Opening another picker can report its open before the previous one
+  // reports its close, so only the picker that opened may clear the flag.
+  const handlePickerOpenChange = useCallback((role: ThemeColorRole, isOpen: boolean) => {
+    setPickingRole((current) => (isOpen ? role : current === role ? null : current));
+  }, []);
+
   const clearInspectorSelection = useCallback(() => {
     setSelectedRole(null);
     setUsageCount(null);
@@ -566,9 +574,9 @@ export function ThemeEditorPanel({
       setUsageCount(null);
       return;
     }
-    // Picking a new element needs the unobscured app, so suspend the existing
-    // spotlight while the picker is armed.
-    if (isInspecting) return;
+    // Picking a new element, or judging a color while choosing it, needs the
+    // unobscured app, so suspend the spotlight while either is underway.
+    if (isInspecting || pickingRole !== null) return;
 
     const highlightedRoles = selectedHighlightRolesKey.split(",") as Array<ThemeColorRole>;
     const refreshHighlights = () => setUsageCount(highlightThemeRoleUsage(highlightedRoles));
@@ -625,7 +633,7 @@ export function ThemeEditorPanel({
       window.removeEventListener("scroll", scheduleSpotlightRefresh, true);
       clearThemeInspectorHighlights();
     };
-  }, [isInspecting, open, selectedHighlightRolesKey, selectedRole]);
+  }, [isInspecting, open, pickingRole, selectedHighlightRolesKey, selectedRole]);
 
   useEffect(() => {
     if (!open || !isInspecting) {
@@ -1037,7 +1045,7 @@ export function ThemeEditorPanel({
           key={family.id}
           label={family.label}
           onChange={updateColor}
-          onSelect={selectThemeRole}
+          onPickerOpenChange={handlePickerOpenChange}
           onToggleSelected={toggleThemeRole}
           role={family.role}
           selected={selectedRole === family.role}
@@ -1076,7 +1084,7 @@ export function ThemeEditorPanel({
           <ThemeColorField
             key={role}
             onChange={updateColor}
-            onSelect={selectThemeRole}
+            onPickerOpenChange={handlePickerOpenChange}
             onToggleSelected={toggleThemeRole}
             role={role}
             label={role === "canvas" ? "Background" : "Accent"}
