@@ -1,0 +1,139 @@
+import { useEffect, useSyncExternalStore } from "react";
+import { PlayIcon, SquareIcon } from "lucide-react";
+import {
+  DEFAULT_UNIFIED_SETTINGS,
+  READ_ALOUD_VOICES,
+  type ReadAloudVoice,
+} from "@t3tools/contracts";
+
+import { readAloud } from "~/lib/readAloud";
+import { READ_ALOUD_VOICE_INFO } from "~/lib/readAloudVoices";
+import { Button } from "../ui/button";
+import {
+  Select,
+  SelectGroup,
+  SelectGroupLabel,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
+import { SettingResetButton, SettingsRow } from "./settingsLayout";
+import { searchableSetting } from "./settingsSearch";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
+
+const PREVIEW_KEY = "settings-voice-preview";
+const getServerSnapshot = () => null;
+
+const VOICE_GROUPS = (
+  [
+    ["American", "Female"],
+    ["American", "Male"],
+    ["British", "Female"],
+    ["British", "Male"],
+  ] as const
+).map(([accent, gender]) => ({
+  label: `${accent} ${gender.toLowerCase()}`,
+  voices: READ_ALOUD_VOICES.filter(
+    (voice) =>
+      READ_ALOUD_VOICE_INFO[voice].accent === accent &&
+      READ_ALOUD_VOICE_INFO[voice].gender === gender,
+  ),
+}));
+
+function isReadAloudVoice(value: unknown): value is ReadAloudVoice {
+  return READ_ALOUD_VOICES.some((voice) => voice === value);
+}
+
+export function ReadAloudVoiceSettings() {
+  const voice = useScopedSettings((settings) => settings.readAloudVoice);
+  const updateSettings = useUpdateScopedSettings();
+  const preview = useSyncExternalStore(
+    readAloud.subscribe,
+    () => readAloud.getSnapshot(PREVIEW_KEY),
+    getServerSnapshot,
+  );
+  useEffect(() => () => readAloud.stopMessage(PREVIEW_KEY), []);
+
+  const previewing = preview !== null && preview.status !== "error" && preview.status !== "ended";
+  const info = READ_ALOUD_VOICE_INFO[voice];
+  const description =
+    preview?.status === "preparing"
+      ? `${preview.progress?.label ?? "Preparing preview…"}${
+          preview.progress?.percent != null ? ` ${preview.progress.percent}%` : ""
+        }`
+      : (preview?.error ??
+        "Voice used to read responses aloud on this device. Each voice downloads once when first used.");
+
+  return (
+    <SettingsRow
+      {...searchableSetting("read-aloud-voice")}
+      description={<span role="status">{description}</span>}
+      resetAction={
+        voice !== DEFAULT_UNIFIED_SETTINGS.readAloudVoice ? (
+          <SettingResetButton
+            label="read aloud voice"
+            onClick={() => {
+              readAloud.stopMessage(PREVIEW_KEY);
+              updateSettings({ readAloudVoice: DEFAULT_UNIFIED_SETTINGS.readAloudVoice });
+            }}
+          />
+        ) : null
+      }
+      control={
+        <div className="flex items-center gap-2">
+          <Select
+            value={voice}
+            onValueChange={(value) => {
+              if (!isReadAloudVoice(value)) return;
+              readAloud.stopMessage(PREVIEW_KEY);
+              updateSettings({ readAloudVoice: value });
+            }}
+          >
+            <SelectTrigger size="sm" className="w-full sm:w-48" aria-label="Read aloud voice">
+              <SelectValue>
+                {info.name} · {info.accent}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              {VOICE_GROUPS.map((group) => (
+                <SelectGroup key={group.label}>
+                  <SelectGroupLabel>{group.label}</SelectGroupLabel>
+                  {group.voices.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      <span className="flex items-center justify-between gap-4">
+                        {READ_ALOUD_VOICE_INFO[option].name}
+                        <span className="text-muted-foreground">
+                          {READ_ALOUD_VOICE_INFO[option].grade}
+                        </span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectPopup>
+          </Select>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            aria-label={previewing ? "Stop voice preview" : `Preview ${info.name} voice`}
+            onClick={() => {
+              if (previewing) {
+                readAloud.stopMessage(PREVIEW_KEY);
+                return;
+              }
+              void readAloud.start(PREVIEW_KEY, {
+                text: `Hi, I'm ${info.name}. This is how responses will sound when read aloud.`,
+                voice,
+              });
+            }}
+          >
+            {previewing ? <SquareIcon /> : <PlayIcon />}
+            {previewing ? "Stop" : "Preview"}
+          </Button>
+        </div>
+      }
+    />
+  );
+}

@@ -39,7 +39,7 @@ function setup(generate: ReadAloudBackend["generate"] = async () => new Blob()) 
 describe("ReadAloudController", () => {
   it("plays, pauses, and resumes the same response", async () => {
     const { player, audio } = setup();
-    await player.start("response-1", "Hello.");
+    await player.start("response-1", { text: "Hello.", voice: "af_heart" });
     expect(player.getSnapshot("response-1")?.status).toBe("playing");
     expect(audio.paused).toBe(false);
 
@@ -57,7 +57,7 @@ describe("ReadAloudController", () => {
       generated += 1;
       return new Blob();
     });
-    await player.start("response", "Hello.");
+    await player.start("response", { text: "Hello.", voice: "af_heart" });
     audio.currentTime = 15;
     audio.dispatchEvent(new Event("timeupdate"));
     expect(player.getSnapshot("response")).toMatchObject({ position: 15, duration: 60 });
@@ -77,21 +77,21 @@ describe("ReadAloudController", () => {
 
   it("adjusts playback speed immediately and retains it for the next response", async () => {
     const { player, audio } = setup();
-    await player.start("first", "First.");
+    await player.start("first", { text: "First.", voice: "af_heart" });
     player.setSpeed(1.5);
     expect(audio.playbackRate).toBe(1.5);
     player.setSpeed(9);
     player.setSpeed(Number.NaN);
     expect(audio.playbackRate).toBe(1.5);
     player.stop();
-    await player.start("second", "Second.");
+    await player.start("second", { text: "Second.", voice: "af_heart" });
     expect(player.getSnapshot("second")?.speed).toBe(1.5);
     expect(audio.playbackRate).toBe(1.5);
   });
 
   it("stops audio and releases its resources", async () => {
     const { player, audio, disposed } = setup();
-    await player.start("response", "Hello.");
+    await player.start("response", { text: "Hello.", voice: "af_heart" });
     player.stop();
     expect(audio.paused).toBe(true);
     expect(disposed()).toBe(1);
@@ -110,7 +110,7 @@ describe("ReadAloudController", () => {
         finish = resolve;
       });
     });
-    const pending = player.start("response", "Hello.");
+    const pending = player.start("response", { text: "Hello.", voice: "af_heart" });
     expect(player.getSnapshot("response")).toMatchObject({
       status: "preparing",
       progress: { percent: 50 },
@@ -126,7 +126,7 @@ describe("ReadAloudController", () => {
   it("keeps newer playback when an older generation finishes late", async () => {
     let finishFirst!: (blob: Blob) => void;
     let reportFirst!: Parameters<ReadAloudBackend["generate"]>[2];
-    const { player, disposed } = setup((text, _signal, progress) => {
+    const { player, disposed } = setup(({ text }, _signal, progress) => {
       if (text === "First.") {
         reportFirst = progress;
         return new Promise((resolve) => {
@@ -135,8 +135,8 @@ describe("ReadAloudController", () => {
       }
       return Promise.resolve(new Blob());
     });
-    const pending = player.start("first", "First.");
-    await player.start("second", "Second.");
+    const pending = player.start("first", { text: "First.", voice: "af_heart" });
+    await player.start("second", { text: "Second.", voice: "af_heart" });
     const secondSnapshot = player.getSnapshot("second");
     reportFirst({ label: "Stale progress", percent: 99 });
     finishFirst(new Blob());
@@ -149,8 +149,8 @@ describe("ReadAloudController", () => {
 
   it("replaces active audio without overlapping responses", async () => {
     const { player, audio, disposed } = setup();
-    await player.start("first", "First.");
-    const second = player.start("second", "Second.");
+    await player.start("first", { text: "First.", voice: "af_heart" });
+    const second = player.start("second", { text: "Second.", voice: "af_heart" });
     expect(audio.paused).toBe(true);
     expect(disposed()).toBe(1);
     await second;
@@ -162,7 +162,7 @@ describe("ReadAloudController", () => {
 
   it("can replay after reaching the end", async () => {
     const { player, audio } = setup();
-    await player.start("response", "Hello.");
+    await player.start("response", { text: "Hello.", voice: "af_heart" });
     audio.currentTime = 60;
     audio.ended = true;
     audio.paused = true;
@@ -182,12 +182,12 @@ describe("ReadAloudController", () => {
       }
       return new Blob();
     });
-    await player.start("response", "Hello.");
+    await player.start("response", { text: "Hello.", voice: "af_heart" });
     expect(player.getSnapshot("response")).toMatchObject({
       status: "error",
       error: "Model download failed.",
     });
-    await player.start("response", "Hello.");
+    await player.start("response", { text: "Hello.", voice: "af_heart" });
     expect(player.getSnapshot("response")?.status).toBe("playing");
   });
 
@@ -197,7 +197,7 @@ describe("ReadAloudController", () => {
     audio.play = async () => {
       throw new DOMException("Gesture required", "NotAllowedError");
     };
-    await player.start("response", "Hello.");
+    await player.start("response", { text: "Hello.", voice: "af_heart" });
     expect(player.getSnapshot("response")).toMatchObject({
       status: "paused",
       error: "Speech is ready. Press Play to listen.",

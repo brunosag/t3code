@@ -1,3 +1,10 @@
+import type { ReadAloudVoice } from "@t3tools/contracts";
+
+export interface SpeechRequest {
+  readonly text: string;
+  readonly voice: ReadAloudVoice;
+}
+
 export interface SpeechGenerationProgress {
   readonly label: string;
   readonly percent: number | null;
@@ -21,7 +28,7 @@ type PlaybackAudio = EventTarget &
 
 export interface ReadAloudBackend {
   readonly generate: (
-    text: string,
+    request: SpeechRequest,
     signal: AbortSignal,
     onProgress: (progress: SpeechGenerationProgress) => void,
   ) => Promise<Blob>;
@@ -75,7 +82,7 @@ export class ReadAloudController {
     this.playback = null;
   }
 
-  async start(messageKey: string, text: string): Promise<void> {
+  async start(messageKey: string, request: SpeechRequest): Promise<void> {
     this.release();
     const generation = new AbortController();
     this.generation = generation;
@@ -89,8 +96,8 @@ export class ReadAloudController {
       error: null,
     });
     try {
-      if (!text.trim()) throw new Error("This response has no text suitable for speech.");
-      const blob = await this.backend.generate(text, generation.signal, (progress) => {
+      if (!request.text.trim()) throw new Error("This response has no text suitable for speech.");
+      const blob = await this.backend.generate(request, generation.signal, (progress) => {
         if (!generation.signal.aborted) this.update({ progress });
       });
       // Aborted backends can still finish. Never let their result replace newer playback.

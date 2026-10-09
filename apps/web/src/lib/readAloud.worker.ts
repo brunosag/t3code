@@ -2,7 +2,7 @@ import { env, KokoroTTS, TextSplitterStream } from "kokoro-js";
 import { env as transformersEnv, RawAudio } from "@huggingface/transformers";
 import wasmUrl from "@read-aloud-runtime/ort-wasm-simd-threaded.jsep.wasm?url";
 import mjsUrl from "@read-aloud-runtime/ort-wasm-simd-threaded.jsep.mjs?url";
-import type { SpeechGenerationProgress } from "./readAloudController";
+import type { SpeechGenerationProgress, SpeechRequest } from "./readAloudController";
 
 export type SpeechWorkerResponse =
   | { readonly type: "progress"; readonly progress: SpeechGenerationProgress }
@@ -21,7 +21,8 @@ env.wasmPaths = {
   mjs: new URL(mjsUrl, self.location.href).href,
 };
 
-self.addEventListener("message", async (event: MessageEvent<{ text: string }>) => {
+self.addEventListener("message", async (event: MessageEvent<SpeechRequest>) => {
+  const { text, voice } = event.data;
   try {
     const tts = await KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0-ONNX", {
       dtype: "q8",
@@ -40,7 +41,7 @@ self.addEventListener("message", async (event: MessageEvent<{ text: string }>) =
     });
     // Keep generation increments short; token length is checked after numeric expansion below.
     const chunks: string[] = [];
-    for (const sentence of event.data.text.split(/(?<=[.!?])\s+|\n+/)) {
+    for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
       let remaining = sentence.trim();
       while (remaining.length > 180) {
         const space = remaining.lastIndexOf(" ", 180);
@@ -63,7 +64,7 @@ self.addEventListener("message", async (event: MessageEvent<{ text: string }>) =
       const sentences = new TextSplitterStream();
       sentences.push(chunk);
       sentences.close();
-      for await (const result of tts.stream(sentences, { voice: "af_heart" })) {
+      for await (const result of tts.stream(sentences, { voice })) {
         const append = (audio: Float32Array) => {
           samples.push(audio);
           sampleCount += audio.length;
@@ -78,7 +79,7 @@ self.addEventListener("message", async (event: MessageEvent<{ text: string }>) =
         async function appendPhonemes(phonemes: string): Promise<void> {
           const inputIds = tts.tokenizer(phonemes, { truncation: false }).input_ids;
           if (inputIds.dims.at(-1)! <= 510) {
-            append((await tts.generate_from_ids(inputIds, { voice: "af_heart" })).audio);
+            append((await tts.generate_from_ids(inputIds, { voice })).audio);
             return;
           }
           const middle = Math.floor(phonemes.length / 2);

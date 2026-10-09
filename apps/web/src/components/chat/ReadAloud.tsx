@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { PauseIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react";
 import { speechTextFromMarkdown } from "@t3tools/client-runtime/read-aloud";
 
+import { getClientSettings } from "~/hooks/useSettings";
 import { readAloud } from "~/lib/readAloud";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -51,7 +52,12 @@ export function ReadAloudButton({
             disabled={streaming || !text.trim()}
             onClick={() => {
               if (active) readAloud.stopMessage(key);
-              else void readAloud.start(key, speechTextFromMarkdown(text));
+              else {
+                void readAloud.start(key, {
+                  text: speechTextFromMarkdown(text),
+                  voice: getClientSettings().readAloudVoice,
+                });
+              }
             }}
           />
         }
@@ -148,7 +154,7 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
                 ? ` ${state.progress.percent}%`
                 : ""}
             </p>
-            <p>First use downloads an English voice. Speech stays on this device.</p>
+            <p>First use downloads the selected voice. Speech stays on this device.</p>
           </div>
         ) : null}
         {playable ? (

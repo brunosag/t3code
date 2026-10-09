@@ -36,8 +36,11 @@ The player stays available while you scroll, with pause, resume, stop, a seek ba
 and playback speed from 0.5× to 2×. Starting another response stops the current one.
 Switching threads stops playback.
 
-The first use downloads an English voice; speech is generated on your device and
-response text is not sent to a speech service. The download is cached when your
+Choose the voice in **Settings → General → Read aloud voice**, where **Preview**
+plays a short sample. Voices cover American and British English, and their quality varies.
+
+The first use downloads the speech model and the chosen voice; speech is generated on
+your device and response text is not sent to a speech service. The download is cached when your
 browser supports it. Long responses take longer to prepare before playback starts.
 Read aloud skips code, tool activity, tables, images, equations, and citation metadata.
 

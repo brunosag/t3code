@@ -1,7 +1,7 @@
 import { ReadAloudController, type ReadAloudBackend } from "./readAloudController";
 import type { SpeechWorkerResponse } from "./readAloud.worker";
 
-const generate: ReadAloudBackend["generate"] = (text, signal, onProgress) =>
+const generate: ReadAloudBackend["generate"] = (request, signal, onProgress) =>
   new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(new DOMException("Stopped", "AbortError"));
@@ -42,7 +42,7 @@ const generate: ReadAloudBackend["generate"] = (text, signal, onProgress) =>
         new Error("Unable to load the local speech engine. Check your connection and try again."),
       );
     });
-    worker.postMessage({ text }, {});
+    worker.postMessage(request, {});
   });
 
 export const readAloud = new ReadAloudController({

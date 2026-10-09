@@ -2,6 +2,7 @@ import { SettingsGroup } from "./SettingsGroup";
 import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
 import { Spinner } from "~/components/ui/spinner";
 import { NotificationSettings } from "./NotificationSettings";
+import { ReadAloudVoiceSettings } from "./ReadAloudVoiceSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { ArchiveIcon, ArchiveX, CheckIcon, ChevronRightIcon, SettingsIcon } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
@@ -614,6 +615,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
         ? ["Follow-up behavior"]
         : []),
+      ...(settings.readAloudVoice !== DEFAULT_UNIFIED_SETTINGS.readAloudVoice
+        ? ["Read aloud voice"]
+        : []),
       ...(settings.contextWindowMeterEnabled !== DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled
         ? ["Context window indicator"]
         : []),
@@ -677,6 +681,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.composerCollapseOnScroll,
       settings.composerRichTextEnabled,
       settings.sendShortcut,
+      settings.readAloudVoice,
       settings.followUpBehavior,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
@@ -799,6 +804,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       composerCollapseOnScroll: DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll,
       composerRichTextEnabled: DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled,
       sendShortcut: DEFAULT_UNIFIED_SETTINGS.sendShortcut,
+      readAloudVoice: DEFAULT_UNIFIED_SETTINGS.readAloudVoice,
       followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
       contextWindowMeterEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
@@ -2890,6 +2896,8 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        <ReadAloudVoiceSettings />
 
         <SettingsRow
           serverScoped

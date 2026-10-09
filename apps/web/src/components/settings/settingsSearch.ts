@@ -416,6 +416,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["enter return command ctrl multiline prompt new line composer"],
   },
   {
+    id: "read-aloud-voice",
+    title: "Read aloud voice",
+    to: "/settings/general",
+    searchTerms: ["speech text to speech tts voice listen narrate kokoro preview accent"],
+  },
+  {
     id: "follow-up-behavior",
     title: "Follow-up behavior",
     to: "/settings/general",
