@@ -32,15 +32,17 @@ import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import { layerTestProviderHost } from "@t3tools/provider-testing/host";
-import * as ProviderContinuationRequests from "@t3tools/provider-core/server/continuationRequests";
-import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
+import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
+import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { handoffBudget } from "@t3tools/provider-core/server/handoffBudget";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import { AgentScope } from "@t3tools/shared/AgentScope";
 import {
   makePiAdapterV2,
   PiAdapterV2Driver,
@@ -52,7 +54,8 @@ import { makePiRpcConnection, type PiRpcRecord } from "./rpc.ts";
 const layerTest = Layer.mergeAll(
   NodeServices.layer,
   IdAllocator.layer,
-  layerTestProviderHost().pipe(Layer.provide(NodeServices.layer)),
+  McpProviderSessions.layer,
+  TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
 );
 
 const decodeJsonLine = Schema.decodeSync(Schema.fromJsonString(Schema.Unknown));
@@ -375,7 +378,7 @@ const makeAdapter = Effect.fnUntraced(function* (
       config: { enabled: true, binaryPath: "pi", launchArgs, customModels: [] },
     }).pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Effect.provideService(HostProcessEnvironment, {}),
+      Effect.provideService(HostProcess.Environment, {}),
       Effect.provideService(ProviderContinuationRequests.ProviderContinuationRequests, {
         ...continuationRequests,
         take: Effect.never,
@@ -1329,7 +1332,7 @@ describe("PiAdapterV2", () => {
 
   it.effect("injects the T3 MCP extension and bearer when a session exists", () =>
     Effect.gen(function* () {
-      McpProviderSession.setMcpProviderSession({
+      yield* (yield* McpProviderSessions.McpProviderSessions).set({
         environmentId: EnvironmentId.make("environment-pi-mcp"),
         threadId: THREAD_ID,
         providerSessionId: "mcp-session-pi",
@@ -1350,11 +1353,7 @@ describe("PiAdapterV2", () => {
       assert.equal(spawn.env.T3_MCP_URL, "http://127.0.0.1:43123/mcp");
       assert.equal(spawn.env.T3_MCP_BEARER_TOKEN, "secret-pi-token");
       assert.equal(spawn.env.T3_PI_RUNTIME_MODE, "full-access");
-    }).pipe(
-      Effect.ensuring(Effect.sync(() => McpProviderSession.clearMcpProviderSession(THREAD_ID))),
-      Effect.scoped,
-      Effect.provide(layerTest),
-    ),
+    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
   it.effect("rejects a resume while a turn is active", () =>
@@ -3797,10 +3796,11 @@ describe("PiRpc early process exit", () => {
     }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 
-  it.effect("refreshes the roster for new sessions and keeps all-disabled rosters exclusive", () =>
+  it.effect("preserves roster extensions through scoped launches and refreshes each session", () =>
     Effect.gen(function* () {
       const fake = yield* makeFakePi;
       const fs = yield* FileSystem.FileSystem;
+      const scopedLaunches: Array<{ args: ReadonlyArray<string>; env: NodeJS.ProcessEnv }> = [];
       let definitions: ReadonlyArray<AgentDefinition> = [
         { name: "scout", systemPrompt: "Inspect", enabled: false },
       ];
@@ -3810,6 +3810,16 @@ describe("PiRpc early process exit", () => {
         undefined,
         undefined,
         Effect.sync(() => definitions),
+      ).pipe(
+        Effect.provideService(AgentScope, {
+          wrap: (input) =>
+            Effect.sync(() => {
+              scopedLaunches.push({ args: input.args, env: input.env ?? {} });
+              return { command: input.command, args: ["--scoped-launch", ...input.args] };
+            }),
+          oomKilled: () => Effect.succeed(false),
+          clear: () => Effect.void,
+        }),
       );
       const open = (providerSessionId: ProviderSessionId) =>
         adapter.openSession({
@@ -3822,6 +3832,10 @@ describe("PiRpc early process exit", () => {
       yield* open(SESSION_ID);
       const disabledPath = definitionsPath();
       assert.isDefined(disabledPath);
+      assert.equal(scopedLaunches[0]?.env["T3_PI_AGENTS_PATH"], disabledPath);
+      assert.equal(fake.lastSpawn().args[0], "--scoped-launch");
+      assert.isTrue(scopedLaunches[0]!.args.some((arg) => arg.includes("/t3-user-input-")));
+      assert.isTrue(scopedLaunches[0]!.args.some((arg) => arg.includes("/t3-agents-")));
       assert.deepEqual(decodeJsonLine(yield* fs.readFileString(disabledPath!)), []);
       definitions = [{ name: "scout", systemPrompt: "Inspect", enabled: true }];
       yield* open(ProviderSessionId.make("next-roster-session"));

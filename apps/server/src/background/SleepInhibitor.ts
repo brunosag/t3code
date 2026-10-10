@@ -9,7 +9,7 @@
  * @module SleepInhibitor
  */
 import type { OrchestrationV2DomainEvent, ThreadId } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -97,7 +97,7 @@ const holdSystemdInhibitLock = Effect.gen(function* () {
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
-    if ((yield* HostProcessPlatform) !== "linux") {
+    if ((yield* HostProcess.Platform) !== "linux") {
       return;
     }
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
