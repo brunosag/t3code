@@ -19,21 +19,51 @@ interface SpeechNode {
 
 const parser = unified().use(remarkParse).use(remarkGfm).use(remarkMath).use(remarkCodexDirectives);
 
+/**
+ * Turns an inline code span or file name into words: paths become their last segment,
+ * line suffixes and URLs are dropped, identifiers split at case changes, and dots
+ * before a name are read as "dot". `src/lib/readAloud.ts:12` reads "read Aloud dot ts".
+ */
+function speakableCode(code: string): string {
+  return code
+    .split(/\s+/)
+    .map((token) =>
+      /^[a-z][a-z\d+.-]*:\/\//i.test(token)
+        ? ""
+        : token
+            .replace(/(?<=[./][^/]*)(?::\d+(?:[-:]\d+)*|#L\d+(?:-L?\d+)?)$/, "")
+            .replace(/\/+$/, "")
+            .replace(/^.*\//, ""),
+    )
+    .join(" ")
+    .replace(/(\p{Ll})(\p{Lu})/gu, "$1 $2")
+    .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, "$1 $2")
+    .replace(/\.(?=[\p{L}\p{N}])/gu, " dot ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ");
+}
+
 function inlineText(node: SpeechNode): string {
   if (node.data?.codexFileCitationMarkdown) return " ";
-  if (node.type === "link" && (node.children ?? []).every((child) => child.value === node.url)) {
+  const children = node.children ?? [];
+  if (node.type === "link" && children.every((child) => child.value === node.url)) {
     return " ";
   }
   switch (node.type) {
     case "text":
       return node.value ?? "";
+    case "inlineCode":
+      return ` ${speakableCode(node.value ?? "")} `;
     case "break":
       return " ";
+    case "link":
+    case "linkReference": {
+      const label = children.map(inlineText).join("");
+      // A one-word label such as `readAloud.ts:12` is usually a file name.
+      return /^\S+$/.test(label.trim()) ? ` ${speakableCode(label.trim())} ` : label;
+    }
     case "emphasis":
     case "strong":
-    case "link":
-    case "linkReference":
-      return (node.children ?? []).map(inlineText).join("");
+      return children.map(inlineText).join("");
     default:
       return " ";
   }

@@ -60,6 +60,16 @@ MEMORY.md:1-4|note=[private metadata]
 
 Finished.
 `),
-    ).toBe("Read this, and.\n\nThe formula is.\n\nSee and the docs.\n\nFinished.");
+    ).toBe("Read this, npm install, and.\n\nThe formula is.\n\nSee and the docs.\n\nFinished.");
+  });
+
+  it("reads inline code and file names as words", () => {
+    expect(
+      speechTextFromMarkdown(
+        "Edit `apps/web/src/readAloud.ts:12` and [SpeechSynthesis.ts:40](/repo/SpeechSynthesis.ts#L40), then set `.env` from `HTTPServer` at `https://example.com/x`.",
+      ),
+    ).toBe(
+      "Edit read Aloud dot ts and Speech Synthesis dot ts, then set dot env from HTTP Server at.",
+    );
   });
 });
