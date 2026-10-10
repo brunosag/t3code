@@ -1,5 +1,4 @@
 import * as NodeZlib from "node:zlib";
-import * as NodeURL from "node:url";
 
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
@@ -197,8 +196,6 @@ export default defineConfig(({ command }) => {
       tailwindPlugins(bundledDev),
     ],
     optimizeDeps: {
-      // These imports must remain asset URLs, rather than optimized module exports.
-      exclude: ["@read-aloud-runtime"],
       include: [
         "@clerk/clerk-js",
         "@clerk/react/internal",
@@ -234,16 +231,9 @@ export default defineConfig(({ command }) => {
       "import.meta.env.APP_VERSION": JSON.stringify(configuredAppVersion),
     },
     resolve: {
-      // Keep the speech runtime's executable assets on the client origin, including Electron's CSP.
-      alias: {
-        "@read-aloud-runtime": NodeURL.fileURLToPath(
-          new URL("./node_modules/@huggingface/transformers/dist", import.meta.url),
-        ),
-      },
       tsconfigPaths: true,
       dedupe: ["react", "react-dom"],
     },
-    worker: { format: "es" },
     experimental: {
       bundledDev,
     },

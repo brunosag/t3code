@@ -38,6 +38,11 @@ export const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   "@clerk/electron-passkeys",
   "node-gyp-build",
   "node-addon-api",
+  // The speech engine process requires these from disk by resolved path; ONNX
+  // Runtime dlopens its addon, and onnxruntime-common is its runtime dependency.
+  "onnxruntime-node",
+  "onnxruntime-common",
+  "phonemizer",
   // ws's optional accelerators. Nothing in this repo declares them, so they are
   // not in the staged production install and the packaged app does not ship
   // them either way -- ws wraps the require in try/catch and falls back to its

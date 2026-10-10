@@ -148,6 +148,7 @@ import {
   ReviewDiffPreviewResult,
 } from "./review.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
+import { SpeechSynthesisError, SpeechSynthesisEvent, SpeechSynthesisInput } from "./speech.ts";
 import {
   OrchestrationSearchThreadsError,
   OrchestrationSearchThreadsInput,
@@ -518,6 +519,9 @@ export const WS_METHODS = {
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
+
+  // Speech methods
+  speechSynthesize: "speech.synthesize",
 
   // Pull request methods
   pullRequestsList: "pullRequests.list",
@@ -915,6 +919,13 @@ const WsCloudInstallRelayClientRpc = Rpc.make(WS_METHODS.cloudInstallRelayClient
   payload: Schema.Struct({}),
   success: RelayClientInstallProgressEventSchema,
   error: Schema.Union([RelayClientInstallFailedError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsSpeechSynthesizeRpc = Rpc.make(WS_METHODS.speechSynthesize, {
+  payload: SpeechSynthesisInput,
+  success: SpeechSynthesisEvent,
+  error: Schema.Union([SpeechSynthesisError, EnvironmentAuthorizationError]),
   stream: true,
 });
 
@@ -1900,6 +1911,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetBackgroundPolicyRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
+  WsSpeechSynthesizeRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsSummaryRpc,

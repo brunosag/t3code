@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { PauseIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react";
+import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { speechTextFromMarkdown } from "@t3tools/client-runtime/read-aloud";
 
 import { getClientSettings } from "~/hooks/useSettings";
@@ -32,6 +33,7 @@ export function ReadAloudButton({
   streaming: boolean;
 }) {
   const key = messageKey(threadKey, messageId);
+  const environmentId = parseScopedThreadKey(threadKey)?.environmentId;
   const state = useSyncExternalStore(
     readAloud.subscribe,
     () => readAloud.getSnapshot(key),
@@ -49,11 +51,12 @@ export function ReadAloudButton({
             variant="ghost-muted"
             aria-label={label}
             aria-pressed={active}
-            disabled={streaming || !text.trim()}
+            disabled={streaming || !text.trim() || environmentId === undefined}
             onClick={() => {
               if (active) readAloud.stopMessage(key);
-              else {
+              else if (environmentId !== undefined) {
                 void readAloud.start(key, {
+                  environmentId,
                   text: speechTextFromMarkdown(text),
                   voice: getClientSettings().readAloudVoice,
                 });
@@ -89,7 +92,9 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
 
   if (!state) return null;
   const preparing = state.status === "preparing";
-  const playing = state.status === "playing";
+  const buffering = state.status === "buffering";
+  // Buffering still means the user asked to listen, so it offers Pause.
+  const playing = state.status === "playing" || buffering;
   const playable = !preparing && state.status !== "error";
   return (
     <section
@@ -146,7 +151,7 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
             </span>
           ) : null}
         </div>
-        {preparing ? (
+        {preparing || buffering ? (
           <div className="flex flex-col gap-1 text-xs text-muted-foreground">
             <p role="status">
               {state.progress?.label}
@@ -154,7 +159,7 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
                 ? ` ${state.progress.percent}%`
                 : ""}
             </p>
-            <p>First use downloads the selected voice. Speech stays on this device.</p>
+            {preparing ? <p>The first read on an environment downloads its speech model.</p> : null}
           </div>
         ) : null}
         {playable ? (

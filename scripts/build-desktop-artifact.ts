@@ -991,17 +991,44 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/gnome-extension",
   "!apps/desktop/gnome-extension/**/*",
 ] as const;
+// onnxruntime-node (the speech engine) publishes every platform's binaries in one
+// package, 31-43 MB each. A package only needs its own platform and architecture.
+const ONNX_RUNTIME_BINARIES = "**/node_modules/onnxruntime-node/bin/napi-v3";
+const ONNX_RUNTIME_PLATFORM = { mac: "darwin", linux: "linux", win: "win32" } as const;
+function unusedOnnxRuntimeBinaries(
+  platform: keyof typeof ONNX_RUNTIME_PLATFORM,
+  arch?: typeof BuildArch.Type,
+): string[] {
+  const own = ONNX_RUNTIME_PLATFORM[platform];
+  const unused = Object.values(ONNX_RUNTIME_PLATFORM)
+    .filter((other) => other !== own)
+    .map((other) => `${ONNX_RUNTIME_BINARIES}/${other}`);
+  if (arch === "x64" || arch === "arm64") {
+    unused.push(`${ONNX_RUNTIME_BINARIES}/${own}/${arch === "arm64" ? "x64" : "arm64"}`);
+  }
+  return unused;
+}
+
 // Windows terminal helpers cannot run on macOS and slow signing and notarization.
 export const MAC_FILE_EXCLUSIONS = [
   "!**/node_modules/node-pty/prebuilds/win32-*/**/*",
   "!**/node_modules/node-pty/third_party/conpty/**/*",
+  ...unusedOnnxRuntimeBinaries("mac").map((directory) => `!${directory}/**/*`),
 ] as const;
 // Linux builds node-pty from source, so every prebuild in the package is for
 // another platform (58 MB of it Windows debug symbols).
 export const LINUX_FILE_EXCLUSIONS = [
-  ...MAC_FILE_EXCLUSIONS,
+  "!**/node_modules/node-pty/prebuilds/win32-*/**/*",
+  "!**/node_modules/node-pty/third_party/conpty/**/*",
   "!**/node_modules/node-pty/prebuilds/darwin-*/**/*",
+  ...unusedOnnxRuntimeBinaries("linux").map((directory) => `!${directory}/**/*`),
 ] as const;
+
+export function resolveLinuxFileExclusions(arch?: typeof BuildArch.Type) {
+  if (arch !== "x64" && arch !== "arm64") return [...LINUX_FILE_EXCLUSIONS];
+  const unusedArch = arch === "arm64" ? "x64" : "arm64";
+  return [...LINUX_FILE_EXCLUSIONS, `!${ONNX_RUNTIME_BINARIES}/linux/${unusedArch}/**/*`];
+}
 
 // node-pty publishes both Darwin prebuilds in one package. Single-architecture
 // apps only need the native target; universal apps need both. An omitted arch
@@ -1013,7 +1040,11 @@ export function resolveMacFileExclusions(arch?: typeof BuildArch.Type) {
   }
 
   const unusedArch = arch === "arm64" ? "x64" : "arm64";
-  return [...MAC_FILE_EXCLUSIONS, `!**/node_modules/node-pty/prebuilds/darwin-${unusedArch}/**/*`];
+  return [
+    ...MAC_FILE_EXCLUSIONS,
+    `!**/node_modules/node-pty/prebuilds/darwin-${unusedArch}/**/*`,
+    `!${ONNX_RUNTIME_BINARIES}/darwin/${unusedArch}/**/*`,
+  ];
 }
 // Windows ships the server tree (bundle + node_modules) as a separate
 // resources/server.asar sidecar instead of loose files: the NSIS installer
@@ -1061,6 +1092,11 @@ export function resolveWindowsServerAsarIgnoreGlobs(arch: typeof BuildArch.Type)
     `${unusedPrebuild}/**`,
     unusedConpty,
     `${unusedConpty}/**`,
+    // Unpacked native files count toward WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT.
+    ...unusedOnnxRuntimeBinaries("win", arch).flatMap((directory) => [
+      directory,
+      `${directory}/**`,
+    ]),
   ];
 }
 
@@ -2776,7 +2812,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       ...(platform === "mac"
         ? resolveMacFileExclusions(arch)
         : platform === "linux"
-          ? LINUX_FILE_EXCLUSIONS
+          ? resolveLinuxFileExclusions(arch)
           : []),
     ],
     directories: {

@@ -83,7 +83,15 @@ describe("selectCliRuntimeExternalDependencies", () => {
   it("selects every external root declared by the server", () => {
     assert.deepStrictEqual(
       Object.keys(selectCliRuntimeExternalDependencies(serverPackageJson.dependencies)).sort(),
-      ["@cursor/sdk", "@ff-labs/fff-node", "@napi-rs/keyring", "node-pty", "playwright-core"],
+      [
+        "@cursor/sdk",
+        "@ff-labs/fff-node",
+        "@napi-rs/keyring",
+        "node-pty",
+        "onnxruntime-node",
+        "phonemizer",
+        "playwright-core",
+      ],
     );
   });
 });
@@ -149,6 +157,12 @@ it.layer(NodeServices.layer)("external package dependency closure", (it) => {
   // loaded by Node, so their closure genuinely does not need to be external.
   const isRuntimeExternal = isRuntimeExternalCliDependency;
 
+  // Dependencies only an install script loads. pnpm never runs onnxruntime-node's
+  // (allowBuilds), and its runtime requires nothing but onnxruntime-common.
+  const INSTALL_SCRIPT_DEPENDENCIES: Readonly<Record<string, ReadonlyArray<string>>> = {
+    "onnxruntime-node": ["global-agent", "tar"],
+  };
+
   // A cold walk of the pnpm store can exceed the root timeout when the Windows
   // lane runs four filesystem-heavy workspace suites at once.
   it.effect(
@@ -196,6 +210,7 @@ it.layer(NodeServices.layer)("external package dependency closure", (it) => {
           ...(manifest.peerDependencies ?? {}),
         };
         for (const dependency of Object.keys(declared)) {
+          if (INSTALL_SCRIPT_DEPENDENCIES[name]?.includes(dependency)) continue;
           if (!isRuntimeExternal(dependency)) {
             violations.push(`${name} -> ${dependency}`);
           }

@@ -57,6 +57,7 @@ import {
   resolveDesktopUpdateChannel,
   resolveDesktopWebAssetBrand,
   resolveResourceMonitorRustTargets,
+  resolveLinuxFileExclusions,
   resolveWindowsServerAsarIgnoreGlobs,
   resourceMonitorExecutableName,
   resolveGitHubPublishConfig,
@@ -734,14 +735,23 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
-  it("excludes foreign node-pty prebuilds from macOS and Linux packages", () => {
+  it("excludes foreign native binaries from macOS and Linux packages", () => {
     assert.deepStrictEqual(MAC_FILE_EXCLUSIONS, [
       "!**/node_modules/node-pty/prebuilds/win32-*/**/*",
       "!**/node_modules/node-pty/third_party/conpty/**/*",
+      "!**/node_modules/onnxruntime-node/bin/napi-v3/linux/**/*",
+      "!**/node_modules/onnxruntime-node/bin/napi-v3/win32/**/*",
     ]);
     assert.deepStrictEqual(LINUX_FILE_EXCLUSIONS, [
-      ...MAC_FILE_EXCLUSIONS,
+      "!**/node_modules/node-pty/prebuilds/win32-*/**/*",
+      "!**/node_modules/node-pty/third_party/conpty/**/*",
       "!**/node_modules/node-pty/prebuilds/darwin-*/**/*",
+      "!**/node_modules/onnxruntime-node/bin/napi-v3/darwin/**/*",
+      "!**/node_modules/onnxruntime-node/bin/napi-v3/win32/**/*",
+    ]);
+    assert.deepStrictEqual(resolveLinuxFileExclusions("arm64"), [
+      ...LINUX_FILE_EXCLUSIONS,
+      "!**/node_modules/onnxruntime-node/bin/napi-v3/linux/x64/**/*",
     ]);
   });
 
@@ -872,13 +882,19 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
-  it("excludes node-pty binaries for the other Windows architecture", () => {
+  it("excludes native binaries for other Windows architectures and platforms", () => {
     assert.deepStrictEqual(resolveWindowsServerAsarIgnoreGlobs("x64"), [
       ...WINDOWS_SERVER_ASAR_IGNORE_GLOBS,
       "**/node_modules/node-pty/prebuilds/win32-arm64",
       "**/node_modules/node-pty/prebuilds/win32-arm64/**",
       "**/node_modules/node-pty/third_party/conpty/*/win10-arm64",
       "**/node_modules/node-pty/third_party/conpty/*/win10-arm64/**",
+      "**/node_modules/onnxruntime-node/bin/napi-v3/darwin",
+      "**/node_modules/onnxruntime-node/bin/napi-v3/darwin/**",
+      "**/node_modules/onnxruntime-node/bin/napi-v3/linux",
+      "**/node_modules/onnxruntime-node/bin/napi-v3/linux/**",
+      "**/node_modules/onnxruntime-node/bin/napi-v3/win32/arm64",
+      "**/node_modules/onnxruntime-node/bin/napi-v3/win32/arm64/**",
     ]);
     assert.deepStrictEqual(resolveWindowsServerAsarIgnoreGlobs("arm64"), [
       ...WINDOWS_SERVER_ASAR_IGNORE_GLOBS,
@@ -886,6 +902,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "**/node_modules/node-pty/prebuilds/win32-x64/**",
       "**/node_modules/node-pty/third_party/conpty/*/win10-x64",
       "**/node_modules/node-pty/third_party/conpty/*/win10-x64/**",
+      "**/node_modules/onnxruntime-node/bin/napi-v3/darwin",
+      "**/node_modules/onnxruntime-node/bin/napi-v3/darwin/**",
+      "**/node_modules/onnxruntime-node/bin/napi-v3/linux",
+      "**/node_modules/onnxruntime-node/bin/napi-v3/linux/**",
+      "**/node_modules/onnxruntime-node/bin/napi-v3/win32/x64",
+      "**/node_modules/onnxruntime-node/bin/napi-v3/win32/x64/**",
     ]);
   });
 

@@ -77,6 +77,7 @@ import {
   ProviderSetupError,
   RelayClientInstallFailedError,
   type RelayClientInstallProgressEvent,
+  SpeechSynthesisError,
   type ServerSelfUpdateError,
   type ServerSelfUpdateProgressEvent,
   type ServerConfig as ClientServerConfig,
@@ -223,6 +224,7 @@ import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
+import * as SpeechSynthesis from "./speech/SpeechSynthesis.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
 import { pullRequestSyncKey } from "./pullRequest/pullRequestSyncKey.ts";
@@ -1323,6 +1325,7 @@ const layerWsRpc = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const relayClient = yield* RelayClient.RelayClient;
+      const speechSynthesis = yield* SpeechSynthesis.SpeechSynthesis;
       // A webhook URL starts agent runs, so only sessions that may operate
       // see it; read-only sessions still see the task itself.
       const withVisibleWebhookUrls = (result: ScheduledTaskListResult): ScheduledTaskListResult =>
@@ -2435,6 +2438,26 @@ const layerWsRpc = (
           backgroundPolicy.reportHostPowerState(input),
         [WS_METHODS.serverGetBackgroundPolicy]: (_input) => backgroundPolicy.snapshot,
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
+        [WS_METHODS.speechSynthesize]: (input) =>
+          speechSynthesis.synthesize(input).pipe(
+            Stream.catchTags({
+              SpeechModelDownloadError: () =>
+                Stream.fail(
+                  new SpeechSynthesisError({
+                    reason: "model-download",
+                    message:
+                      "Couldn't download the speech model. Check this host's internet connection and try again.",
+                  }),
+                ),
+              SpeechEngineError: () =>
+                Stream.fail(
+                  new SpeechSynthesisError({
+                    reason: "engine",
+                    message: "The speech engine on this host stopped unexpectedly. Try again.",
+                  }),
+                ),
+            }),
+          ),
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>
           Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>((queue) =>
             relayClient
