@@ -1325,6 +1325,7 @@ function deriveTimelineTurnFolds(
 
 export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
+  runs?: Parameters<typeof deriveRevertTurnCountByUserMessageId>[0]["runs"];
   latestRun?: TimelineLatestRun | null;
   runningRunId?: RunId | null;
   expandedRunIds?: ReadonlySet<RunId>;
@@ -1355,6 +1356,7 @@ export function deriveMessagesTimelineRows(input: {
     ? deriveRevertTurnCountByUserMessageId({
         timelineEntries: timelineEntries,
         checkpoints: input.turnDiffSummaries,
+        runs: input.runs ?? [],
       })
     : new Map<MessageId, number>();
   const nextRows: MessagesTimelineRow[] = [];
@@ -2053,6 +2055,20 @@ function sameCheckpointSummaries(
   return true;
 }
 
+function sameRevertRuns(
+  previous: MessagesTimelineRowsInput["runs"],
+  next: MessagesTimelineRowsInput["runs"],
+): boolean {
+  if (previous === next) return true;
+  if (previous === undefined || next === undefined || previous.length !== next.length) return false;
+  return previous.every(
+    (run, index) =>
+      run.id === next[index]?.id &&
+      run.ordinal === next[index]?.ordinal &&
+      run.status === next[index]?.status,
+  );
+}
+
 function replaceStreamingMessageRows(
   input: MessagesTimelineRowsInput,
   previous: MessagesTimelineRowsProjection,
@@ -2060,6 +2076,7 @@ function replaceStreamingMessageRows(
   const {
     timelineEntries: previousEntries,
     latestRun: previousRun,
+    runs: previousRevertRuns,
     turnDiffSummaries: previousCheckpoints,
     expandedRunIds: previousExpandedRuns,
     expandedAttemptIds: previousExpandedAttempts,
@@ -2069,6 +2086,7 @@ function replaceStreamingMessageRows(
   const {
     timelineEntries,
     latestRun,
+    runs,
     turnDiffSummaries,
     expandedRunIds,
     expandedAttemptIds,
@@ -2081,6 +2099,7 @@ function replaceStreamingMessageRows(
     timelineEntries.length !== previousEntries.length ||
     !shallow(previousContext, context) ||
     !shallow(previousRun, latestRun) ||
+    !sameRevertRuns(previousRevertRuns, runs) ||
     !shallow(previousExpandedRuns, expandedRunIds) ||
     !shallow(previousExpandedAttempts, expandedAttemptIds) ||
     !shallow(previousExpandedGroups, expandedWorkGroupIds) ||

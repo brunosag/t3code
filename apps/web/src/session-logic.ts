@@ -4,6 +4,7 @@ import {
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2PlanArtifact,
   type OrchestrationV2ProjectedTurnItem,
+  type OrchestrationV2Run,
   type OrchestrationV2RunAttempt,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
@@ -1045,12 +1046,27 @@ export function inferCheckpointTurnCountByRunId(
 export function deriveRevertTurnCountByUserMessageId(input: {
   readonly timelineEntries: ReadonlyArray<TimelineEntry>;
   readonly checkpoints: ReadonlyArray<ThreadCheckpointSummary>;
+  readonly runs: ReadonlyArray<Pick<OrchestrationV2Run, "id" | "ordinal" | "status">>;
 }): Map<ChatMessage["id"], number> {
   const readyCheckpointByRunId = new Map<RunId, ThreadCheckpointSummary>();
   for (const checkpoint of input.checkpoints) {
     if (checkpoint.status === "ready") {
       readyCheckpointByRunId.set(checkpoint.runId, checkpoint);
     }
+  }
+  // Ordinals are audit identities: rewinding discards runs without renumbering
+  // the next one. Use the surviving conversation, not ordinal minus one.
+  const survivingRuns = input.runs
+    .filter((run) => run.status !== "rolled_back")
+    .sort((a, b) => a.ordinal - b.ordinal);
+  const targetByRunId = new Map<RunId, number>();
+  for (const [index, run] of survivingRuns.entries()) {
+    const previous = survivingRuns[index - 1];
+    if (!readyCheckpointByRunId.has(run.id)) continue;
+    // A missing checkpoint on a surviving turn must block editing past it;
+    // otherwise rewinding would remove more conversation than requested.
+    if (previous !== undefined && !readyCheckpointByRunId.has(previous.id)) continue;
+    targetByRunId.set(run.id, previous?.ordinal ?? 0);
   }
   const byUserMessageId = new Map<ChatMessage["id"], number>();
   for (const entry of input.timelineEntries) {
@@ -1059,9 +1075,9 @@ export function deriveRevertTurnCountByUserMessageId(input: {
       continue;
     }
     if (entry.message.runId === null) continue;
-    const checkpoint = readyCheckpointByRunId.get(entry.message.runId);
-    if (checkpoint === undefined) continue;
-    byUserMessageId.set(entry.message.id, Math.max(0, checkpoint.checkpointTurnCount - 1));
+    const target = targetByRunId.get(entry.message.runId);
+    if (target === undefined) continue;
+    byUserMessageId.set(entry.message.id, target);
   }
   return byUserMessageId;
 }

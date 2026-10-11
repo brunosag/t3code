@@ -1246,7 +1246,11 @@ describe("deriveMessagesTimelineRows", () => {
       files: [{ path: "src/index.ts", kind: "modified", additions: 3, deletions: 1 }],
     };
 
-    const rows = deriveMessagesTimelineRows({
+    const projection = deriveMessagesTimelineRowsWithState({
+      runs: [
+        { id: RunId.make("previous-turn"), ordinal: 1, status: "completed" },
+        { id: RunId.make("turn-1"), ordinal: 2, status: "completed" },
+      ],
       timelineEntries: [
         {
           id: "user-entry",
@@ -1280,9 +1284,13 @@ describe("deriveMessagesTimelineRows", () => {
       ],
       isWorking: false,
       activeTurnStartedAt: null,
-      turnDiffSummaries: [assistantTurnDiffSummary],
+      turnDiffSummaries: [
+        { ...assistantTurnDiffSummary, runId: RunId.make("previous-turn"), checkpointTurnCount: 1 },
+        assistantTurnDiffSummary,
+      ],
       supportsConversationRollback: true,
     });
+    const rows = projection.rows;
 
     const userRow = rows.find(
       (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
@@ -1295,6 +1303,19 @@ describe("deriveMessagesTimelineRows", () => {
 
     expect(userRow?.revertTurnCount).toBe(1);
     expect(assistantRow?.assistantTurnDiffSummary).toBe(assistantTurnDiffSummary);
+
+    const rewound = deriveMessagesTimelineRowsWithState(
+      {
+        ...projection.input,
+        runs: (projection.input.runs ?? []).map((run) =>
+          run.ordinal === 1 ? { ...run, status: "rolled_back" } : run,
+        ),
+      },
+      projection,
+    );
+    expect(
+      rewound.rows.find((row) => row.kind === "message" && row.message.role === "user"),
+    ).toMatchObject({ revertTurnCount: 0 });
   });
 
   it("folds the first assistant message and settled work before the terminal response", () => {
@@ -4074,6 +4095,10 @@ describe("streaming v2 row projection", () => {
     const timeline = deriveTimelineEntriesFromVisibleTurnItemsWithState(timelineInput);
     const input = {
       timelineEntries: timeline.entries,
+      runs: [
+        { id: source.historyRunId, ordinal: 1, status: "completed" as const },
+        { id: source.runId, ordinal: 2, status: "running" as const },
+      ],
       latestRun: {
         runId: source.runId,
         status: "running" as const,
@@ -4135,6 +4160,7 @@ describe("streaming v2 row projection", () => {
       ...initial.input,
       timelineEntries: timeline.entries,
       latestRun: { ...initial.input.latestRun },
+      runs: initial.input.runs.map((run) => ({ ...run })),
       turnDiffSummaries: initial.input.turnDiffSummaries.map((summary) => ({ ...summary })),
     };
     const next = deriveMessagesTimelineRowsWithState(input, previous);

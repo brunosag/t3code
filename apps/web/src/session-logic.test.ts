@@ -2,6 +2,7 @@ import {
   MessageId,
   RuntimeRequestId,
   CheckpointId,
+  CheckpointRef,
   CheckpointScopeId,
   NodeId,
   PlanId,
@@ -18,6 +19,7 @@ import {
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import type { ThreadRuntimeSummary } from "@t3tools/client-runtime/state/shell";
+import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { deriveMessagesTimelineRows } from "./components/chat/MessagesTimeline.logic";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
@@ -42,6 +44,16 @@ import {
 } from "./session-logic";
 import { makeStreamingTimelineFixture, makeThreadProjectionFixture } from "./test-fixtures";
 import type { ChatMessage } from "./types";
+
+const makeCheckpointSummary = (ordinal: number, status: ThreadCheckpointSummary["status"]) => ({
+  runId: RunId.make(`run-${ordinal}`),
+  checkpointTurnCount: ordinal,
+  checkpointRef: CheckpointRef.make(`checkpoint-run-${ordinal}`),
+  status,
+  files: [],
+  assistantMessageId: null,
+  completedAt: "2026-06-20T00:00:03.000Z",
+});
 
 describe("V2 session presentation", () => {
   it("uses run status as the settlement boundary", () => {
@@ -284,6 +296,7 @@ describe("V2 session presentation", () => {
 
     const targets = deriveRevertTurnCountByUserMessageId({
       timelineEntries,
+      runs: [{ id: runId, ordinal: 1, status: "completed" }],
       checkpoints: [
         {
           runId,
@@ -300,6 +313,99 @@ describe("V2 session presentation", () => {
     expect([...targets]).toEqual([[turnStartMessageId, 0]]);
     expect(targets.has(steerMessageId)).toBe(false);
   });
+
+  it.each([null, "stale", "error", "missing", "ready"] as const)(
+    "rewinds across a discarded run whose checkpoint is %s",
+    (discardedCheckpointStatus) => {
+      const messages: ChatMessage[] = [4, 5, 6].map((ordinal) => ({
+        id: MessageId.make(`message-${ordinal}`),
+        role: "user",
+        text: "Continue where you left off.",
+        runId: RunId.make(`run-${ordinal}`),
+        inputIntent: "turn_start",
+        streaming: false,
+        createdAt: "2026-06-20T00:00:00.000Z",
+        updatedAt: "2026-06-20T00:00:00.000Z",
+      }));
+      const input: Parameters<typeof deriveRevertTurnCountByUserMessageId>[0] = {
+        runs: [6, 2, 4, 1, 5, 3].map((ordinal) => ({
+          id: RunId.make(`run-${ordinal}`),
+          ordinal,
+          status: ordinal === 4 ? "rolled_back" : ordinal >= 5 ? "interrupted" : "completed",
+        })),
+        timelineEntries: messages.map((message) => ({
+          id: message.id,
+          kind: "message",
+          createdAt: message.createdAt,
+          message,
+        })),
+        checkpoints: [
+          makeCheckpointSummary(6, "ready"),
+          makeCheckpointSummary(3, "ready"),
+          ...(discardedCheckpointStatus === null
+            ? []
+            : [makeCheckpointSummary(4, discardedCheckpointStatus)]),
+          makeCheckpointSummary(1, "ready"),
+          makeCheckpointSummary(5, "ready"),
+          makeCheckpointSummary(2, "ready"),
+        ],
+      };
+      const targets = deriveRevertTurnCountByUserMessageId(input);
+      expect([...targets]).toEqual([
+        [MessageId.make("message-5"), 3],
+        [MessageId.make("message-6"), 5],
+      ]);
+      expect([
+        ...deriveRevertTurnCountByUserMessageId({
+          ...input,
+          runs: input.runs.map((run) =>
+            run.ordinal < 5 ? { ...run, status: "rolled_back" } : run,
+          ),
+        }),
+      ]).toEqual([
+        [MessageId.make("message-5"), 0],
+        [MessageId.make("message-6"), 5],
+      ]);
+    },
+  );
+
+  it.each([null, "missing", "error", "stale"] as const)(
+    "does not skip a surviving turn whose checkpoint is %s",
+    (previousStatus) => {
+      const runId = RunId.make("run-3");
+      const messageId = MessageId.make("message-3");
+      const targets = deriveRevertTurnCountByUserMessageId({
+        runs: [1, 2, 3].map((ordinal) => ({
+          id: RunId.make(`run-${ordinal}`),
+          ordinal,
+          status: ordinal === 2 ? "failed" : "completed",
+        })),
+        timelineEntries: [
+          {
+            id: messageId,
+            kind: "message",
+            createdAt: "2026-06-20T00:00:00.000Z",
+            message: {
+              id: messageId,
+              role: "user",
+              text: "Continue",
+              runId,
+              inputIntent: "turn_start",
+              streaming: false,
+              createdAt: "2026-06-20T00:00:00.000Z",
+              updatedAt: "2026-06-20T00:00:00.000Z",
+            },
+          },
+        ],
+        checkpoints: [
+          makeCheckpointSummary(1, "ready"),
+          ...(previousStatus === null ? [] : [makeCheckpointSummary(2, previousStatus)]),
+          makeCheckpointSummary(3, "ready"),
+        ],
+      });
+      expect(targets.has(messageId)).toBe(false);
+    },
+  );
 
   it("uses visible turn item order and keeps provider errors in the work log", () => {
     const now = DateTime.makeUnsafe("2026-06-20T00:00:00.000Z");

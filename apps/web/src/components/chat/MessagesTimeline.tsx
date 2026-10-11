@@ -25,6 +25,7 @@ import {
   type AssistantCitation,
   type EnvironmentId,
   type MessageId,
+  type OrchestrationV2Run,
   type OrchestrationV2TurnItem,
   type RunAttemptId,
   type ScopedThreadRef,
@@ -511,7 +512,7 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   providerStatuses: ReadonlyArray<ServerProvider>;
-  runs: ReadonlyArray<HandoffTimelineRun>;
+  runs: ReadonlyArray<HandoffTimelineRun & Pick<OrchestrationV2Run, "status">>;
   anchorMessageId: MessageId | null;
   onAnchorReady: (messageId: MessageId, anchorIndex: number) => void;
   onAnchorSizeChanged: (messageId: MessageId, size: number) => void;
@@ -885,6 +886,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       {
         timelineEntries,
         latestRun,
+        runs: runsProp,
         runningRunId,
         expandedRunIds: visibleExpandedRunIds,
         expandedAttemptIds: visibleExpandedAttemptIds,
@@ -908,6 +910,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     workspaceRoot,
     timelineEntries,
     latestRun,
+    runsProp,
     runningRunId,
     visibleExpandedRunIds,
     visibleExpandedAttemptIds,
