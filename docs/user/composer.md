@@ -45,8 +45,8 @@ text is not sent to a speech service. The first read on each server downloads a
 330 MB speech model to its data folder. Playback starts once the first sentence is
 ready, and the rest is prepared while you listen.
 Inline code and file names are read as words, so `readAloud.ts:12` is read as "read aloud
-dot ts". Read aloud skips code blocks, tool activity, tables, images, equations, and citation
-metadata.
+dot ts". Each table row is read as its column names and values. Read aloud skips code blocks,
+tool activity, images, equations, and citation metadata.
 
 ## Attach files
 

@@ -29,10 +29,6 @@ Done.
       speechTextFromMarkdown(`
 Read this, \`npm install\`, and ~~obsolete advice~~. ![diagram](image.png)
 
-| Command | Output |
-| --- | --- |
-| run | tool output |
-
 The formula is $x^2 + y^2$.
 
 $$
@@ -61,6 +57,23 @@ MEMORY.md:1-4|note=[private metadata]
 Finished.
 `),
     ).toBe("Read this, npm install, and.\n\nThe formula is.\n\nSee and the docs.\n\nFinished.");
+  });
+
+  it("reads each table row as header and value pairs", () => {
+    expect(
+      speechTextFromMarkdown(`
+| File | Status | Notes |
+| --- | --- | --- |
+| \`main.ts\` | **Done.** | |
+| ![chart](chart.png) | Pending | Needs review |
+
+|  | Before |
+| --- | --- |
+| Speed | 2 s |
+`),
+    ).toBe(
+      "File: main dot ts; Status: Done.\n\nStatus: Pending; Notes: Needs review.\n\nSpeed; Before: 2 s.",
+    );
   });
 
   it("reads inline code and file names as words", () => {

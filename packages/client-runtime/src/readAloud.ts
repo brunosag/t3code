@@ -69,25 +69,52 @@ function inlineText(node: SpeechNode): string {
   }
 }
 
+function inlineContent(nodes: readonly SpeechNode[]): string {
+  return nodes
+    .map(inlineText)
+    .join("")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.!?;:])/g, "$1")
+    .replace(/([,;:])\1+/g, "$1")
+    .trim();
+}
+
+const hasWords = (text: string) => /[\p{L}\p{N}]/u.test(text);
+
+/**
+ * Reads each body row as one sentence of "Header: value" pairs, so a row of
+ * | File | Status | reads "File: main dot ts; Status: done."
+ */
+function tableRowSentences(table: SpeechNode): string[] {
+  const [headerRow, ...bodyRows] = (table.children ?? []).map((row) =>
+    (row.children ?? []).map((cell) => inlineContent(cell.children ?? []).replace(/[.,;:]+$/, "")),
+  );
+  return bodyRows.map((cells) =>
+    cells
+      .flatMap((cell, index) => {
+        if (!hasWords(cell)) return [];
+        const header = headerRow?.[index] ?? "";
+        return [hasWords(header) ? `${header}: ${cell}` : cell];
+      })
+      .join("; "),
+  );
+}
+
 /** Extracts assistant prose only; callers must never pass work-log or tool output. */
 export function speechTextFromMarkdown(markdown: string): string {
   const blocks: string[] = [];
+  function pushSentence(text: string): void {
+    if (hasWords(text)) blocks.push(/[.!?:;]$/.test(text) ? text : `${text}.`);
+  }
   function visit(node: SpeechNode): void {
     switch (node.type) {
       case "paragraph":
-      case "heading": {
-        const text = (node.children ?? [])
-          .map(inlineText)
-          .join("")
-          .replace(/\s+/g, " ")
-          .replace(/\s+([,.!?;:])/g, "$1")
-          .replace(/([,;:])\1+/g, "$1")
-          .trim();
-        if (/[\p{L}\p{N}]/u.test(text)) {
-          blocks.push(/[.!?:;]$/.test(text) ? text : `${text}.`);
-        }
+      case "heading":
+        pushSentence(inlineContent(node.children ?? []));
         break;
-      }
+      case "table":
+        for (const sentence of tableRowSentences(node)) pushSentence(sentence);
+        break;
       case "root":
       case "blockquote":
       case "list":
