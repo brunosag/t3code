@@ -179,7 +179,7 @@ function isRunOwnedSubagentTerminalStatus(
  * Whether a new run takes over a subagent's child thread, so a later message
  * can resume it there. A running subagent stays with the run that launched it,
  * which keeps ingesting until it ends; taking it over too would store its
- * events twice. An interrupted, failed or cancelled one is never resumed.
+ * events twice. Other terminal children enroll only when their provider reports a resume.
  */
 export function canRouteRelatedSubagent(status: OrchestrationV2Subagent["status"]): boolean {
   return status === "completed";
@@ -426,21 +426,31 @@ export function routeProviderEvent(
     }
     case "subagent.updated": {
       const belongs = ownsRun(event.subagent.runId) || ownsChildThread(event.subagent.threadId);
-      const coordinator = event.subagent;
-      if (
-        !ownsRun(coordinator.runId) ||
-        coordinator.workflow === undefined ||
-        coordinator.childThreadId === null
-      ) {
+      const subagent = event.subagent;
+      if (!ownsRun(subagent.runId) || subagent.childThreadId === null) {
         return [belongs, state];
       }
-      const workflowMemberParents = new Map(state.workflowMemberParents);
-      for (const member of coordinator.workflow.agents) {
-        if (member.childThreadId !== undefined) {
-          workflowMemberParents.set(member.childThreadId, coordinator.childThreadId);
-        }
+      const childThreadId = subagent.childThreadId;
+      let next = state;
+      // An authoritative resume reattributes the task to this run. Enroll its
+      // runless child before ingesting the new lifecycle and conversation.
+      if (
+        !state.rootTurnEnded &&
+        isOpenExecutionNodeStatus(subagent.status) &&
+        !ownsThread(childThreadId)
+      ) {
+        next = { ...next, ownedThreadIds: new Set([...next.ownedThreadIds, childThreadId]) };
       }
-      return [true, { ...state, workflowMemberParents }];
+      if (subagent.workflow !== undefined) {
+        const workflowMemberParents = new Map(next.workflowMemberParents);
+        for (const member of subagent.workflow.agents) {
+          if (member.childThreadId !== undefined) {
+            workflowMemberParents.set(member.childThreadId, childThreadId);
+          }
+        }
+        next = { ...next, workflowMemberParents };
+      }
+      return [next === state ? belongs : true, next];
     }
     case "message.updated":
       return [ownsRun(event.message.runId) || ownsChildThread(event.message.threadId), state];

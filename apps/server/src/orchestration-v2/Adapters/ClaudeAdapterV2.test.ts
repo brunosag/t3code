@@ -87,6 +87,7 @@ import type * as ProviderContinuationRequests from "@t3tools/provider-core/serve
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { makeProviderEventRoutingState, routeProviderEvent } from "../RunExecutionService.ts";
 import { ClaudeOrchestratorReplayHarness } from "./ClaudeAdapterV2.testkit.ts";
 import { provideDeterministicTestRuntime } from "../testkit/DeterministicRuntime.ts";
 import { runOrchestratorV2Scenario } from "../testkit/OrchestratorScenario.ts";
@@ -9343,6 +9344,93 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect("does not invent options when recovering a resumed subagent after restart", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const launchId = "toolu-recovered-launch";
+        const sendId = "toolu-recovered-send";
+        const harness = yield* makeWakeHarnessWithOptions({ subagentLaunchToolUseId: launchId });
+        const now = yield* DateTime.now;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-recovered-effort"),
+            text: "Resume the builder.",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "assistant",
+            parent_tool_use_id: null,
+            message: {
+              model: "claude-sonnet-4-6",
+              id: "msg-recovered-send",
+              type: "message",
+              role: "assistant",
+              content: [
+                {
+                  type: "tool_use",
+                  id: sendId,
+                  name: "SendMessage",
+                  input: { to: "task-recovered", message: "Continue" },
+                },
+              ],
+            },
+            uuid: "00000000-0000-4000-8000-000000000601",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "system",
+            subtype: "task_started",
+            task_id: "task-recovered",
+            tool_use_id: sendId,
+            description: "Recovered builder",
+            task_type: "local_agent",
+            uuid: "00000000-0000-4000-8000-000000000602",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            type: "assistant",
+            parent_tool_use_id: launchId,
+            message: {
+              model: "claude-opus-5-5",
+              id: "msg-recovered-model",
+              type: "message",
+              role: "assistant",
+              content: [{ type: "text", text: "Working again" }],
+            },
+            uuid: "00000000-0000-4000-8000-000000000603",
+            session_id: WAKE_NATIVE_SESSION,
+          }),
+        );
+        yield* Queue.offer(
+          harness.sdkMessages,
+          makeResultFrame({
+            uuid: "00000000-0000-4000-8000-000000000604",
+            result: "Resumed the builder.",
+          }),
+        );
+        yield* Queue.take(harness.terminalReceipts);
+        const observed = harness.events.findLast(
+          (event) => event.type === "subagent.updated",
+        )?.subagent;
+        assert.equal(observed?.model, "claude-opus-5-5");
+        assert.isUndefined(observed?.modelSelection);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
   it.effect("extracts text from direct content-block subagent results", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -9554,7 +9642,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           subtype: "task_notification",
           task_id: SUBAGENT_TASK_ID,
           tool_use_id: SUBAGENT_TOOL_USE_ID,
-          status: "completed",
+          status: "failed",
           output_file: "/tmp/task-resume-postsettle.output",
           summary: FIRST_SUMMARY,
           uuid: "00000000-0000-4000-8000-000000000502",
@@ -9644,7 +9732,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           }),
         );
         yield* awaitUntil(() => harness.terminalEvents().length === 2, "continuation terminal");
-        assert.equal(subagentEvents().at(-1)?.subagent.status, "completed");
+        assert.equal(subagentEvents().at(-1)?.subagent.status, "failed");
         assert.equal(subagentEvents().at(-1)?.subagent.result, FIRST_SUMMARY);
         assert.isFalse(yield* harness.hasPendingBackgroundWork);
 
@@ -9770,7 +9858,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         // The drained replay re-opens the row (running, stale result cleared)
         // before the second notification terminalizes it again.
         const statuses = subagentEvents().map((event) => event.subagent.status);
-        const firstCompleted = statuses.indexOf("completed");
+        const firstCompleted = statuses.indexOf("failed");
         const reopenedIndex = statuses.lastIndexOf("running");
         assert.isAbove(reopenedIndex, firstCompleted);
         assert.isNull(subagentEvents()[reopenedIndex]?.subagent.result);
@@ -9791,7 +9879,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               event.node.nativeItemRef?.nativeId === SUBAGENT_TASK_ID,
           )
           .map((event) => event.node.status);
-        assert.isAbove(nodeStatuses.lastIndexOf("running"), nodeStatuses.indexOf("completed"));
+        assert.isAbove(nodeStatuses.lastIndexOf("running"), nodeStatuses.indexOf("failed"));
         const finalSubagent = subagentEvents().at(-1)?.subagent;
         assert.equal(finalSubagent?.status, "completed");
         assert.equal(finalSubagent?.result, SECOND_SUMMARY);
@@ -9805,6 +9893,29 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             event.subagent.runId === "run-attempt-claude-wake-9c",
         );
         assert.isAtLeast(reopenIndex, 0);
+        // Run the real adapter sequence through the routing seam: the failed
+        // child was not inherited by this continuation. Its root must reopen.
+        const identity = {
+          threadId: harness.threadId,
+          runId: RunId.make("run-attempt-claude-wake-9c"),
+          attemptId: RunAttemptId.make("attempt-claude-wake-9c"),
+          providerThreadId: harness.providerThread.id,
+        };
+        let routing = makeProviderEventRoutingState({ identity, providerTurnId: null });
+        const acceptedChildStatuses: string[] = [];
+        for (const event of harness.events.slice(reopenIndex)) {
+          const [accepted, next] = routeProviderEvent(event, identity, routing);
+          routing = next;
+          if (
+            accepted &&
+            event.type === "node.updated" &&
+            event.node.kind === "root_turn" &&
+            event.node.runId === null
+          ) {
+            acceptedChildStatuses.push(event.node.status);
+          }
+        }
+        assert.deepEqual(acceptedChildStatuses, ["running", "completed"]);
         const resumedWorkIndexes = harness.events.flatMap((event, index) =>
           event.type === "message.updated" && event.message.text === "RESUMED_WORK" ? [index] : [],
         );

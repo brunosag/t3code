@@ -22,7 +22,7 @@ import {
   deriveReportedModelSelection,
   deriveLatestThreadRun,
   deriveProviderSubagentStatus,
-  formatModelSelectionEffort,
+  formatProviderSubagentEffort,
   formatProviderSubagentStatus,
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
@@ -407,7 +407,7 @@ describe("deriveProviderSubagentStatus", () => {
   });
 });
 
-describe("formatModelSelectionEffort", () => {
+describe("formatProviderSubagentEffort", () => {
   const instanceId = ProviderInstanceId.make("claudeAgent");
   const selection = (options?: ReadonlyArray<{ id: string; value: string }>) => ({
     instanceId,
@@ -437,26 +437,41 @@ describe("formatModelSelectionEffort", () => {
     },
   ];
 
-  it("shows the model's default effort when the user never picked one", () => {
-    expect(formatModelSelectionEffort(selection(), catalog({}))).toBe("High");
+  it("does not claim a catalog default is a native subagent observation", () => {
+    expect(formatProviderSubagentEffort(selection(), catalog({}))).toBeNull();
+  });
+
+  it("does not borrow another model or provider's reported effort", () => {
+    const report = { ...selection([{ id: "effort", value: "xhigh" }]), model: "other-model" };
+    expect(formatProviderSubagentEffort(selection(), catalog({}), report)).toBeNull();
+    expect(
+      formatProviderSubagentEffort(selection(), catalog({}), {
+        ...report,
+        model: selection().model,
+        instanceId: ProviderInstanceId.make("other"),
+      }),
+    ).toBeNull();
+    expect(
+      formatProviderSubagentEffort(selection([{ id: "effort", value: "unknown" }]), catalog({})),
+    ).toBeNull();
   });
 
   it("names a stored effort the way the catalog does", () => {
     expect(
-      formatModelSelectionEffort(selection([{ id: "effort", value: "xhigh" }]), catalog({})),
+      formatProviderSubagentEffort(selection([{ id: "effort", value: "xhigh" }]), catalog({})),
     ).toBe("Extra High");
   });
 
-  it("uses the descriptor's current value over the default", () => {
-    expect(formatModelSelectionEffort(selection(), catalog({ currentValue: "medium" }))).toBe(
-      "Medium",
-    );
+  it("does not claim the composer current value is a native subagent observation", () => {
+    expect(
+      formatProviderSubagentEffort(selection(), catalog({ currentValue: "medium" })),
+    ).toBeNull();
   });
 
   it("shows nothing for a model the catalog does not describe", () => {
-    expect(formatModelSelectionEffort(selection([{ id: "effort", value: "high" }]))).toBeNull();
+    expect(formatProviderSubagentEffort(selection([{ id: "effort", value: "high" }]))).toBeNull();
     expect(
-      formatModelSelectionEffort(
+      formatProviderSubagentEffort(
         { ...selection(), model: "claude-haiku-4-5" },
         catalog({ currentValue: "medium" }),
       ),
@@ -674,8 +689,8 @@ describe("provider-reported model selection", () => {
       },
     ];
     const variantReport = { ...selected, options: [{ id: "variant", value: "default" }] };
-    expect(formatModelSelectionEffort(selected, models, variantReport)).toBe("Default");
-    expect(formatModelSelectionEffort(selected, models)).toBe("Unknown");
+    expect(formatProviderSubagentEffort(selected, models, variantReport)).toBe("Default");
+    expect(formatProviderSubagentEffort(selected, models)).toBeNull();
   });
 });
 

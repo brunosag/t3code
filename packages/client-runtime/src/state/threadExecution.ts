@@ -21,7 +21,7 @@ import {
   backgroundWorkHoldsCompletion,
   derivePendingBackgroundWork,
 } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
-import { getProviderOptionCurrentLabel, getProviderOptionDescriptors } from "@t3tools/shared/model";
+import { getProviderOptionDescriptors } from "@t3tools/shared/model";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import * as DateTime from "effect/DateTime";
 
@@ -161,14 +161,8 @@ export function deriveReportedModelSelection(
 // Option ids providers use for reasoning effort (Codex, Claude, Grok/ACP, OpenCode).
 const REASONING_EFFORT_OPTION_IDS = ["reasoningEffort", "effort", "reasoning", "variant"] as const;
 
-/**
- * The reasoning effort a thread's model runs at, resolved and named the way
- * the composer's effort picker does: the stored choice when valid, else the
- * descriptor's current value, else the model's default. Null when the
- * provider catalog has no effort option for this model (a subagent on a
- * model the catalog does not describe), rather than guessing.
- */
-export function formatModelSelectionEffort(
+/** Names a native subagent's explicit or reported effort; catalog defaults are not observations. */
+export function formatProviderSubagentEffort(
   selection: ModelSelection,
   models: ReadonlyArray<ServerProviderModel> = [],
   reportedSelection?: ModelSelection | null,
@@ -179,8 +173,17 @@ export function formatModelSelectionEffort(
   for (const id of REASONING_EFFORT_OPTION_IDS) {
     const descriptor = descriptors.find((candidate) => candidate.id === id);
     if (descriptor?.type !== "select") continue;
-    const label = getProviderOptionCurrentLabel(descriptor, selection, reportedSelection);
-    if (label) return label;
+    const option =
+      selection.options?.find((candidate) => candidate.id === id) ??
+      (reportedSelection?.instanceId === selection.instanceId &&
+      reportedSelection.model === selection.model
+        ? reportedSelection.options?.find((candidate) => candidate.id === id)
+        : undefined);
+    if (option === undefined) continue;
+    return (
+      descriptor.options.find((choice) => choice.id === option.value)?.label ??
+      (option.value === "default" ? "Default" : null)
+    );
   }
   return null;
 }

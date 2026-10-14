@@ -5096,6 +5096,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             subagent.childThread = childThread;
           }
 
+          yield* emitProviderEvent({
+            type: "subagent.updated",
+            driver: CLAUDE_PROVIDER,
+            subagent: task,
+          });
           if (lifecycleChanged) {
             yield* emitProviderEvent({
               type: "node.updated",
@@ -5168,11 +5173,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               now,
             });
           }
-          yield* emitProviderEvent({
-            type: "subagent.updated",
-            driver: CLAUDE_PROVIDER,
-            subagent: task,
-          });
           if (workflowWithThreads !== undefined) {
             yield* projectClaudeWorkflowMembers({
               coordinator: subagent,
