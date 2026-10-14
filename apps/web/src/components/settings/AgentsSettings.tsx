@@ -417,7 +417,7 @@ function AgentCard({
 export function AgentsSettings() {
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
-  const { scope, environment } = useSettingsScope();
+  const { scope, environment, target } = useSettingsScope();
   const navigate = useNavigate();
   const [draft, setDraft] = useState<AgentDraft[] | null>(null);
   const environmentWide = scope.kind === "project" || scope.kind === "checkout";
@@ -432,9 +432,13 @@ export function AgentsSettings() {
   const entries = useMemo(
     () =>
       sortProviderInstanceEntries(
-        applyProviderInstanceSettings(deriveProviderInstanceEntries(piProviders), settings),
+        applyProviderInstanceSettings(
+          deriveProviderInstanceEntries(piProviders),
+          settings,
+          target?.projectId ?? null,
+        ),
       ),
-    [piProviders, settings],
+    [piProviders, settings, target?.projectId],
   );
   const modelDisabledReason = useScopedModelDisabledReason(settings, entries);
 
@@ -497,6 +501,7 @@ export function AgentsSettings() {
     return (
       <>
         <ProviderModelPicker
+          environmentId={environment?.environmentId ?? null}
           activeInstanceId={activeEntry.instanceId}
           model={definition.model}
           lockedProvider={null}
