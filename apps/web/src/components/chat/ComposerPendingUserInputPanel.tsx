@@ -140,10 +140,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
   const handleOptionSelection = useCallback(
     (questionId: string, optionValue: string) => {
-      // Text and options are mutually exclusive, and the text wins on submit.
-      // Selecting here would clear what the user wrote without advancing their
-      // answer, so the click is refused until the text is cleared.
-      if (progress.customAnswer.trim().length > 0) return;
       if (disabled || isResponding) return;
       if (activeQuestion?.multiSelect) {
         onToggleOption(questionId, optionValue);
@@ -159,7 +155,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         onAdvanceRef.current();
       }, 200);
     },
-    [activeQuestion, disabled, isResponding, onToggleOption, progress.customAnswer],
+    [activeQuestion, disabled, isResponding, onToggleOption],
   );
 
   // Keyboard shortcut: number keys 1-9 select corresponding options when focus is
@@ -263,11 +259,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               threadRef={threadRef}
               className="text-foreground/85"
             />
-            {customAnswerActive && activeQuestion.options.length > 0 ? (
-              <p className="mt-1 text-secondary-label text-xs">
-                Your written answer will be sent. Clear it to choose an option.
-              </p>
-            ) : activeQuestion.multiSelect ? (
+            {activeQuestion.multiSelect ? (
               <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
             ) : null}
             <div className="mt-2 space-y-0.5">

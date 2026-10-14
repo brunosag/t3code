@@ -5,6 +5,7 @@ import { threadContextRecord, threadContextReference } from "./lib/composerConte
 
 import {
   buildPendingUserInputAnswers,
+  carryDisplacedCustomAnswerIntoPrompt,
   countAnsweredPendingUserInputQuestions,
   derivePendingUserInputProgress,
   findFirstUnansweredPendingUserInputQuestionIndex,
@@ -189,20 +190,6 @@ describe("togglePendingUserInputOptionSelection", () => {
     ).toEqual({
       customAnswer: "",
       selectedOptionValues: ["Web"],
-    });
-  });
-
-  it("keeps a written answer when an option is clicked", () => {
-    const written = { customAnswer: "Ship the server first" };
-
-    expect(
-      togglePendingUserInputOptionSelection(singleSelectQuestion, written, "Orchestration-first"),
-    ).toEqual(written);
-    expect(togglePendingUserInputOptionSelection(multiSelectQuestion, written, "Server")).toEqual(
-      written,
-    );
-    expect(buildPendingUserInputAnswers([singleSelectQuestion], { scope: written })).toEqual({
-      scope: "Ship the server first",
     });
   });
 
@@ -439,5 +426,24 @@ describe("restorePendingUserInputAnswer", () => {
     });
     expect(restorePendingUserInputAnswer(undefined, undefined)).toEqual({});
     expect(restorePendingUserInputAnswer(undefined, "")).toEqual({});
+  });
+});
+
+describe("carryDisplacedCustomAnswerIntoPrompt", () => {
+  it("keeps the thread draft when nothing was typed into the answer", () => {
+    expect(carryDisplacedCustomAnswerIntoPrompt("draft", undefined)).toBe("draft");
+    expect(carryDisplacedCustomAnswerIntoPrompt("draft", "   ")).toBe("draft");
+  });
+
+  it("moves the typed answer into an empty thread draft", () => {
+    expect(carryDisplacedCustomAnswerIntoPrompt("", "also rename the flag ")).toBe(
+      "also rename the flag",
+    );
+  });
+
+  it("appends the typed answer after an existing thread draft", () => {
+    expect(carryDisplacedCustomAnswerIntoPrompt("first half\n", "second half")).toBe(
+      "first half\n\nsecond half",
+    );
   });
 });

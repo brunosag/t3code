@@ -214,6 +214,7 @@ import {
 } from "./chat/timelineScrollAnchoring";
 import {
   buildPendingUserInputAnswers,
+  carryDisplacedCustomAnswerIntoPrompt,
   restorePendingUserInputAnswer,
   derivePendingUserInputProgress,
   projectPendingUserInputAnswer,
@@ -10372,7 +10373,33 @@ export default function ChatView(props: ChatViewProps) {
       if (!activePendingUserInput) {
         return;
       }
-      if (activePendingDraftAnswers[questionId]?.customAnswer?.trim()) return;
+      // The option replaces the custom answer. Anything typed there is the
+      // user's text, so it goes back to the thread draft instead of vanishing.
+      // Read the restored answer: after a reload the text exists only there.
+      const displacedAnswer = activePendingDraftAnswers[questionId]?.customAnswer;
+      const currentPrompt =
+        useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.prompt ?? "";
+      const nextPrompt = carryDisplacedCustomAnswerIntoPrompt(currentPrompt, displacedAnswer);
+      if (nextPrompt !== currentPrompt) {
+        setComposerDraftPrompt(composerDraftTarget, nextPrompt);
+        if (activeThreadId) {
+          const store = useComposerDraftStore.getState();
+          const questionTarget = questionAttachmentDraftId(
+            environmentId,
+            activeThreadId,
+            activePendingUserInput.requestId,
+            questionId,
+          );
+          store.addThreadContexts(
+            composerDraftTarget,
+            store.getComposerDraft(questionTarget)?.threadContexts ?? [],
+            { appendReference: false },
+          );
+          // The question draft persists the typed answer across reloads; the
+          // text now lives in the thread draft, so it must not come back here.
+          setComposerDraftPrompt(questionTarget, "");
+        }
+      }
       setPendingUserInputAnswersByRequestId((existing) => {
         const question =
           (activePendingProgress?.activeQuestion?.id === questionId
@@ -10403,7 +10430,11 @@ export default function ChatView(props: ChatViewProps) {
       activePendingUserInput,
       activePendingRequestKey,
       activePendingDraftAnswers,
+      activeThreadId,
+      composerDraftTarget,
       composerRef,
+      environmentId,
+      setComposerDraftPrompt,
     ],
   );
 
