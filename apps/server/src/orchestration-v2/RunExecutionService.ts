@@ -175,7 +175,7 @@ function isRunOwnedSubagentTerminalStatus(
  * Whether a new run takes over a subagent's child thread, so a later message
  * can resume it there. A running subagent stays with the run that launched it,
  * which keeps ingesting until it ends; taking it over too would store its
- * events twice. An interrupted, failed or cancelled one is never resumed.
+ * events twice. Other terminal children enroll only when their provider reports a resume.
  */
 export function canRouteRelatedSubagent(status: OrchestrationV2Subagent["status"]): boolean {
   return status === "completed";
@@ -417,8 +417,25 @@ export function routeProviderEvent(
       }
       return [true, addProviderThread(event.node.providerThreadId)];
     }
-    case "subagent.updated":
-      return [ownsRun(event.subagent.runId) || ownsChildThread(event.subagent.threadId), state];
+    case "subagent.updated": {
+      const belongs = ownsRun(event.subagent.runId) || ownsChildThread(event.subagent.threadId);
+      const childThreadId = event.subagent.childThreadId;
+      // An authoritative resume reattributes the task to this run. Enroll its
+      // runless child before ingesting the new lifecycle and conversation.
+      if (
+        !ownsRun(event.subagent.runId) ||
+        state.rootTurnEnded ||
+        !isOpenExecutionNodeStatus(event.subagent.status) ||
+        childThreadId === null ||
+        ownsThread(childThreadId)
+      ) {
+        return [belongs, state];
+      }
+      return [
+        true,
+        { ...state, ownedThreadIds: new Set([...state.ownedThreadIds, childThreadId]) },
+      ];
+    }
     case "message.updated":
       return [ownsRun(event.message.runId) || ownsChildThread(event.message.threadId), state];
     case "turn_item.updated": {

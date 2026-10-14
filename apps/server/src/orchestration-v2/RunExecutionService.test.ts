@@ -511,6 +511,45 @@ it("does not carry interrupted or still-running child ownership into later attem
   } satisfies ProviderAdapter.ProviderAdapterV2Event;
 
   assert.isFalse(RunExecutionService.routeProviderEvent(lateChildNode, identity, state)[0]);
+
+  // SendMessage can resume a failed child. Its authoritative lifecycle belongs
+  // to this run; that event must enroll the child before its runless root.
+  const resumed = {
+    type: "subagent.updated",
+    driver,
+    subagent: {
+      id: NodeId.make("node:resumed-child"),
+      threadId,
+      runId: identity.runId,
+      parentNodeId: NodeId.make("node:resuming-root"),
+      origin: "provider_native",
+      createdBy: "agent",
+      driver,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      providerThreadId: null,
+      childThreadId,
+      nativeTaskRef: null,
+      prompt: "Continue",
+      title: null,
+      model: null,
+      status: "running",
+      result: null,
+      startedAt: null,
+      completedAt: null,
+      updatedAt: DateTime.makeUnsafe("2026-10-14T03:00:00Z"),
+    },
+  } satisfies ProviderAdapter.ProviderAdapterV2Event;
+  const [, resumedState] = RunExecutionService.routeProviderEvent(resumed, identity, state);
+  assert.isTrue(RunExecutionService.routeProviderEvent(lateChildNode, identity, resumedState)[0]);
+  for (const excluded of [
+    { ...resumed, subagent: { ...resumed.subagent, runId: RunId.make("run:old-launch") } },
+    { ...resumed, subagent: { ...resumed.subagent, status: "failed" as const } },
+  ]) {
+    const [, excludedState] = RunExecutionService.routeProviderEvent(excluded, identity, state);
+    assert.isFalse(
+      RunExecutionService.routeProviderEvent(lateChildNode, identity, excludedState)[0],
+    );
+  }
 });
 
 it.effect("rechecks run ownership immediately before calling the provider", () =>

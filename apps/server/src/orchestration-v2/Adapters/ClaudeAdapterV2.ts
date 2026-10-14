@@ -2865,6 +2865,7 @@ interface ActiveClaudeToolCall {
 // keyed by the tool_use_id that launches it.
 interface PendingClaudeSubagentLaunch {
   readonly model?: string;
+  readonly effort?: string;
   // parent_tool_use_id of the subagent whose own Agent call launches this one.
   readonly ownerToolUseId?: string;
 }
@@ -2902,6 +2903,7 @@ function rememberClaudeSubagentLaunch(
 ): void {
   if (context.subagentsByToolUseId.has(toolUseId)) return;
   const requested = firstStringInputField(input, ["model"]);
+  const effort = firstStringInputField(input, ["effort"]);
   // "inherit" is the caller's model: the session's here, an owner's once
   // task_started resolves it.
   const model =
@@ -2914,9 +2916,14 @@ function rememberClaudeSubagentLaunch(
   // call) wins over the requested one.
   const launch: PendingClaudeSubagentLaunch = {
     ...(model === undefined || pending.get(toolUseId)?.model !== undefined ? {} : { model }),
+    ...(effort === undefined ? {} : { effort }),
     ...(ownerToolUseId === null ? {} : { ownerToolUseId }),
   };
-  if (launch.model !== undefined || launch.ownerToolUseId !== undefined) {
+  if (
+    launch.model !== undefined ||
+    launch.effort !== undefined ||
+    launch.ownerToolUseId !== undefined
+  ) {
     rememberPendingClaudeSubagentLaunch(pending, toolUseId, launch);
   }
 }
@@ -4157,6 +4164,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           readonly prompt?: string;
           readonly title?: string;
           readonly model?: string;
+          readonly effort?: string;
           // The subagent whose own Agent call started this one; read only
           // when this call registers the subagent.
           readonly owner?: ActiveClaudeSubagent;
@@ -4257,6 +4265,26 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     existingSubagent.task,
                   )
                 : existingSubagent.task;
+          // Recovery knows the launch identity but not its options. Leave
+          // those absent so a resumed snapshot cannot erase persisted effort.
+          const modelSelection =
+            existingSubagent === undefined ||
+            priorTask?.modelSelection !== undefined ||
+            input.effort !== undefined
+              ? {
+                  instanceId: input.context.input.modelSelection.instanceId,
+                  model:
+                    input.model ??
+                    priorTask?.modelSelection?.model ??
+                    priorTask?.model ??
+                    input.context.input.modelSelection.model,
+                  ...(input.effort === undefined
+                    ? priorTask?.modelSelection?.options === undefined
+                      ? {}
+                      : { options: priorTask.modelSelection.options }
+                    : { options: [{ id: "effort", value: input.effort }] }),
+                }
+              : undefined;
           const task = {
             ...(priorTask ?? {
               id: nodeId,
@@ -4296,6 +4324,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
             ...(input.title === undefined ? {} : { title: input.title }),
             ...(input.model === undefined ? {} : { model: input.model }),
+            ...(modelSelection === undefined ? {} : { modelSelection }),
             ...(input.progress === undefined ? {} : { progress: input.progress }),
             ...(input.result === undefined ? {} : { result: input.result }),
             ...(isReopen ? { startedAt: now } : {}),
@@ -4360,10 +4389,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               parentNodeId: nodeId,
               activeProviderThreadId: null,
               providerInstanceId: input.context.input.modelSelection.instanceId,
-              modelSelection:
-                task.model && task.model !== input.context.input.modelSelection.model
-                  ? { instanceId: input.context.input.modelSelection.instanceId, model: task.model }
-                  : input.context.input.modelSelection,
+              modelSelection: modelSelection ?? {
+                instanceId: input.context.input.modelSelection.instanceId,
+                model: task.model ?? input.context.input.modelSelection.model,
+              },
               title: subagentThreadTitle({
                 parentTitle: input.context.input.appThread.title,
                 prompt: task.prompt,
@@ -4381,6 +4410,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             });
           }
 
+          yield* emitProviderEvent({
+            type: "subagent.updated",
+            driver: CLAUDE_PROVIDER,
+            subagent: task,
+          });
           if (lifecycleChanged) {
             yield* emitProviderEvent({
               type: "node.updated",
@@ -4477,11 +4511,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               turnItem: promptArtifacts.turnItem,
             });
           }
-          yield* emitProviderEvent({
-            type: "subagent.updated",
-            driver: CLAUDE_PROVIDER,
-            subagent: task,
-          });
           yield* emitProviderEvent({
             type: "turn_item.updated",
             driver: CLAUDE_PROVIDER,
@@ -6273,6 +6302,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 ...(message.tool_use_id === undefined ? {} : { toolUseId: message.tool_use_id }),
                 ...(message.prompt === undefined ? {} : { prompt: message.prompt }),
                 ...(model === undefined ? {} : { model }),
+                ...(launch?.effort === undefined ? {} : { effort: launch.effort }),
                 ...(owner === undefined ? {} : { owner }),
                 title: message.description,
                 status: "running",

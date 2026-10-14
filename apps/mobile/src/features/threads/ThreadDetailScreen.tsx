@@ -39,7 +39,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-execution";
 import { resolveSubagentPillSegment } from "@t3tools/client-runtime/state/thread-subagents";
 import {
-  formatModelSelectionEffort,
+  formatProviderSubagentEffort,
   type ProviderSubagentStatus,
 } from "@t3tools/client-runtime/state/thread-execution";
 import { formatModelSlugName, resolveSelectableModel } from "@t3tools/shared/model";
@@ -1400,7 +1400,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                           providerSubagentCatalogModel?.name ??
                           formatModelSlugName(props.selectedThread.modelSelection.model)
                         }
-                        effortLabel={formatModelSelectionEffort(
+                        effortLabel={formatProviderSubagentEffort(
                           props.selectedThread.modelSelection,
                           providerSubagentProvider?.models,
                           reportedModelSelection,

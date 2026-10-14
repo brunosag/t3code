@@ -1,3 +1,4 @@
+import { modelSelectionsEqual } from "@t3tools/shared/model";
 import {
   NodeId,
   CommandId,
@@ -412,8 +413,20 @@ export const layer: Layer.Layer<
         if (subagent.origin !== "provider_native" || childThreadId === null || model === null) {
           return [];
         }
+        const selection = subagent.modelSelection ?? {
+          instanceId: subagent.providerInstanceId,
+          model,
+        };
         const staleThread = projections.getThread(childThreadId).pipe(
-          Effect.map((thread) => (thread.modelSelection.model === model ? null : thread)),
+          Effect.map((thread) =>
+            (
+              subagent.modelSelection === undefined
+                ? thread.modelSelection.model === model
+                : modelSelectionsEqual(thread.modelSelection, selection)
+            )
+              ? null
+              : thread,
+          ),
           Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.succeed(null) }),
         );
         // Nearly every update already matches; only a mismatch takes the lock.
@@ -427,10 +440,10 @@ export const layer: Layer.Layer<
             const event = yield* makeDomainEvent(input, {
               type: "thread.model-selection-updated",
               threadId: thread.id,
-              // The parent's options belong to the parent's model.
+              // Only explicit native options survive a model change.
               payload: {
                 ...thread,
-                modelSelection: { instanceId: thread.modelSelection.instanceId, model },
+                modelSelection: selection,
                 updatedAt: now,
               },
               occurredAt: now,

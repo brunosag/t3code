@@ -98,7 +98,7 @@ import { useAcknowledgeThreadWoke, useThreadActions } from "../hooks/useThreadAc
 import {
   deriveProviderSubagentStatus,
   deriveReportedModelSelection,
-  formatModelSelectionEffort,
+  formatProviderSubagentEffort,
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
   deriveLatestThreadRun,
@@ -4286,7 +4286,7 @@ export default function ChatView(props: ChatViewProps) {
   const providerSubagentEffortLabel =
     activeThread === undefined
       ? null
-      : formatModelSelectionEffort(
+      : formatProviderSubagentEffort(
           activeThread.modelSelection,
           providerSubagentModels,
           reportedModelSelection,
