@@ -7,8 +7,10 @@ import {
 } from "./question-attachments";
 import {
   composerDraftsAtom,
+  getComposerDraftSnapshot,
   clearComposerDraft,
   setComposerDraftText,
+  setQuestionDraftText,
 } from "./use-composer-drafts";
 import {
   composerAttachmentUploadsAtom,
@@ -28,9 +30,10 @@ import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 
 import { threadEnvironment } from "../state/threads";
-import { scopedRequestKey } from "../lib/scopedEntities";
+import { scopedThreadKey, scopedRequestKey } from "../lib/scopedEntities";
 import {
   buildPendingUserInputAnswers,
+  carryDisplacedCustomAnswerIntoPrompt,
   restorePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
@@ -214,11 +217,27 @@ export function useSelectedThreadRequests() {
         return;
       }
 
-      if (activePendingUserInputDrafts[question.id]?.customAnswer?.trim()) return;
       const requestKey = scopedRequestKey(selectedThreadShell.environmentId, requestId);
+      const questionKey = questionAttachmentDraftKey(
+        selectedThreadShell.environmentId,
+        selectedThreadShell.id,
+        requestId,
+        question.id,
+      );
+      // Read at tap time so a second tap cannot move an answer twice before rerendering.
+      const displacedAnswer = restorePendingUserInputAnswer(
+        appAtomRegistry.get(userInputDraftsByRequestKeyAtom)[requestKey]?.[question.id],
+        getComposerDraftSnapshot(questionKey).text,
+      ).customAnswer;
+      const threadKey = scopedThreadKey(selectedThreadShell.environmentId, selectedThreadShell.id);
+      const currentPrompt = getComposerDraftSnapshot(threadKey).text;
+      const nextPrompt = carryDisplacedCustomAnswerIntoPrompt(currentPrompt, displacedAnswer);
+      if (nextPrompt !== currentPrompt) setComposerDraftText(threadKey, nextPrompt);
+      // Keep the question's attachments while clearing the durable text copy.
+      setQuestionDraftText(questionKey, "");
       setUserInputDraftOption(requestKey, question, value);
     },
-    [selectedThreadShell, activePendingUserInputDrafts],
+    [selectedThreadShell],
   );
 
   const onChangeUserInputCustomAnswer = useCallback(
@@ -234,7 +253,7 @@ export function useSelectedThreadRequests() {
       setUserInputDraftCustomAnswer(requestKey, question, customAnswer);
       // Mirror the text into the question's own composer draft. The drafts atom
       // above is memory-only, so this is what survives an app restart.
-      setComposerDraftText(
+      setQuestionDraftText(
         questionAttachmentDraftKey(
           selectedThreadShell.environmentId,
           selectedThreadShell.id,

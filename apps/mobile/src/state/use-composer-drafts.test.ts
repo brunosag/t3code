@@ -184,6 +184,7 @@ import {
   restoreCloudComposerDrafts,
   retargetNewTaskDraft,
   setComposerDraftText,
+  setQuestionDraftText,
   insertComposerDraftContext,
   insertComposerDraftText,
   rememberComposerDraftSelection,
@@ -240,6 +241,39 @@ function contextDraft(start: number, count: number): ComposerDraft {
 }
 
 describe("mobile composer drafts", () => {
+  it.each([false, true])(
+    "keeps question documents and cleared text across restarts (legacy chips: %s)",
+    (withLegacyChips) => {
+      const questionKey = "environment-1:question-%22thread%22-request";
+      const file = {
+        type: "file" as const,
+        id: "question-file",
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 10,
+        fileUri: "file:///notes.txt",
+      };
+      const plain = { text: "Written answer", attachments: [file] };
+      const legacy = decodePersistedComposerState({ schemaVersion: 1, drafts: { thread: plain } })
+        .drafts.thread;
+      const restored = decodePersistedComposerState({
+        schemaVersion: 1,
+        drafts: { [questionKey]: withLegacyChips ? legacy : plain },
+      }).drafts[questionKey];
+      expect(restored?.text.trim()).toBe("Written answer");
+      expect(restored?.text).not.toContain("t3-context:");
+      appAtomRegistry.set(composerDraftsAtom, { [questionKey]: restored! });
+      setQuestionDraftText(questionKey, "");
+      expect(getComposerDraftSnapshot(questionKey).attachments).toEqual([file]);
+      const reloaded = decodePersistedComposerState({
+        schemaVersion: 1,
+        drafts: appAtomRegistry.get(composerDraftsAtom),
+      }).drafts[questionKey];
+      expect(reloaded?.text).toBe("");
+      expect(reloaded?.attachments).toEqual([file]);
+    },
+  );
+
   it("restores a PR checkout source after restarting the composer", () => {
     const draft: ComposerDraft = {
       text: "Address feedback",

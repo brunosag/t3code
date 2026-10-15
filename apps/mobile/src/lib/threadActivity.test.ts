@@ -27,6 +27,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   workEntryRowLabel,
   restorePendingUserInputAnswer,
+  carryDisplacedCustomAnswerIntoPrompt,
   isContextHandoffActivityGroup,
   buildThreadFeed,
   deriveThreadFeedPresentation,
@@ -2672,6 +2673,18 @@ it.each(["provider_error", "usage_limit"] as const)(
   },
 );
 
+describe("displaced question text", () => {
+  it.each([
+    ["", "  Answer  ", "Answer"],
+    ["Existing draft  ", " Answer ", "Existing draft\n\nAnswer"],
+    ["  ", "Answer", "Answer"],
+    ["Existing draft  ", " \n", "Existing draft  "],
+    ["Existing draft", undefined, "Existing draft"],
+  ])("keeps the main draft when moving %j / %j", (prompt, answer, expected) => {
+    expect(carryDisplacedCustomAnswerIntoPrompt(prompt, answer)).toBe(expected);
+  });
+});
+
 describe("persisted question text", () => {
   it("restores written answers and respects an explicitly cleared answer", () => {
     expect(restorePendingUserInputAnswer(undefined, "My answer")).toEqual({
@@ -2693,7 +2706,7 @@ describe("persisted question text", () => {
         restorePendingUserInputAnswer(undefined, "My answer"),
         "Web",
       ),
-    ).toEqual({ customAnswer: "My answer" });
+    ).toEqual({ customAnswer: "", selectedOptionValues: ["Web"] });
     expect(togglePendingUserInputOptionSelection(question, { customAnswer: "" }, "Web")).toEqual({
       customAnswer: "",
       selectedOptionValues: ["Web"],

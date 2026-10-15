@@ -598,6 +598,28 @@ function newDraftId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/** Question attachments stay in their strip rather than becoming inline answer text. */
+function restoreQuestionDraft(draft: ComposerDraft): ComposerDraft {
+  const questionAttachmentIds = new Set(draft.attachments.map((attachment) => attachment.id));
+  const questionFileContextIds = new Set(
+    draft.context?.records.flatMap((record) =>
+      record.kind === "file" &&
+      "attachmentId" in record &&
+      questionAttachmentIds.has(record.attachmentId)
+        ? [record.contextId]
+        : [],
+    ),
+  );
+  const questionText = replaceComposerContextReferences(draft.text, (ref) =>
+    ref.kind === "file" && questionFileContextIds.has(ref.contextId) ? "" : ref.source,
+  );
+  return {
+    ...draft,
+    text: questionText,
+    context: referencedComposerContext(questionText, draft.context),
+  };
+}
+
 /**
  * Project-keyed new-task drafts from earlier builds are rewritten on load into
  * id-keyed drafts with the project stamped in, so existing drafts survive the
@@ -608,7 +630,9 @@ export function migrateLegacyNewTaskDraft(
   draft: ComposerDraft,
   now: string,
 ): readonly [key: string, draft: ComposerDraft] {
-  const restored = restoreMissingComposerFileReferences(draft);
+  const restored = key.includes(":question-")
+    ? restoreQuestionDraft(draft)
+    : restoreMissingComposerFileReferences(draft);
   const legacy = draft.project === undefined ? parseLegacyNewTaskDraftKey(key) : null;
   if (legacy === null) {
     return [key, restored];
@@ -1306,6 +1330,18 @@ export function setComposerDraftText(draftKey: string, value: string): void {
     return withComposerDraft(current, draftKey, draft);
   });
   scheduleUnusedComposerAttachmentCleanup(removed);
+}
+
+/** Question answers use an attachment strip, so editing their text never removes files. */
+export function setQuestionDraftText(draftKey: string, value: string): void {
+  updateComposerDrafts((current) => {
+    const existing = normalizeDraft(current[draftKey]);
+    return withComposerDraft(current, draftKey, {
+      ...existing,
+      text: value,
+      context: referencedComposerContext(value, existing.context),
+    });
+  });
 }
 
 export function insertComposerDraftText(

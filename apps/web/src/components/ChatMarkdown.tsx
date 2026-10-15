@@ -110,7 +110,7 @@ import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
 import { isWindowsAbsolutePath } from "@t3tools/shared/path";
 import {
   artifactTemplateFromHastProperties,
-  renderCodexFileCitationsAsMarkdown,
+  renderCodexInlineDirectivesAsMarkdown,
 } from "@t3tools/shared/codexMarkdownDirectives";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import {
@@ -846,7 +846,7 @@ function MarkdownCodeBlock({
   theme,
   onRunShellCommand,
   isStreaming,
-  leadingActions,
+  viewToggle,
   canWrap = true,
   diagram = false,
   children,
@@ -857,9 +857,10 @@ function MarkdownCodeBlock({
   theme: "light" | "dark";
   onRunShellCommand?: ((command: string) => void) | undefined;
   isStreaming: boolean;
-  leadingActions?: ReactNode;
+  /** Switches between source and rendered content; sits left of copy in both views. */
+  viewToggle?: ReactNode;
   canWrap?: boolean;
-  /** Renders content instead of code, with actions below it like tables. */
+  /** Renders content frameless, with the code header's actions above it. */
   diagram?: boolean;
   children: ReactNode;
 }) {
@@ -939,12 +940,14 @@ function MarkdownCodeBlock({
 
   if (diagram) {
     return (
-      <div className="my-[0.65rem]" data-language={language}>
-        {children}
-        <div className="mt-0.5 flex items-center justify-between select-none">
-          {leadingActions}
+      // The transparent border and header padding match the code frame, so the
+      // actions stay in place when switching views.
+      <div className="my-[0.65rem] border border-transparent" data-language={language}>
+        <div className="flex items-center justify-end gap-0.5 pt-1.5 pr-1.5 select-none">
+          {viewToggle}
           {copyButton}
         </div>
+        {children}
       </div>
     );
   }
@@ -959,7 +962,6 @@ function MarkdownCodeBlock({
       headerProps={THREAD_FIND_IGNORE_PROPS}
       actions={
         <span className="flex items-center gap-0.5" role="toolbar" aria-label="Code block actions">
-          {leadingActions}
           {canWrap ? (
             <Tooltip>
               <TooltipTrigger
@@ -997,6 +999,7 @@ function MarkdownCodeBlock({
               <TooltipPopup side="top">Run in terminal</TooltipPopup>
             </Tooltip>
           ) : null}
+          {viewToggle}
           {copyButton}
         </span>
       }
@@ -1040,7 +1043,7 @@ function MarkdownMermaidCodeBlock({
       isStreaming={isStreaming}
       canWrap={!showDiagram}
       diagram={showDiagram}
-      leadingActions={
+      viewToggle={
         isStreaming ? null : (
           <Tooltip>
             <TooltipTrigger
@@ -2450,7 +2453,7 @@ function useChatMarkdownState({
       string,
       NonNullable<ReturnType<typeof resolveMarkdownFileLinkMeta>>
     >();
-    for (const href of extractMarkdownLinkHrefs(renderCodexFileCitationsAsMarkdown(text))) {
+    for (const href of extractMarkdownLinkHrefs(renderCodexInlineDirectivesAsMarkdown(text))) {
       if (parseComposerContextHref(href)) continue;
       const normalizedHref = normalizeMarkdownLinkHrefKey(href);
       if (metaByHref.has(normalizedHref)) continue;

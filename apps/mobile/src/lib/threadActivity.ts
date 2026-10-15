@@ -1705,13 +1705,22 @@ export function isPendingUserInputOptionSelected(
   );
 }
 
+/** Preserve a displaced written answer after the main thread draft's existing text. */
+export function carryDisplacedCustomAnswerIntoPrompt(
+  prompt: string,
+  customAnswer: string | undefined,
+): string {
+  const displaced = customAnswer?.trim() ?? "";
+  if (displaced.length === 0) return prompt;
+  if (prompt.trim().length === 0) return displaced;
+  return `${prompt.trimEnd()}\n\n${displaced}`;
+}
+
 export function togglePendingUserInputOptionSelection(
   question: ThreadUserInputQuestion,
   draft: PendingUserInputDraftAnswer | undefined,
   optionValue: string,
 ): PendingUserInputDraftAnswer {
-  if (question.allowCustomAnswer !== false && normalizeDraftAnswer(draft?.customAnswer))
-    return draft ?? {};
   const resolvedOptionValue = resolvePendingUserInputOptionValue(question, optionValue);
   if (resolvedOptionValue === null) {
     return draft ?? {};
