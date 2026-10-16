@@ -91,9 +91,7 @@ export const make = Effect.gen(function* () {
               ),
               iconPath,
             );
-          } catch {
-            // Icon installation is optional; registration retries after readiness.
-          }
+          } catch {}
         }
         NodeFS.writeFileSync(
           NodePath.posix.join(applicationsDir, linux.linuxDesktopEntryName),
@@ -137,7 +135,6 @@ export const make = Effect.gen(function* () {
         ozonePlatform: readCommandLineSwitchValue(Electron.app.commandLine, "ozone-platform"),
         enableFeatures: readCommandLineSwitchValue(Electron.app.commandLine, "enable-features"),
         disableFeatures: readCommandLineSwitchValue(Electron.app.commandLine, "disable-features"),
-        // Runs only on Hyprland Wayland sessions without an explicit feature override.
         readHyprctlVersionJson: () =>
           NodeChildProcess.execFileSync("hyprctl", ["version", "-j"], {
             encoding: "utf8",

@@ -179,7 +179,7 @@ describe("DesktopPreReadyPlatform", () => {
         const identity = yield* Effect.promise(() => portalIdentity);
         assert.equal(identity.desktopName, "t3code.desktop");
         assert.include(identity.desktopEntry ?? "", 'Exec="/Applications/current.AppImage" %U');
-        assert.include(identity.desktopEntry ?? "", "Name=T3 Code (Alpha)");
+        assert.include(identity.desktopEntry ?? "", "Name=T3 Code (Beta)");
         // Packaged runs pre-write the launcher entry users pin, not just a
         // hidden URL handler.
         // KDE matches StartupWMClass before desktop entry names, and prefers
