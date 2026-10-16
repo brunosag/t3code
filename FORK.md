@@ -16,6 +16,8 @@ Upstream imports legacy conversation messages into V2. Continued imported thread
 
 ## Deployment
 
+`bsag` is the fork's base branch: start work from `origin/bsag`, never the stale local `main`. Once a change is verified, rebase it onto `origin/bsag` and push without asking; the user has made that a standing permission, and the push deploys. A deploy is done when its run succeeds and `activeVersion` in `~/local/t3-pi/runtime/service-state.json` on `vps` ends in the pushed commit's 9-character SHA; watch the run (`gh run watch`) and check that before calling it live. Put `[skip ci]` in a docs-only commit message to skip the deploy.
+
 Pushing `bsag` runs `.github/workflows/deploy-pi-vps.yml`, which tests the retained changes, builds the server with its web client, and installs the npm tarball on `vps` over Tailscale. `tutor-prod` remains a compatibility SSH alias and the Azure resource name. Secrets are `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, and `VPS_DEPLOY_KEY`; repository variables are `VPS_HOST` and `VPS_USER`.
 
 The live installation is `~/local/t3-pi`; preserve its `userdata` and keep development state separate. Runtime versions use `-pi.<short-sha>`, with the core derived from the upstream release package. Installation retains previous complete runtimes and uses the stock service launcher through a Node shim at `runtime/versions/<version>/t3`. Host procedures live in `~/local/t3-pi/DEPLOYMENT.md`.
@@ -26,4 +28,6 @@ The npm-installed server loads `@ff-labs/fff-node` through an ESM import. Upstre
 
 ## Maintenance
 
-Merge upstream into a review worktree and run focused tests plus typechecks for affected packages before updating `bsag`. Pi transport, adapter, and retained extension tests live in `packages/provider-pi/src/server`. Do not restore the removed V1 adapter or permission layer.
+Merge upstream into a review worktree and run focused tests plus typechecks for affected packages before updating `bsag`. In a conflict, take upstream's side unless it touches a retained change above.
+
+Keep upstream's scheduled workflows disabled on the fork (`gh workflow disable -R brunosag/t3code <file>`; currently `release.yml` and `mobile-android-apk.yml`). Their stuck runs got the fork's Actions paused, which stopped deploys. After each upstream merge, disable any newly arrived workflow with a `schedule:` trigger. Pi transport, adapter, and retained extension tests live in `packages/provider-pi/src/server`. Do not restore the removed V1 adapter or permission layer.
