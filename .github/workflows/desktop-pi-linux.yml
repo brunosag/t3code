@@ -54,6 +54,9 @@ jobs:
           vp test run \
             packages/provider-pi/src/server \
             apps/server/src/provider/ProviderRegistry.test.ts \
+            apps/server/src/background/SleepInhibitor.test.ts \
+            apps/server/src/background/SleepInhibitor.integration.test.ts \
+            packages/shared/src/orchestrationV2PendingBackgroundWork.test.ts \
             apps/server/src/claudeHistoryWorker.test.ts \
             packages/provider-core/src/server/maintenanceResolver.test.ts \
             apps/web/src/providerInstances.test.ts \

@@ -1,6 +1,6 @@
 /**
- * SleepInhibitor - keeps a Linux host awake while any thread has an active
- * run, by holding a logind block lock through `systemd-inhibit`.
+ * SleepInhibitor - keeps a Linux host awake while any thread has unfinished
+ * agent work, by holding a logind block lock through `systemd-inhibit`.
  *
  * The lock includes `handle-lid-switch` because logind ignores plain sleep
  * locks for lid-close suspend by default (`LidSwitchIgnoreInhibited=yes`).
@@ -8,8 +8,16 @@
  *
  * @module SleepInhibitor
  */
-import type { OrchestrationV2DomainEvent, ThreadId } from "@t3tools/contracts";
+import type {
+  OrchestrationV2DomainEvent,
+  OrchestrationV2ThreadShell,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import {
+  isBackgroundTurnItem,
+  isPullRequestWatchTask,
+} from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -24,26 +32,40 @@ import { forkParked } from "../serverActivation.ts";
 const SYSTEMD_INHIBIT_ARGS = [
   "--what=sleep:idle:handle-lid-switch",
   "--who=T3 Code",
-  "--why=An agent turn is running",
+  "--why=Agent work is running",
   "--mode=block",
   // `cat` reads the server's stdin pipe, so the lock also drops if the
   // server dies without running finalizers.
   "cat",
 ];
 
+type ThreadActivity = Pick<
+  OrchestrationV2ThreadShell,
+  "id" | "activityRunStatus" | "pendingBackgroundTasks"
+>;
+
+const isThreadActive = (thread: ThreadActivity | null) =>
+  thread?.activityRunStatus != null ||
+  // PR watches are passive server polling; provider Monitor tasks still own running processes.
+  (thread?.pendingBackgroundTasks ?? []).some((task) => !isPullRequestWatchTask(task));
+
 /**
- * Runs `holdLock` while at least one thread is active. Run and deletion
- * events re-read the thread through `isThreadActive`, so stale events cannot
+ * Runs `holdLock` while at least one thread is active. Work and deletion
+ * events re-read the thread through `getThreadShell`, so stale events cannot
  * pin the lock. `holdLock` should keep the lock until it is interrupted.
  */
 export const run = <E>(input: {
-  readonly initialActiveThreadIds: Iterable<ThreadId>;
+  readonly initialThreads: Iterable<ThreadActivity>;
   readonly events: Stream.Stream<OrchestrationV2DomainEvent, E>;
-  readonly isThreadActive: (threadId: ThreadId) => Effect.Effect<boolean>;
+  readonly getThreadShell: (threadId: ThreadId) => Effect.Effect<ThreadActivity | null>;
   readonly holdLock: Effect.Effect<void, never, Scope.Scope>;
 }) =>
   Effect.gen(function* () {
-    const activeThreadIds = new Set(input.initialActiveThreadIds);
+    const activeThreadIds = new Set(
+      Array.from(input.initialThreads)
+        .filter(isThreadActive)
+        .map((thread) => thread.id),
+    );
     let lock: Fiber.Fiber<void> | null = null;
 
     const sync = Effect.gen(function* () {
@@ -63,12 +85,17 @@ export const run = <E>(input: {
         switch (event.type) {
           case "run.created":
           case "run.updated":
+          case "provider-thread.updated":
+          case "thread.provider-switched":
           case "thread.deleted":
+            break;
+          case "turn-item.updated":
+            if (!isBackgroundTurnItem(event.payload)) return;
             break;
           default:
             return;
         }
-        if (yield* input.isThreadActive(event.threadId)) {
+        if (isThreadActive(yield* input.getThreadShell(event.threadId))) {
           activeThreadIds.add(event.threadId);
         } else {
           activeThreadIds.delete(event.threadId);
@@ -90,7 +117,7 @@ const holdSystemdInhibitLock = Effect.gen(function* () {
     }),
   );
   const exitCode = yield* child.exitCode;
-  yield* Effect.logWarning("systemd-inhibit exited while a turn was running", { exitCode });
+  yield* Effect.logWarning("systemd-inhibit exited while agent work was running", { exitCode });
 }).pipe(
   Effect.catch((error) => Effect.logWarning("failed to hold sleep inhibitor lock", { error })),
 );
@@ -108,17 +135,12 @@ export const layer = Layer.effectDiscard(
         const snapshot = yield* threads.getShellSnapshot();
         // Resume right after the snapshot so no run transition is missed.
         yield* run({
-          initialActiveThreadIds: snapshot.threads
-            .filter((thread) => thread.activityRunStatus != null)
-            .map((thread) => thread.id),
+          initialThreads: snapshot.threads,
           events: threads
             .streamStoredEventsFrom({ afterSequence: snapshot.snapshotSequence })
             .pipe(Stream.map((stored) => stored.event)),
-          isThreadActive: (threadId) =>
-            threads.getThreadShell(threadId).pipe(
-              Effect.map((shell) => shell?.activityRunStatus != null),
-              Effect.orElseSucceed(() => false),
-            ),
+          getThreadShell: (threadId) =>
+            threads.getThreadShell(threadId).pipe(Effect.orElseSucceed(() => null)),
           holdLock: holdSystemdInhibitLock.pipe(
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           ),

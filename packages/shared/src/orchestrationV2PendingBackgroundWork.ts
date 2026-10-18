@@ -16,6 +16,18 @@ const BACKGROUND_TURN_ITEM_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
   "subagent",
 ]);
 
+const PULL_REQUEST_WATCH_TASK_PREFIX = "pull-request-watch:";
+
+export function isBackgroundTurnItem(item: Pick<OrchestrationV2TurnItem, "type">): boolean {
+  return BACKGROUND_TURN_ITEM_TYPES.has(item.type);
+}
+
+export function isPullRequestWatchTask(
+  task: Pick<OrchestrationV2PendingBackgroundTask, "kind" | "taskId">,
+): boolean {
+  return task.kind === "monitor" && task.taskId.startsWith(PULL_REQUEST_WATCH_TASK_PREFIX);
+}
+
 const TERMINAL_RUN_STATUSES = new Set<OrchestrationV2Run["status"]>([
   "cancelled",
   "completed",
@@ -45,7 +57,7 @@ export type PendingBackgroundWorkTask = OrchestrationV2PendingBackgroundTask;
 export function turnItemUpdateCanEndBackgroundWork(
   item: Pick<OrchestrationV2TurnItem, "type" | "status">,
 ): boolean {
-  return BACKGROUND_TURN_ITEM_TYPES.has(item.type) && !isOrchestrationV2WorkActive(item.status);
+  return isBackgroundTurnItem(item) && !isOrchestrationV2WorkActive(item.status);
 }
 
 export function backgroundWorkHoldsCompletion(
@@ -169,7 +181,7 @@ export function pendingBackgroundTurnItems<Item extends PendingBackgroundWorkTur
   );
   return input.turnItems.filter(
     (item) =>
-      BACKGROUND_TURN_ITEM_TYPES.has(item.type) &&
+      isBackgroundTurnItem(item) &&
       isOrchestrationV2WorkActive(item.status) &&
       !(item.type === "dynamic_tool" && isPersistentDynamicToolInput(item.input)) &&
       (item.runId === undefined ||
@@ -251,7 +263,7 @@ function pullRequestWatchTasks(
       ? []
       : [
           {
-            taskId: `pull-request-watch:${threadPullRequestKeyOf(link)}`,
+            taskId: `${PULL_REQUEST_WATCH_TASK_PREFIX}${threadPullRequestKeyOf(link)}`,
             description: `Watching pull request #${link.number}`,
             kind: "monitor" as const,
           },
