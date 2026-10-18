@@ -8,6 +8,10 @@ import {
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import {
+  CLAUDE_AUTO_COMPACT_WINDOWS,
+  isClaudeCompactionOption,
+} from "@t3tools/shared/claudeCompaction";
+import {
   getModelSelectionStringOptionValue,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
@@ -167,13 +171,12 @@ export function resolveClaudeModelsForVersion(
 
 export function withClaudeSessionOptions(model: ServerProviderModel): ServerProviderModel {
   const descriptors = model.capabilities?.optionDescriptors ?? [];
-  if (descriptors.some((descriptor) => descriptor.id === "autoCompact")) return model;
   return {
     ...model,
     capabilities: {
       ...model.capabilities,
       optionDescriptors: [
-        ...descriptors,
+        ...descriptors.filter((descriptor) => !isClaudeCompactionOption(descriptor.id)),
         {
           id: "autoCompact",
           label: "Auto-compact",
@@ -188,6 +191,18 @@ export function withClaudeSessionOptions(model: ServerProviderModel): ServerProv
             },
             { id: "on", label: "On" },
             { id: "off", label: "Off" },
+          ],
+        },
+        {
+          id: "autoCompactWindow",
+          label: "Compact at",
+          type: "select",
+          options: [
+            { id: "default", label: "Default", isDefault: true },
+            ...CLAUDE_AUTO_COMPACT_WINDOWS.map((tokens) => ({
+              id: String(tokens),
+              label: tokens === 1_000_000 ? "1M tokens" : `${tokens / 1_000}k tokens`,
+            })),
           ],
         },
       ],

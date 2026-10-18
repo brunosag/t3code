@@ -18,6 +18,33 @@ import {
 const PROVIDER: ProviderDriverKind = ProviderDriverKind.make("codex");
 const MODEL = "test-model";
 
+it("preserves context controls for dispatch without treating a threshold as reasoning", () => {
+  const state = getComposerProviderState({
+    provider: ProviderDriverKind.make("claudeAgent"),
+    model: MODEL,
+    models: modelWith([
+      selectDescriptor("autoCompact", [
+        { id: "default", label: "Default", isDefault: true },
+        { id: "off", label: "Off" },
+      ]),
+      selectDescriptor("autoCompactWindow", [
+        { id: "default", label: "Default", isDefault: true },
+        { id: "500000", label: "500k" },
+      ]),
+    ]),
+    modelOptions: [
+      { id: "autoCompact", value: "off" },
+      { id: "autoCompactWindow", value: "500000" },
+    ],
+    planModeEnabled: false,
+  });
+  expect(state.promptEffort).toBeNull();
+  expect(state.modelOptionsForDispatch).toEqual([
+    { id: "autoCompact", value: "off" },
+    { id: "autoCompactWindow", value: "500000" },
+  ]);
+});
+
 function selectDescriptor(
   id: string,
   options: ReadonlyArray<{ id: string; label: string; isDefault?: boolean }>,

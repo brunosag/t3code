@@ -93,6 +93,16 @@ describe("Claude model catalog", () => {
         );
         assert.equal(descriptor.options.find((option) => option.isDefault)?.id, "default");
       }
+      const threshold = model.capabilities?.optionDescriptors?.find(
+        (option) => option.id === "autoCompactWindow",
+      );
+      assert.equal(threshold?.type, "select");
+      if (threshold?.type === "select") {
+        assert.deepEqual(
+          threshold.options.map((option) => option.id),
+          ["default", "100000", "200000", "300000", "500000", "750000", "1000000"],
+        );
+      }
       assert.deepEqual(withClaudeSessionOptions(model), model);
     }
     assert.isTrue(

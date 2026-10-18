@@ -7,6 +7,14 @@
  */
 export const CLAUDE_RESUME_COMPACTION_NEVER_ANSWER = "Don't ask again";
 
+export const CLAUDE_AUTO_COMPACT_WINDOWS = [
+  100_000, 200_000, 300_000, 500_000, 750_000, 1_000_000,
+] as const;
+
+export function isClaudeCompactionOption(id: string): boolean {
+  return id === "autoCompact" || id === "autoCompactWindow";
+}
+
 export function formatClaudeResumeCompactionQuestion(input: {
   readonly ageMinutes: number;
   readonly estimatedTokens: number;

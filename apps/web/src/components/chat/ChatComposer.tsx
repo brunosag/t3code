@@ -312,6 +312,7 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
+import type { ClaudeCompactionControlsProps } from "./ClaudeCompactionControls";
 import {
   providerSupportsManualCompaction,
   resolveContextWindowModelDisplayName,
@@ -1341,6 +1342,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   compact: boolean;
   canOperateThread: boolean;
   activeContextWindow: ContextWindowSnapshot | null;
+  claudeCompaction: ClaudeCompactionControlsProps | undefined;
   reserveContextWindowMeter: boolean;
   activeThreadModelDisplayName: string | null;
   isPreparingWorktree: boolean;
@@ -1379,9 +1381,10 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
 }) {
   return (
     <>
-      {props.activeContextWindow ? (
+      {props.activeContextWindow || props.claudeCompaction ? (
         <ContextWindowMeter
           usage={props.activeContextWindow}
+          claudeCompaction={props.claudeCompaction}
           modelDisplayName={props.activeThreadModelDisplayName}
           onCompact={props.onCompactContext}
           compactDisabled={props.compactDisabled}
@@ -1941,6 +1944,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           })
       : null);
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const setComposerModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
   const addComposerDraftFiles = useComposerDraftStore((store) => store.addFiles);
@@ -2283,6 +2287,39 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
+  const onCompactionOptionsChange = (options: Parameters<typeof setComposerModelOptions>[2]) => {
+    if (!canOperateThread) return;
+    setComposerModelOptions(composerDraftTarget, selectedProvider, options, {
+      instanceId: selectedInstanceId,
+      model: selectedModel,
+      persistSticky: true,
+    });
+  };
+  const onCompactionOptionsChangeStable = useStableCallback(onCompactionOptionsChange);
+  const claudeCompaction = useMemo<ClaudeCompactionControlsProps | undefined>(() => {
+    if (!settings.contextWindowMeterEnabled || selectedProvider !== "claudeAgent") return undefined;
+    const threshold = selectedProviderModels
+      .find((model) => model.slug === selectedModel)
+      ?.capabilities?.optionDescriptors?.find(
+        (descriptor) => descriptor.id === "autoCompactWindow",
+      );
+    return threshold?.type === "select"
+      ? {
+          options: selectedModelOptionsForDispatch,
+          thresholds: threshold.options,
+          disabled: !canOperateThread,
+          onChange: onCompactionOptionsChangeStable,
+        }
+      : undefined;
+  }, [
+    settings.contextWindowMeterEnabled,
+    selectedProvider,
+    selectedProviderModels,
+    selectedModel,
+    selectedModelOptionsForDispatch,
+    canOperateThread,
+    onCompactionOptionsChangeStable,
+  ]);
   const { enabled: planModeUiEnabled, interactionMode } = resolveComposerInteractionMode({
     planModeEnabled: settings.planModeEnabled,
     provider: selectedProviderStatus,
@@ -7273,6 +7310,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   <ComposerFooterPrimaryActions
                     compact={isComposerResting || isComposerPrimaryActionsCompact}
                     canOperateThread={canOperateThread}
+                    claudeCompaction={claudeCompaction}
                     activeContextWindow={
                       settings.contextWindowMeterEnabled ? activeContextWindow : null
                     }

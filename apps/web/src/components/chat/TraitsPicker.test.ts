@@ -36,7 +36,7 @@ describe("Claude auto-compaction control", () => {
     ],
   };
 
-  it("is available even when a custom model has no reasoning controls", () => {
+  it("keeps compaction controls out of model options", () => {
     expect(
       shouldRenderTraitsControls({
         provider: ProviderDriverKind.make("claudeAgent"),
@@ -53,13 +53,13 @@ describe("Claude auto-compaction control", () => {
         modelOptions: undefined,
         planModeEnabled: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it.each([
-    ["default", "Auto-compact"],
-    ["on", "Auto-compact On"],
-    ["off", "Auto-compact Off"],
+    ["default", ""],
+    ["on", ""],
+    ["off", ""],
   ])("labels the %s override without adding the default to the composer", (currentValue, label) => {
     expect(
       buildTraitsTriggerDisplay({
