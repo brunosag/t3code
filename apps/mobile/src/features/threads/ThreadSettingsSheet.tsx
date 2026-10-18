@@ -1161,7 +1161,7 @@ function ThreadSettingsChoiceContent(props: {
             rows: selectableChoices(activeDescriptor).map((choice) => ({
               id: choice.id,
               label: choice.label,
-              description: undefined,
+              description: choice.description,
               selected:
                 choice.id ===
                 getProviderOptionCurrentValue(
@@ -1198,6 +1198,11 @@ function ThreadSettingsChoiceContent(props: {
       contentInsetAdjustmentBehavior="automatic"
       showsVerticalScrollIndicator={false}
     >
+      {activeDescriptor?.description ? (
+        <Text className="px-4 pb-3 text-sm text-foreground-muted">
+          {activeDescriptor.description}
+        </Text>
+      ) : null}
       <View className="overflow-hidden rounded-2xl bg-grouped-card">
         {submenuContent.rows.map((row, index) => (
           <ChoiceRow

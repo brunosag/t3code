@@ -162,7 +162,37 @@ export function resolveClaudeModelsForVersion(
 ): ReadonlyArray<ClaudeCatalogModel["model"]> {
   return catalog.models
     .filter((entry) => isVersionSupported(entry.compatibility, version))
-    .map((entry) => entry.model);
+    .map((entry) => withClaudeSessionOptions(entry.model));
+}
+
+export function withClaudeSessionOptions(model: ServerProviderModel): ServerProviderModel {
+  const descriptors = model.capabilities?.optionDescriptors ?? [];
+  if (descriptors.some((descriptor) => descriptor.id === "autoCompact")) return model;
+  return {
+    ...model,
+    capabilities: {
+      ...model.capabilities,
+      optionDescriptors: [
+        ...descriptors,
+        {
+          id: "autoCompact",
+          label: "Auto-compact",
+          description: "Applies from your next message in this session.",
+          type: "select",
+          options: [
+            {
+              id: "default",
+              label: "Use Claude settings",
+              isDefault: true,
+              description: "Use Claude Code's configuration.",
+            },
+            { id: "on", label: "On" },
+            { id: "off", label: "Off" },
+          ],
+        },
+      ],
+    },
+  };
 }
 
 export function resolveClaudeUpdateRequiredModels(

@@ -402,6 +402,11 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
               <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
                 {descriptor.label}
               </div>
+              {descriptor.description ? (
+                <div className="max-w-56 px-2 pb-1.5 text-pretty text-muted-foreground/80 text-xs">
+                  {descriptor.description}
+                </div>
+              ) : null}
               {ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id ? (
                 <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">
                   Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change this
@@ -492,8 +497,17 @@ export function buildTraitsTriggerDisplay(input: {
   let fastModeFallbackLabel: string | null = null;
   let speedLabel: string | null = null;
   let reasoningLabelIndex = -1;
+  let hasAutoCompact = false;
   const labels: Array<string> = [];
   for (const descriptor of input.descriptors) {
+    if (descriptor.id === "autoCompact" && descriptor.type === "select") {
+      hasAutoCompact = true;
+      const value = getProviderOptionCurrentValue(descriptor);
+      if (value === "on" || value === "off") {
+        labels.push(`${descriptor.label} ${value === "on" ? "On" : "Off"}`);
+      }
+      continue;
+    }
     if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
       speedLabel = descriptor.currentValue === true ? "Fast" : null;
       fastModeFallbackLabel = speedLabel ?? "Normal";
@@ -555,7 +569,7 @@ export function buildTraitsTriggerDisplay(input: {
       labels.push(speedLabel);
     }
   }
-  return { label: labels.join(" · ") };
+  return { label: labels.join(" · ") || (hasAutoCompact ? "Auto-compact" : "") };
 }
 
 export const TraitsPicker = memo(function TraitsPicker({

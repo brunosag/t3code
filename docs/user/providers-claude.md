@@ -48,6 +48,13 @@ Set **Auto-compact after** in the Claude provider settings to an integer between
 300,000 tokens. This changes when compaction happens, not the model's context
 window. Leave it empty for Claude Code's default.
 
+To turn automatic compaction off or on in an existing session, open the composer's
+model options and choose **Auto-compact** (on mobile, use the thread's model settings).
+The choice applies from your next message without restarting Claude. **Use Claude settings**
+restores Claude Code's configuration. This option is saved with the selected model's
+composer options. It does not cancel compaction already running or restore compacted
+history. With automatic compaction off, use `/compact` before reaching the context limit.
+
 You can also send `/compact` in an existing conversation. Web and desktop offer
 **Compact context** from the context meter. When you return to a large thread
 after Claude's prompt cache expires, a **Compact** chip with the thread's token count shows

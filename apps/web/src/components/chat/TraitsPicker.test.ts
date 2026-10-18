@@ -4,7 +4,11 @@ import {
   ProviderDriverKind,
   type ProviderOptionDescriptor,
 } from "@t3tools/contracts";
-import { buildTraitsTriggerDisplay, buildUnavailableModelOptionDescriptors } from "./TraitsPicker";
+import {
+  buildTraitsTriggerDisplay,
+  buildUnavailableModelOptionDescriptors,
+  shouldRenderTraitsControls,
+} from "./TraitsPicker";
 
 function selectDescriptor(
   id: string,
@@ -19,6 +23,54 @@ function fastModeDescriptor(
 ): Extract<ProviderOptionDescriptor, { type: "boolean" }> {
   return { id: "fastMode", label: "Fast Mode", type: "boolean", currentValue };
 }
+
+describe("Claude auto-compaction control", () => {
+  const descriptor = {
+    id: "autoCompact",
+    label: "Auto-compact",
+    type: "select" as const,
+    options: [
+      { id: "default", label: "Default", isDefault: true },
+      { id: "on", label: "On" },
+      { id: "off", label: "Off" },
+    ],
+  };
+
+  it("is available even when a custom model has no reasoning controls", () => {
+    expect(
+      shouldRenderTraitsControls({
+        provider: ProviderDriverKind.make("claudeAgent"),
+        models: [
+          {
+            slug: "custom",
+            name: "Custom",
+            isCustom: true,
+            capabilities: { optionDescriptors: [descriptor] },
+          },
+        ],
+        model: "custom",
+        prompt: "",
+        modelOptions: undefined,
+        planModeEnabled: false,
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["default", "Auto-compact"],
+    ["on", "Auto-compact On"],
+    ["off", "Auto-compact Off"],
+  ])("labels the %s override without adding the default to the composer", (currentValue, label) => {
+    expect(
+      buildTraitsTriggerDisplay({
+        provider: ProviderDriverKind.make("claudeAgent"),
+        descriptors: [{ ...descriptor, currentValue }],
+        primarySelectDescriptorId: descriptor.id,
+        ultrathinkPromptControlled: false,
+      }),
+    ).toEqual({ label });
+  });
+});
 
 function serviceTierDescriptor(
   currentValue: "default" | "priority" | "ultrafast" | "flex",

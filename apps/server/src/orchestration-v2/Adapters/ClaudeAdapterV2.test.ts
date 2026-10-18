@@ -2646,6 +2646,67 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect("changes auto-compaction for the next message without replacing the live process", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness;
+      const now = yield* DateTime.now;
+      const selection = {
+        instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+        model: "claude-opus-5-5",
+      } satisfies ModelSelection;
+      const start = (ordinal: number, value?: string) =>
+        harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make(`attempt-auto-compact:${ordinal}`),
+            text: `Request ${ordinal}`,
+            attachments: [],
+            providerTurnOrdinal: ordinal,
+            modelSelection: {
+              ...selection,
+              ...(value ? { options: [{ id: "autoCompact", value }] } : {}),
+            },
+          }),
+        );
+      const settle = Effect.gen(function* () {
+        yield* harness.offerAndWait(turnOneResult);
+        yield* Queue.take(harness.terminalReceipts);
+      });
+
+      yield* start(1, "off");
+      const originalOptions = harness.getOpenedOptions();
+      assert.propertyVal(originalOptions?.settings, "autoCompactEnabled", false);
+      yield* harness.offerAndWait(wakeTaskStarted);
+      yield* settle;
+      for (const [index, value] of ["on", "off", "default"].entries()) {
+        yield* start(index + 2, value);
+        yield* settle;
+      }
+      const appliedSettings = harness.liveSelectionChanges.filter(
+        (change) => typeof change === "object" && change !== null && !("model" in change),
+      );
+      assert.deepEqual(
+        appliedSettings.map((settings) =>
+          typeof settings === "object" && settings !== null && "autoCompactEnabled" in settings
+            ? settings.autoCompactEnabled
+            : "missing",
+        ),
+        [true, false, null],
+      );
+      assert.strictEqual(harness.getOpenedOptions(), originalOptions);
+      assert.lengthOf(harness.processQueues, 1);
+      assert.lengthOf(harness.offeredMessages, 4);
+      assert.isTrue(yield* harness.hasPendingBackgroundWork);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
   it.effect(
     "applies model, effort and Fast changes to a process running a background shell, but not thinking or a cleared effort",
     () =>
@@ -2698,9 +2759,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           yield* settle;
           assert.deepEqual(harness.liveSelectionChanges, [
             { model: "claude-opus-5-5" },
-            { effortLevel: "xhigh", fastMode: true, ultracode: true },
+            { effortLevel: "xhigh", fastMode: true, ultracode: true, autoCompactEnabled: null },
             { model: "claude-sonnet-4-6" },
-            { effortLevel: "high", fastMode: null, ultracode: null },
+            { effortLevel: "high", fastMode: null, ultracode: null, autoCompactEnabled: null },
           ]);
           assert.strictEqual(harness.getOpenedOptions(), originalOptions);
           assert.lengthOf(harness.offeredMessages, 4);

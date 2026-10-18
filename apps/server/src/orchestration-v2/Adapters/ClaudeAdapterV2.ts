@@ -1052,6 +1052,7 @@ function claudeLiveSelectionFlagSettings(
     ...(selection.effort === undefined ? {} : { effortLevel: selection.effort as EffortLevel }),
     fastMode: selection.settings.fastMode ?? null,
     ultracode: selection.settings.ultracode ?? null,
+    autoCompactEnabled: selection.settings.autoCompactEnabled ?? null,
   };
 }
 

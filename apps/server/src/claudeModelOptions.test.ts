@@ -14,6 +14,27 @@ const selection = (
 });
 
 describe("compileClaudeModelSelection", () => {
+  it.each([
+    ["on", true],
+    ["off", false],
+  ] as const)("compiles auto-compaction %s for any Claude model", (value, enabled) => {
+    expect(
+      compileClaudeModelSelection(selection("custom-router-model", [{ id: "autoCompact", value }]))
+        .settings,
+    ).toEqual({ autoCompactEnabled: enabled });
+  });
+
+  it.each([undefined, "default", "invalid"])(
+    "leaves auto-compaction configuration to Claude for %s",
+    (value) => {
+      expect(
+        compileClaudeModelSelection(
+          selection("custom-router-model", value ? [{ id: "autoCompact", value }] : []),
+        ).settings,
+      ).not.toHaveProperty("autoCompactEnabled");
+    },
+  );
+
   it("compiles context, effort, and settings together", () => {
     expect(
       compileClaudeModelSelection(
