@@ -11,6 +11,7 @@ import {
   clearComposerDraft,
   setComposerDraftText,
   setQuestionDraftText,
+  questionAttachmentDraftsAtom,
 } from "./use-composer-drafts";
 import {
   composerAttachmentUploadsAtom,
@@ -127,7 +128,13 @@ export function useSelectedThreadRequests() {
     }
   }, [activePendingUserInput, selectedThreadShell]);
   const questionServerConfigs = useServerConfigs();
-  const attachmentDrafts = useAtomValue(composerDraftsAtom);
+  const attachmentDrafts = useAtomValue(
+    questionAttachmentDraftsAtom(
+      selectedThreadShell
+        ? questionAttachmentDraftPrefix(selectedThreadShell.environmentId, selectedThreadShell.id)
+        : "",
+    ),
+  );
   const preparationCounts = useAtomValue(questionAttachmentPreparationAtom);
   const uploadStates = useAtomValue(composerAttachmentUploadsAtom);
   useEffect(() => {

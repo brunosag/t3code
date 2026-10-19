@@ -24,7 +24,8 @@ vi.mock("@effect/atom-react", () => ({
           : appAtomRegistry.get(atom as never),
 }));
 vi.mock("./use-composer-drafts", () => ({
-  composerDraftsAtom: "drafts",
+  composerDraftsAtom: "all-drafts",
+  questionAttachmentDraftsAtom: () => "drafts",
   clearComposerDraft: vi.fn(),
   getComposerDraftSnapshot: (key: string) => fixture.drafts[key] ?? { text: "", attachments: [] },
   setQuestionDraftText: (key: string, text: string) => {

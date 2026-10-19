@@ -1,7 +1,7 @@
 import { PlusIcon, Trash2Icon } from "lucide-react";
 import * as Equal from "effect/Equal";
-import { useMemo, useState, type ReactNode } from "react";
-import type { AgentDefinition, ServerProvider } from "@t3tools/contracts";
+import { useState, type ReactNode } from "react";
+import type { AgentDefinition } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 
 import { getCustomModelOptionsByInstance } from "../../modelSelection";
@@ -11,6 +11,7 @@ import {
   sortProviderInstanceEntries,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
+import { useEnvironmentProviders } from "../../state/environments";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
@@ -424,21 +425,18 @@ export function AgentsSettings() {
 
   // Agents are Pi-only, so the model and reasoning pickers are scoped to the
   // Pi instances of the representative environment.
-  const providers = environment?.serverConfig?.providers ?? EMPTY_SERVER_PROVIDERS;
-  const piProviders = useMemo(
-    (): ReadonlyArray<ServerProvider> => providers.filter((provider) => provider.driver === "pi"),
-    [providers],
-  );
-  const entries = useMemo(
-    () =>
-      sortProviderInstanceEntries(
-        applyProviderInstanceSettings(
-          deriveProviderInstanceEntries(piProviders),
-          settings,
-          target?.projectId ?? null,
-        ),
-      ),
-    [piProviders, settings, target?.projectId],
+  const providersByEnvironment = useEnvironmentProviders();
+  const providers =
+    (environment?.serverConfig
+      ? providersByEnvironment.get(environment.environmentId)
+      : undefined) ?? EMPTY_SERVER_PROVIDERS;
+  const piProviders = providers.filter((provider) => provider.driver === "pi");
+  const entries = sortProviderInstanceEntries(
+    applyProviderInstanceSettings(
+      deriveProviderInstanceEntries(piProviders),
+      settings,
+      target?.projectId ?? null,
+    ),
   );
   const modelDisabledReason = useScopedModelDisabledReason(settings, entries);
 
