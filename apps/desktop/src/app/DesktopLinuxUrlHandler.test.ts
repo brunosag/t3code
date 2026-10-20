@@ -159,6 +159,27 @@ const emptyRecording = (): RecordedRegistration => ({
 });
 
 describe("DesktopLinuxUrlHandler", () => {
+  it.each([
+    {
+      execTarget: "/opt/T3(beta)/t3code.AppImage",
+      execLine: 'Exec="/opt/T3(beta)/t3code.AppImage" %U',
+    },
+    {
+      execTarget: "/opt/t3%20code/t3code.AppImage",
+      execLine: "Exec=/opt/t3%%20code/t3code.AppImage %U",
+    },
+  ])("renders the handler Exec line for $execTarget", ({ execTarget, execLine }) => {
+    const entry = DesktopLinuxUrlHandler.renderLinuxDesktopEntry({
+      displayName: "T3 Code",
+      execTarget,
+      scheme: "t3code",
+      wmClass: "t3code",
+      isDevelopment: false,
+      isPackaged: true,
+    });
+
+    assert.include(entry.split("\n"), execLine);
+  });
   it("renders the launcher entry with freedesktop Exec quoting", () => {
     const entry = DesktopLinuxUrlHandler.renderLinuxDesktopEntry({
       displayName: "T3 Code (Nightly)",
@@ -252,7 +273,7 @@ describe("DesktopLinuxUrlHandler", () => {
         );
         assert.include(
           recorded.files[0]?.content,
-          'Exec="/home/alice/Applications/T3-Code.AppImage" %U',
+          "Exec=/home/alice/Applications/T3-Code.AppImage %U",
         );
         assert.include(recorded.files[0]?.content, "MimeType=x-scheme-handler/t3code;");
         assert.deepEqual(recorded.commands, [
@@ -277,7 +298,15 @@ describe("DesktopLinuxUrlHandler", () => {
 
       assert.include(
         recorded.files[0]?.content,
-        `Exec=${DesktopLinuxUrlHandler.escapeDesktopEntryExecArgument(process.execPath)} %U`,
+        DesktopLinuxUrlHandler.renderLinuxDesktopEntry({
+          displayName: "T3 Code (Alpha)",
+          execTarget: process.execPath,
+          scheme: "t3code",
+          wmClass: "t3code",
+          isDevelopment: false,
+          isPackaged: true,
+          iconPath: "/home/alice/.local/share/icons/t3code.desktop.png",
+        }),
       );
     });
   });

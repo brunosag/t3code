@@ -241,19 +241,18 @@ const make = Effect.gen(function* () {
     yield* Stream.runDrain(handle.stderr).pipe(Effect.ignore, Effect.forkScoped);
 
     // Takes responses until the one for `id`, skipping answers to interrupted requests.
-    const awaitResponse = (id: number) =>
-      Effect.gen(function* () {
-        while (true) {
-          const response = yield* Queue.take(responses).pipe(
-            Effect.catchTags({ Done: () => new EngineFailure({ reason: "exited" }) }),
-          );
-          if (response.id !== id) continue;
-          if (response.error !== undefined) {
-            return yield* new EngineFailure({ reason: response.error });
-          }
-          return response;
+    const awaitResponse = Effect.fn("KokoroEngine.awaitResponse")(function* (id: number) {
+      while (true) {
+        const response = yield* Queue.take(responses).pipe(
+          Effect.catchTags({ Done: () => new EngineFailure({ reason: "exited" }) }),
+        );
+        if (response.id !== id) continue;
+        if (response.error !== undefined) {
+          return yield* new EngineFailure({ reason: response.error });
         }
-      });
+        return response;
+      }
+    });
 
     yield* awaitResponse(0).pipe(Effect.mapError(start));
 
@@ -273,47 +272,49 @@ const make = Effect.gen(function* () {
 
   const engine = yield* RcRef.make({ acquire: startEngine, idleTimeToLive: ENGINE_IDLE_TIME });
 
-  const acquire: KokoroEngine["Service"]["acquire"] = ({ voice, onDownloadProgress }) =>
-    Effect.gen(function* () {
-      yield* ensureFile(MODEL_FILE.path, {
-        sha256: MODEL_FILE.sha256,
-        onProgress: onDownloadProgress,
-      });
-      const tokenizerPath = yield* ensureFile("tokenizer.json");
-      const voicePath = yield* ensureFile(`voices/${voice}.bin`);
-      const tokenizer = yield* fileSystem.readFileString(tokenizerPath).pipe(
-        Effect.flatMap(decodeTokenizer),
-        Effect.mapError((cause) => new SpeechModelDownloadError({ file: "tokenizer.json", cause })),
-      );
-      const running = yield* RcRef.get(engine);
-      // A failed engine is replaced on the next request rather than reused.
-      const failed = (operation: SpeechEngineError["operation"]) => (cause: unknown) =>
-        RcRef.invalidate(engine).pipe(
-          Effect.andThen(Effect.fail(new SpeechEngineError({ operation, cause }))),
-        );
-      return {
-        vocab: new Map(Object.entries(tokenizer.model.vocab)),
-        phonemize: (text, language) =>
-          running
-            .call((id) => ({ id, op: "phonemize", text, language }))
-            .pipe(
-              Effect.map((response) => response.phonemes ?? []),
-              Effect.catch(failed("phonemize")),
-            ),
-        infer: (ids) =>
-          running
-            .call((id) => ({ id, op: "infer", ids: [...ids], voicePath }))
-            .pipe(
-              Effect.flatMap((response) => {
-                const bytes = Base64.decode(response.audio ?? "");
-                return Result.isSuccess(bytes)
-                  ? Effect.succeed(new Float32Array(bytes.success.slice().buffer))
-                  : Effect.fail(bytes.failure);
-              }),
-              Effect.catch(failed("infer")),
-            ),
-      } satisfies KokoroSession;
+  const acquire: KokoroEngine["Service"]["acquire"] = Effect.fn("KokoroEngine.acquire")(function* ({
+    voice,
+    onDownloadProgress,
+  }) {
+    yield* ensureFile(MODEL_FILE.path, {
+      sha256: MODEL_FILE.sha256,
+      onProgress: onDownloadProgress,
     });
+    const tokenizerPath = yield* ensureFile("tokenizer.json");
+    const voicePath = yield* ensureFile(`voices/${voice}.bin`);
+    const tokenizer = yield* fileSystem.readFileString(tokenizerPath).pipe(
+      Effect.flatMap(decodeTokenizer),
+      Effect.mapError((cause) => new SpeechModelDownloadError({ file: "tokenizer.json", cause })),
+    );
+    const running = yield* RcRef.get(engine);
+    // A failed engine is replaced on the next request rather than reused.
+    const failed = (operation: SpeechEngineError["operation"]) => (cause: unknown) =>
+      RcRef.invalidate(engine).pipe(
+        Effect.andThen(Effect.fail(new SpeechEngineError({ operation, cause }))),
+      );
+    return {
+      vocab: new Map(Object.entries(tokenizer.model.vocab)),
+      phonemize: (text, language) =>
+        running
+          .call((id) => ({ id, op: "phonemize", text, language }))
+          .pipe(
+            Effect.map((response) => response.phonemes ?? []),
+            Effect.catch(failed("phonemize")),
+          ),
+      infer: (ids) =>
+        running
+          .call((id) => ({ id, op: "infer", ids: [...ids], voicePath }))
+          .pipe(
+            Effect.flatMap((response) => {
+              const bytes = Base64.decode(response.audio ?? "");
+              return Result.isSuccess(bytes)
+                ? Effect.succeed(new Float32Array(bytes.success.slice().buffer))
+                : Effect.fail(bytes.failure);
+            }),
+            Effect.catch(failed("infer")),
+          ),
+    } satisfies KokoroSession;
+  });
 
   return KokoroEngine.of({ acquire });
 });

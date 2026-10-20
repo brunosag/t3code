@@ -54,56 +54,55 @@ const isThreadActive = (thread: ThreadActivity | null) =>
  * events re-read the thread through `getThreadShell`, so stale events cannot
  * pin the lock. `holdLock` should keep the lock until it is interrupted.
  */
-export const run = <E>(input: {
+export const run = Effect.fn("SleepInhibitor.run")(function* <E>(input: {
   readonly initialThreads: Iterable<ThreadActivity>;
   readonly events: Stream.Stream<OrchestrationV2DomainEvent, E>;
   readonly getThreadShell: (threadId: ThreadId) => Effect.Effect<ThreadActivity | null>;
   readonly holdLock: Effect.Effect<void, never, Scope.Scope>;
-}) =>
-  Effect.gen(function* () {
-    const activeThreadIds = new Set(
-      Array.from(input.initialThreads)
-        .filter(isThreadActive)
-        .map((thread) => thread.id),
-    );
-    let lock: Fiber.Fiber<void> | null = null;
+}) {
+  const activeThreadIds = new Set(
+    Array.from(input.initialThreads)
+      .filter(isThreadActive)
+      .map((thread) => thread.id),
+  );
+  let lock: Fiber.Fiber<void> | null = null;
 
-    const sync = Effect.gen(function* () {
-      if (activeThreadIds.size > 0 && lock === null) {
-        lock = yield* Effect.forkScoped(Effect.scoped(input.holdLock), {
-          startImmediately: true,
-        });
-      } else if (activeThreadIds.size === 0 && lock !== null) {
-        yield* Fiber.interrupt(lock);
-        lock = null;
-      }
-    });
-
-    yield* sync;
-    yield* Stream.runForEach(input.events, (event) =>
-      Effect.gen(function* () {
-        switch (event.type) {
-          case "run.created":
-          case "run.updated":
-          case "provider-thread.updated":
-          case "thread.provider-switched":
-          case "thread.deleted":
-            break;
-          case "turn-item.updated":
-            if (!isBackgroundTurnItem(event.payload)) return;
-            break;
-          default:
-            return;
-        }
-        if (isThreadActive(yield* input.getThreadShell(event.threadId))) {
-          activeThreadIds.add(event.threadId);
-        } else {
-          activeThreadIds.delete(event.threadId);
-        }
-        yield* sync;
-      }),
-    );
+  const sync = Effect.gen(function* () {
+    if (activeThreadIds.size > 0 && lock === null) {
+      lock = yield* Effect.forkScoped(Effect.scoped(input.holdLock), {
+        startImmediately: true,
+      });
+    } else if (activeThreadIds.size === 0 && lock !== null) {
+      yield* Fiber.interrupt(lock);
+      lock = null;
+    }
   });
+
+  yield* sync;
+  yield* Stream.runForEach(input.events, (event) =>
+    Effect.gen(function* () {
+      switch (event.type) {
+        case "run.created":
+        case "run.updated":
+        case "provider-thread.updated":
+        case "thread.provider-switched":
+        case "thread.deleted":
+          break;
+        case "turn-item.updated":
+          if (!isBackgroundTurnItem(event.payload)) return;
+          break;
+        default:
+          return;
+      }
+      if (isThreadActive(yield* input.getThreadShell(event.threadId))) {
+        activeThreadIds.add(event.threadId);
+      } else {
+        activeThreadIds.delete(event.threadId);
+      }
+      yield* sync;
+    }),
+  );
+});
 
 const holdSystemdInhibitLock = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;

@@ -87,6 +87,12 @@ export function escapeDesktopEntryExecArgument(value: string): string {
 }
 
 // Named after the executable, which is what packaging installs into hicolor.
+// Legacy xdg-open looks up the first Exec word without unquoting it.
+const escapeUrlHandlerExecTarget = (value: string): string =>
+  /[ \t\n"'\\><~|&;$*?#()`]/.test(value)
+    ? escapeDesktopEntryExecArgument(value)
+    : escapeDesktopEntryString(value.replaceAll("%", "%%"));
+
 const LAUNCHER_ICON_NAME = "t3code";
 
 /**
@@ -111,7 +117,7 @@ export function renderLinuxDesktopEntry(input: {
     "[Desktop Entry]",
     "Type=Application",
     `Name=${escapeDesktopEntryString(input.displayName)}`,
-    `Exec=${escapeDesktopEntryExecArgument(input.execTarget)} %U`,
+    `Exec=${escapeUrlHandlerExecTarget(input.execTarget)} %U`,
     "Terminal=false",
     `StartupWMClass=${escapeDesktopEntryString(input.wmClass)}`,
     ...(isLauncher

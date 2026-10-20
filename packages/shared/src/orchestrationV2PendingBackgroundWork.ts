@@ -7,7 +7,9 @@ import type {
   ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import { isOrchestrationV2WorkActive } from "@t3tools/contracts";
+import * as Predicate from "effect/Predicate";
 
+import { resolveT3McpToolId } from "./t3McpToolPresentation.ts";
 import { threadPullRequestKeyOf } from "./threadPullRequests.ts";
 
 const BACKGROUND_TURN_ITEM_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
@@ -27,6 +29,14 @@ export function isPullRequestWatchTask(
 ): boolean {
   return task.kind === "monitor" && task.taskId.startsWith(PULL_REQUEST_WATCH_TASK_PREFIX);
 }
+// Plans and text streams can stay open across tool calls without executing work.
+const EXECUTION_TURN_ITEM_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
+  ...BACKGROUND_TURN_ITEM_TYPES,
+  "file_change",
+  "file_search",
+  "web_search",
+  "compaction",
+]);
 
 const TERMINAL_RUN_STATUSES = new Set<OrchestrationV2Run["status"]>([
   "cancelled",
@@ -58,6 +68,39 @@ export function turnItemUpdateCanEndBackgroundWork(
   item: Pick<OrchestrationV2TurnItem, "type" | "status">,
 ): boolean {
   return isBackgroundTurnItem(item) && !isOrchestrationV2WorkActive(item.status);
+}
+
+export function deriveBlockedOnThreadWait(input: {
+  readonly activeRun: Pick<OrchestrationV2Run, "id" | "status"> | null;
+  readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
+}): boolean {
+  if (input.activeRun?.status !== "running") return false;
+  let hasWait = false;
+  for (const item of input.turnItems) {
+    if (
+      item.runId !== input.activeRun.id ||
+      !EXECUTION_TURN_ITEM_TYPES.has(item.type) ||
+      (item.status !== "running" && item.status !== "waiting") ||
+      // App-owned rows track the child, including the child a blocking delegate is waiting for.
+      (item.type === "subagent" && item.origin === "app_owned")
+    ) {
+      continue;
+    }
+    if (item.type !== "dynamic_tool") return false;
+    const tool = resolveT3McpToolId(item.toolName);
+    if (
+      tool !== "t3_thread_wait" &&
+      !(
+        tool === "delegate_task" &&
+        Predicate.isObject(item.input) &&
+        Reflect.get(item.input, "mode") === "wait"
+      )
+    ) {
+      return false;
+    }
+    hasWait = true;
+  }
+  return hasWait;
 }
 
 export function backgroundWorkHoldsCompletion(

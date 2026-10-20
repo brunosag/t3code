@@ -67,11 +67,11 @@ jobs:
             apps/web/src/pendingUserInput.test.ts \
             apps/web/src/versionSkew.test.ts \
             apps/mobile/src/lib/threadActivity.test.ts \
-            apps/mobile/src/state/use-selected-thread-requests.test.tsx \
             packages/contracts/src/settings.test.ts \
             apps/desktop/src/app/DesktopEnvironment.test.ts \
             apps/desktop/src/window/DesktopWindow.test.ts \
             scripts/dev-runner.test.ts
+          (cd apps/mobile && vp test run src/state/use-selected-thread-requests.test.tsx)
 
       # T3 Connect's client identifiers are public (see .env.example) and the
       # vite configs read them from the repo root .env via loadRepoEnv. Without
