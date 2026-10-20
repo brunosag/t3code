@@ -1,5 +1,6 @@
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
+import { withoutFastModeSelection } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   isOrchestrationV2WorkActive,
@@ -8,6 +9,7 @@ import {
   OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
   OrchestrationV2RuntimeRequest,
+  ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionId,
   ThreadId,
@@ -329,6 +331,27 @@ export const layerWithOptions = (
       const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
       const agentScope = yield* AgentScope;
+      // Hiding the option is not enough: threads and delegated tasks keep the
+      // selection they made before the setting was turned on.
+      const withFastModePolicy = Effect.fn("ProviderSessionManagerV2.withFastModePolicy")(
+        function* <I extends { readonly modelSelection?: ModelSelection | undefined }>(
+          input: I,
+          driver: ProviderDriverKind,
+        ) {
+          if (input.modelSelection === undefined || Option.isNone(serverSettings)) return input;
+          const disabled = yield* serverSettings.value.getSettings.pipe(
+            Effect.map((settings) => settings.disableFastMode),
+            Effect.orElseSucceed(() => false),
+          );
+          if (!disabled) return input;
+          return {
+            ...input,
+            modelSelection: withoutFastModeSelection(input.modelSelection, {
+              pinServiceTier: driver === ProviderDriverKind.make("codex"),
+            }),
+          };
+        },
+      );
       const agentAccessSettings = Effect.fn("ProviderSessionManagerV2.agentAccessSettings")(
         function* (threadId: ThreadId) {
           if (Option.isNone(serverSettings)) return { browser: true, device: false };
@@ -1730,7 +1753,7 @@ export const layerWithOptions = (
               modelFamily: normalizeModelMetricLabel(model),
             },
           });
-        return {
+        const decorated: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
           ...runtime,
           subscribeEvents,
           events: Stream.unwrap(
@@ -1889,6 +1912,17 @@ export const layerWithOptions = (
                   .pipe(turnMetrics("runtime-request-response")),
               ),
             ),
+        };
+        return {
+          ...decorated,
+          ensureThread: (input) =>
+            withFastModePolicy(input, runtime.driver).pipe(Effect.flatMap(decorated.ensureThread)),
+          resumeThread: (input) =>
+            withFastModePolicy(input, runtime.driver).pipe(Effect.flatMap(decorated.resumeThread)),
+          forkThread: (input) =>
+            withFastModePolicy(input, runtime.driver).pipe(Effect.flatMap(decorated.forkThread)),
+          startTurn: (input) =>
+            withFastModePolicy(input, runtime.driver).pipe(Effect.flatMap(decorated.startTurn)),
         };
       };
 
@@ -2160,13 +2194,17 @@ export const layerWithOptions = (
                   dropMcpCredentialReservation(input.threadId, mcpCredentialId);
                 }
               });
+              const { modelSelection } = yield* withFastModePolicy(
+                { modelSelection: input.modelSelection },
+                adapter.driver,
+              );
               const sessionScope = yield* Scope.fork(sessionScopes);
               yield* agentScope.clear(input.threadId);
               const runtime = yield* adapter
                 .openSession({
                   threadId: input.threadId,
                   providerSessionId: input.providerSessionId,
-                  modelSelection: input.modelSelection,
+                  modelSelection,
                   runtimePolicy: input.runtimePolicy,
                   ...(input.resumeFromSession === undefined
                     ? {}

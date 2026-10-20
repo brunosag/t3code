@@ -631,6 +631,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
       ? ["Continue threads after restarts"]
       : []),
+    ...(settings.disableFastMode !== DEFAULT_UNIFIED_SETTINGS.disableFastMode
+      ? ["Disable Fast Mode"]
+      : []),
     ...(isBackgroundActivityDirty ? ["Background activity"] : []),
     ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
       ? ["New thread mode"]
@@ -751,6 +754,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
+      disableFastMode: DEFAULT_UNIFIED_SETTINGS.disableFastMode,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
       backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
@@ -2913,6 +2917,31 @@ export function GeneralSettingsPanel() {
                 updateSettings({ continueThreadsAfterServerUpdate: Boolean(checked) })
               }
               aria-label="Continue threads after restarts"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("disable-fast-mode")}
+          serverScoped
+          settingKeys={["disableFastMode"]}
+          description="Hide Fast Mode and fast service tiers from every thread, subagent, and delegated task, and run turns that had them selected at standard speed."
+          resetAction={
+            settings.disableFastMode !== DEFAULT_UNIFIED_SETTINGS.disableFastMode ? (
+              <SettingResetButton
+                label="disable Fast Mode"
+                onClick={() =>
+                  updateSettings({ disableFastMode: DEFAULT_UNIFIED_SETTINGS.disableFastMode })
+                }
+              />
+            ) : null
+          }
+          control={
+            <ScopedSwitch
+              settingKeys={["disableFastMode"]}
+              checked={settings.disableFastMode}
+              onCheckedChange={(checked) => updateSettings({ disableFastMode: Boolean(checked) })}
+              aria-label="Disable Fast Mode"
             />
           }
         />

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProviderDriverKind, ProviderInstanceId, type ModelCapabilities } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ModelCapabilities,
+  type ServerProvider,
+} from "@t3tools/contracts";
 
 import {
   applyClaudePromptEffortPrefix,
@@ -20,6 +25,8 @@ import {
   normalizeCustomModelSlug,
   normalizeModelSlug,
   modelSelectionsEqual,
+  withoutFastModeProviders,
+  withoutFastModeSelection,
 } from "./model.ts";
 
 it("keeps the Codex catalog display formatting", () => {
@@ -343,5 +350,104 @@ describe("provider-reported option display", () => {
     { ...selection, options: [{ id: "variant", value: "none" }] },
   ])("ignores reports after changing the model, instance, or option: %j", (selected) => {
     expect(getProviderOptionCurrentLabel(descriptor, selected, reported)).toBe("Unknown");
+  });
+});
+
+describe("disabled Fast Mode", () => {
+  const instanceId = ProviderInstanceId.make("codex");
+
+  it("drops fast service tiers and falls back to Standard", () => {
+    const provider = {
+      instanceId,
+      driver: ProviderDriverKind.make("codex"),
+      status: "ready",
+      enabled: true,
+      installed: true,
+      auth: { status: "authenticated" },
+      checkedAt: "2026-06-10T00:00:00.000Z",
+      version: null,
+      slashCommands: [],
+      skills: [],
+      models: [
+        {
+          slug: "gpt-5.5",
+          name: "GPT-5.5",
+          isCustom: false,
+          capabilities: createModelCapabilities({
+            optionDescriptors: [
+              {
+                id: "serviceTier",
+                label: "Service Tier",
+                type: "select",
+                currentValue: "priority",
+                options: [
+                  { id: "default", label: "Standard" },
+                  { id: "priority", label: "Fast", isDefault: true },
+                  { id: "ultrafast", label: "Ultrafast" },
+                  { id: "flex", label: "Flex" },
+                ],
+              },
+            ],
+          }),
+        },
+        {
+          slug: "gpt-5.5-mini",
+          name: "GPT-5.5 Mini",
+          isCustom: false,
+          capabilities: createModelCapabilities({
+            optionDescriptors: [
+              {
+                id: "serviceTier",
+                label: "Service Tier",
+                type: "select",
+                options: [
+                  { id: "default", label: "Standard", isDefault: true },
+                  { id: "priority", label: "Fast" },
+                ],
+              },
+            ],
+          }),
+        },
+      ],
+    } as const satisfies ServerProvider;
+
+    const [stripped] = withoutFastModeProviders([provider]);
+    expect(stripped?.models[0]?.capabilities?.optionDescriptors).toEqual([
+      {
+        id: "serviceTier",
+        label: "Service Tier",
+        type: "select",
+        currentValue: "default",
+        options: [
+          { id: "default", label: "Standard", isDefault: true },
+          { id: "flex", label: "Flex" },
+        ],
+      },
+    ]);
+    expect(stripped?.models[1]?.capabilities?.optionDescriptors).toEqual([]);
+  });
+
+  it("removes Fast Mode from a selection and pins Codex to Standard", () => {
+    const selection = createModelSelection(instanceId, "gpt-5.5", [
+      { id: "reasoningEffort", value: "high" },
+      { id: "fastMode", value: true },
+    ]);
+    expect(withoutFastModeSelection(selection, { pinServiceTier: true }).options).toEqual([
+      { id: "reasoningEffort", value: "high" },
+      { id: "serviceTier", value: "default" },
+    ]);
+    expect(
+      withoutFastModeSelection(
+        createModelSelection(instanceId, "gpt-5.5", [{ id: "serviceTier", value: "ultrafast" }]),
+        { pinServiceTier: false },
+      ).options,
+    ).toEqual([{ id: "serviceTier", value: "default" }]);
+  });
+
+  it("returns an untouched selection as the same object", () => {
+    const selection = createModelSelection(instanceId, "claude-opus-5-5", [
+      { id: "effort", value: "max" },
+    ]);
+    expect(withoutFastModeSelection(selection, { pinServiceTier: false })).toBe(selection);
   });
 });

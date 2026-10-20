@@ -1184,6 +1184,11 @@ export const ServerSettings = Schema.Struct({
   continueThreadsAfterServerUpdate: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
+  /**
+   * Withholds every Fast Mode option, including Codex fast service tiers, from
+   * clients and agents, and strips it from turns that already selected it.
+   */
+  disableFastMode: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   projectAgentBrowserAccessOverrides: Schema.Record(ProjectId, Schema.Boolean).pipe(
@@ -1551,6 +1556,7 @@ export const ServerSettingsPatch = Schema.Struct({
   easDeviceHosts: Schema.optionalKey(EasDeviceHostConfigs),
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   compactIdleThreads: Schema.optionalKey(Schema.Boolean),
+  disableFastMode: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),

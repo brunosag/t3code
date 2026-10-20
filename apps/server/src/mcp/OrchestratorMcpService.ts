@@ -61,6 +61,7 @@ import {
   type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
+import { withoutFastModeSelection } from "@t3tools/shared/model";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import {
   normalizeThreadPullRequestKey,
@@ -1990,15 +1991,21 @@ const make = Effect.gen(function* () {
       const { parent, limits } = yield* loadCaller(scope);
       const providers = yield* loadProviders;
       const orchestrationCapableInstanceIds = yield* loadOrchestrationCapableInstanceIds();
-      const modelPreferences = yield* serverSettings.getSettings.pipe(
-        Effect.map((settings) => settings.providerModelPreferences ?? {}),
+      const settings = yield* serverSettings.getSettings.pipe(
         Effect.mapError(() => failure("orchestration_error", "Unable to read server settings.")),
       );
+      const modelPreferences = settings.providerModelPreferences ?? {};
+      const inheritedSelection =
+        parent === undefined || parent === null
+          ? undefined
+          : settings.disableFastMode
+            ? withoutFastModeSelection(parent.thread.modelSelection, { pinServiceTier: false })
+            : parent.thread.modelSelection;
       return {
         parentThreadId: parent?.thread.id ?? null,
-        inheritedProviderInstanceId: parent?.thread.modelSelection.instanceId ?? null,
-        inheritedModel: parent?.thread.modelSelection.model ?? null,
-        inheritedOptions: parent?.thread.modelSelection.options ?? [],
+        inheritedProviderInstanceId: inheritedSelection?.instanceId ?? null,
+        inheritedModel: inheritedSelection?.model ?? null,
+        inheritedOptions: inheritedSelection?.options ?? [],
         runtimeMode: limits.runtimeMode,
         interactionMode: limits.interactionMode,
         providers: providers.map((provider) => {

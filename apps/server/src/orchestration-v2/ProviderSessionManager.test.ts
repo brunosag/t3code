@@ -175,6 +175,7 @@ interface TestProviderRuntimeState {
   readonly interruptCount: number;
   readonly resumeCount: number;
   readonly unloadedNativeThreadIds: ReadonlyArray<string>;
+  readonly modelSelections: ReadonlyArray<ModelSelection>;
   readonly eventQueues: ReadonlyMap<
     string,
     Queue.Queue<ProviderAdapter.ProviderAdapterV2Event, Cause.Done>
@@ -187,6 +188,7 @@ const emptyState: TestProviderRuntimeState = {
   interruptCount: 0,
   resumeCount: 0,
   unloadedNativeThreadIds: [],
+  modelSelections: [],
   eventQueues: new Map(),
 };
 
@@ -390,6 +392,7 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
           return {
             ...current,
             openCount: current.openCount + 1,
+            modelSelections: [...current.modelSelections, input.modelSelection],
             eventQueues,
           };
         });
@@ -429,7 +432,11 @@ const makeProviderAdapter = Effect.fnUntraced(function* (
               ...current,
               resumeCount: current.resumeCount + 1,
             })).pipe(Effect.as(threadInput.providerThread)),
-          startTurn: () => options.startTurn ?? Effect.void,
+          startTurn: (turnInput) =>
+            Ref.update(state, (current) => ({
+              ...current,
+              modelSelections: [...current.modelSelections, turnInput.modelSelection],
+            })).pipe(Effect.andThen(options.startTurn ?? Effect.void)),
           steerTurn: () => Effect.void,
           interruptTurn: () =>
             Ref.update(state, (current) => ({
@@ -1057,6 +1064,90 @@ it.effect("ProviderSessionManagerV2 records provider session and turn metrics", 
       Effect.provideService(Metric.MetricRegistry, new Map()),
     );
   }),
+);
+
+it.effect(
+  "ProviderSessionManagerV2 runs Fast Mode selections at standard speed when disabled",
+  () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make(emptyState);
+      const fastSelection = {
+        ...modelSelection,
+        options: [
+          { id: "reasoningEffort", value: "high" },
+          { id: "fastMode", value: true },
+        ],
+      } satisfies ModelSelection;
+      const standardSelection = {
+        ...modelSelection,
+        options: [
+          { id: "reasoningEffort", value: "high" },
+          { id: "serviceTier", value: "default" },
+        ],
+      } satisfies ModelSelection;
+      yield* Effect.gen(function* () {
+        const eventSink = yield* EventSink.EventSinkV2;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+        const now = yield* DateTime.now;
+        const threadId = ThreadId.make("thread-provider-session-manager-fast-mode");
+        const providerSessionId = yield* idAllocator.allocate.providerSession({
+          providerInstanceId: modelSelection.instanceId,
+          threadId,
+        });
+        const providerThread = makeProviderThread({
+          idAllocator,
+          threadId,
+          providerSessionId,
+          now,
+        });
+        const runId = idAllocator.derive.run({ threadId, ordinal: 1 });
+        yield* eventSink.write({
+          events: [yield* makeThreadCreatedEvent({ idAllocator, threadId, now })],
+        });
+
+        const runtime = yield* manager.open({
+          threadId,
+          providerSessionId,
+          modelSelection: fastSelection,
+          runtimePolicy,
+        });
+        yield* runtime.startTurn({
+          appThread: (yield* projectionStore.getThreadProjection(threadId)).thread,
+          threadId,
+          runId,
+          runOrdinal: 1,
+          providerTurnOrdinal: 1,
+          attemptId: idAllocator.derive.runAttempt({ runId, attemptOrdinal: 1 }),
+          rootNodeId: idAllocator.derive.rootNode({ runId }),
+          providerThread,
+          message: {
+            createdBy: "user",
+            creationSource: "web",
+            messageId: yield* idAllocator.allocate.message({ threadId, ordinal: 1 }),
+            text: "hello",
+            attachments: [],
+          },
+          modelSelection: fastSelection,
+          runtimePolicy,
+        });
+        yield* manager.close(providerSessionId);
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            state,
+            idleTimeoutMs: 60_000,
+            serverSettingsLayer: ServerSettings.layerTest({ disableFastMode: true }),
+          }),
+        ),
+      );
+
+      assert.deepStrictEqual((yield* Ref.get(state)).modelSelections, [
+        standardSelection,
+        standardSelection,
+      ]);
+    }),
 );
 
 it.effect("ProviderSessionManagerV2 opens a duplicate session only once", () =>

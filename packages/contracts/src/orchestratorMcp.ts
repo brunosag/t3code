@@ -116,7 +116,7 @@ export const OrchestratorMcpTarget = Schema.Struct({
   options: Schema.optional(
     OrchestratorMcpTargetOptions.annotate({
       description:
-        "Model options from orchestrator_capabilities. For the same provider instance and model, overrides individual inherited values; [] or {} clears them. Claude: {effort: 'max', fastMode: true}; Codex: {reasoningEffort: 'max', serviceTier: 'priority'}. Only use options advertised by the selected model.",
+        "Model options from orchestrator_capabilities. For the same provider instance and model, overrides individual inherited values; [] or {} clears them. Claude: {effort: 'max'}; Codex: {reasoningEffort: 'max'}. Only use options advertised by the selected model.",
     }),
   ),
 });

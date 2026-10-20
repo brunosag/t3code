@@ -456,6 +456,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment-defaults",
   },
   {
+    id: "disable-fast-mode",
+    title: "Disable Fast Mode",
+    to: "/settings/general",
+    scope: "environment-defaults",
+    searchTerms: ["fast mode service tier priority speed cost turn off"],
+  },
+  {
     id: "continue-threads-after-server-update",
     title: "Continue threads after restarts",
     to: "/settings/general",

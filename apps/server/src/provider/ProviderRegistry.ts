@@ -22,9 +22,11 @@ import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
+import { withoutFastModeProviders } from "@t3tools/shared/model";
 import * as ModelManifest from "./ModelManifest.ts";
 import { applyProviderCompatibility } from "./providerCompatibility.ts";
 import * as ServerConfig from "../config.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import {
   hydrateCachedProvider,
@@ -379,11 +381,26 @@ export const layer = Layer.effect(
     const config = yield* ServerConfig.ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
 
     const changesPubSub = yield* Effect.acquireRelease(
       PubSub.unbounded<ReadonlyArray<ServerProvider>>(),
       PubSub.shutdown,
     );
+
+    // The cache and refresh logic keep full snapshots; only what callers read
+    // hides Fast Mode, so turning the setting back off restores it at once.
+    const settingsChanges = yield* serverSettings.subscribeChanges;
+    const fastModeDisabledRef = yield* Ref.make(
+      yield* serverSettings.getSettings.pipe(
+        Effect.map((settings) => settings.disableFastMode),
+        Effect.orElseSucceed(() => false),
+      ),
+    );
+    const publishable = (providers: ReadonlyArray<ServerProvider>) =>
+      Ref.get(fastModeDisabledRef).pipe(
+        Effect.map((disabled) => (disabled ? withoutFastModeProviders(providers) : providers)),
+      );
 
     const bootInstances = yield* instanceRegistry.listInstances;
     const bootSources = bootInstances.map(buildSnapshotSource);
@@ -1040,19 +1057,44 @@ export const layer = Layer.effect(
       );
     });
 
+    yield* Stream.runForEach(
+      settingsChanges.pipe(Stream.map((settings) => settings.disableFastMode)),
+      (disabled) =>
+        Ref.getAndSet(fastModeDisabledRef, disabled).pipe(
+          Effect.flatMap((previous) =>
+            previous === disabled
+              ? Effect.void
+              : Ref.get(providersRef).pipe(
+                  Effect.flatMap((providers) => PubSub.publish(changesPubSub, providers)),
+                ),
+          ),
+        ),
+    ).pipe(Effect.forkScoped);
+
     return {
-      getProviders: Ref.get(providersRef),
+      getProviders: Ref.get(providersRef).pipe(Effect.flatMap(publishable)),
       refresh: (provider?: ProviderDriverKind) =>
-        refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
+        refresh(provider).pipe(
+          Effect.catchCause(recoverRefreshFailure),
+          Effect.flatMap(publishable),
+        ),
       refreshInstance: (instanceId: ProviderInstanceId) =>
-        refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
+        refreshInstance(instanceId).pipe(
+          Effect.catchCause(recoverRefreshFailure),
+          Effect.flatMap(publishable),
+        ),
       refreshWorkspaceSnapshot: (input) =>
-        refreshWorkspaceSnapshot(input).pipe(Effect.catchCause(recoverRefreshFailure)),
-      refreshAfterUpdate,
+        refreshWorkspaceSnapshot(input).pipe(
+          Effect.catchCause(recoverRefreshFailure),
+          Effect.flatMap(publishable),
+        ),
+      refreshAfterUpdate: (provider, selectedInstanceId) =>
+        refreshAfterUpdate(provider, selectedInstanceId).pipe(Effect.flatMap(publishable)),
       getProviderMaintenanceCapabilitiesForInstance,
-      setProviderMaintenanceActionState,
+      setProviderMaintenanceActionState: (input) =>
+        setProviderMaintenanceActionState(input).pipe(Effect.flatMap(publishable)),
       get streamChanges() {
-        return Stream.fromPubSub(changesPubSub);
+        return Stream.fromPubSub(changesPubSub).pipe(Stream.mapEffect(publishable));
       },
     } satisfies ProviderRegistry["Service"];
   }),

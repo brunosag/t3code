@@ -2017,6 +2017,124 @@ it.layer(
       }),
     );
 
+    it.effect("withholds Fast Mode while disabled and restores it when re-enabled", () =>
+      Effect.gen(function* () {
+        const claudeDriver = ProviderDriverKind.make("claudeAgent");
+        const claudeInstanceId = ProviderInstanceId.make("claudeAgent");
+        const provider = {
+          instanceId: claudeInstanceId,
+          driver: claudeDriver,
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          checkedAt: "2026-06-10T00:00:00.000Z",
+          version: null,
+          models: [
+            {
+              slug: "claude-opus-5-5",
+              name: "Opus 5.5",
+              isCustom: false,
+              capabilities: createModelCapabilities({
+                optionDescriptors: [
+                  { id: "fastMode", label: "Fast Mode", type: "boolean" },
+                  { id: "thinking", label: "Thinking", type: "boolean" },
+                ],
+              }),
+            },
+          ],
+          slashCommands: [],
+          skills: [],
+        } as const satisfies ServerProvider;
+        const instance = {
+          instanceId: claudeInstanceId,
+          driverKind: claudeDriver,
+          continuationIdentity: {
+            driverKind: claudeDriver,
+            continuationKey: "claudeAgent:instance:claudeAgent",
+          },
+          displayName: undefined,
+          enabled: true,
+          snapshot: {
+            resolveMaintenance: () =>
+              Effect.succeed(
+                makeManualOnlyProviderMaintenanceCapabilities({
+                  provider: claudeDriver,
+                  packageName: null,
+                }),
+              ),
+            getSnapshot: Effect.succeed(provider),
+            refresh: Effect.succeed(provider),
+            streamChanges: Stream.empty,
+            applyUsageLimits: () => Effect.void,
+          },
+          orchestrationAdapter: {} as ProviderInstance["orchestrationAdapter"],
+          textGeneration: {} as ProviderInstance["textGeneration"],
+        } satisfies ProviderInstance;
+        const layerInstanceRegistry = Layer.succeed(
+          ProviderInstanceRegistry.ProviderInstanceRegistry,
+          {
+            getInstance: (instanceId) =>
+              Effect.succeed(instanceId === claudeInstanceId ? instance : undefined),
+            listInstances: Effect.succeed([instance]),
+            listUnavailable: Effect.succeed([]),
+            streamChanges: Stream.empty,
+            subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
+          },
+        );
+        const scope = yield* Scope.make();
+        yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+        const runtimeServices = yield* Layer.build(
+          ProviderRegistry.layer.pipe(
+            Layer.provideMerge(layerInstanceRegistry),
+            Layer.provideMerge(
+              Layer.effect(
+                ServerSettingsModule.ServerSettingsService,
+                makeMutableServerSettingsService({
+                  ...DEFAULT_SERVER_SETTINGS,
+                  disableFastMode: true,
+                }),
+              ),
+            ),
+            Layer.provideMerge(
+              ServerConfig.layerTest(process.cwd(), {
+                prefix: "t3-provider-registry-fast-mode-",
+              }),
+            ),
+            Layer.provideMerge(NodeServices.layer),
+          ),
+        ).pipe(Scope.provide(scope));
+        yield* Effect.gen(function* () {
+          const registry = yield* ProviderRegistry.ProviderRegistry;
+          const settings = yield* ServerSettingsModule.ServerSettingsService;
+          const descriptorIds = (providers: ReadonlyArray<ServerProvider>) =>
+            providers.flatMap((candidate) =>
+              candidate.models.flatMap(
+                (model) =>
+                  model.capabilities?.optionDescriptors?.map((descriptor) => descriptor.id) ?? [],
+              ),
+            );
+
+          assert.deepStrictEqual(descriptorIds(yield* registry.getProviders), ["thinking"]);
+
+          // Starting immediately subscribes before the update can publish.
+          const changes = yield* Stream.runHead(registry.streamChanges).pipe(
+            Effect.forkChild({ startImmediately: true }),
+          );
+          yield* settings.updateSettings({ disableFastMode: false });
+          const published = yield* Fiber.join(changes);
+          assert.isTrue(published._tag === "Some");
+          if (published._tag === "Some") {
+            assert.deepStrictEqual(descriptorIds(published.value), ["fastMode", "thinking"]);
+          }
+          assert.deepStrictEqual(descriptorIds(yield* registry.getProviders), [
+            "fastMode",
+            "thinking",
+          ]);
+        }).pipe(Effect.provide(runtimeServices));
+      }),
+    );
+
     const updateScenarios = [
       "healthy",
       "unauthenticated",

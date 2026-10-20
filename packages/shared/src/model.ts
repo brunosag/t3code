@@ -7,6 +7,7 @@ import {
   ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -209,6 +210,100 @@ export function getProviderOptionDescriptors(input: {
       getRawSelectionValueById(selections, descriptor.id) ?? descriptor.currentValue,
     ),
   );
+}
+
+// Codex reports "priority" and "ultrafast" tiers; "fast" is the older alias
+// that Codex still maps to priority.
+const FAST_SERVICE_TIER_IDS: ReadonlySet<string> = new Set(["fast", "priority", "ultrafast"]);
+const STANDARD_SERVICE_TIER_ID = "default";
+
+function withoutFastModeDescriptors(
+  descriptors: ReadonlyArray<ProviderOptionDescriptor>,
+): ReadonlyArray<ProviderOptionDescriptor> {
+  return descriptors.flatMap((descriptor): ProviderOptionDescriptor[] => {
+    if (descriptor.id === "fastMode") return [];
+    if (descriptor.id !== "serviceTier" || descriptor.type !== "select") return [descriptor];
+    const options = descriptor.options.filter((option) => !FAST_SERVICE_TIER_IDS.has(option.id));
+    if (options.length === descriptor.options.length) return [descriptor];
+    // A select with only Standard left is no choice at all.
+    if (options.length <= 1) return [];
+    const currentValue =
+      descriptor.currentValue !== undefined && FAST_SERVICE_TIER_IDS.has(descriptor.currentValue)
+        ? STANDARD_SERVICE_TIER_ID
+        : descriptor.currentValue;
+    return [
+      {
+        ...descriptor,
+        options: options.map(({ isDefault: _isDefault, ...option }) =>
+          option.id === currentValue ? { ...option, isDefault: true } : option,
+        ),
+        ...(currentValue === undefined ? {} : { currentValue }),
+      },
+    ];
+  });
+}
+
+export function withoutFastModeProviders(
+  providers: ReadonlyArray<ServerProvider>,
+): ReadonlyArray<ServerProvider> {
+  return providers.map((provider) => ({
+    ...provider,
+    models: provider.models.map((model) =>
+      model.capabilities?.optionDescriptors === undefined
+        ? model
+        : {
+            ...model,
+            capabilities: {
+              ...model.capabilities,
+              optionDescriptors: withoutFastModeDescriptors(model.capabilities.optionDescriptors),
+            },
+          },
+    ),
+    ...(provider.workspaceSnapshots === undefined
+      ? {}
+      : {
+          workspaceSnapshots: provider.workspaceSnapshots.map((snapshot) =>
+            snapshot.optionDescriptors === undefined
+              ? snapshot
+              : {
+                  ...snapshot,
+                  optionDescriptors: withoutFastModeDescriptors(snapshot.optionDescriptors),
+                },
+          ),
+        }),
+  }));
+}
+
+/**
+ * Claude turns off Fast Mode once the option is absent. Codex instead falls
+ * back to its own configured tier, which may be fast, so `pinServiceTier`
+ * states Standard explicitly.
+ */
+export function withoutFastModeSelection(
+  selection: ModelSelection,
+  options: { readonly pinServiceTier: boolean },
+): ModelSelection {
+  let changed = false;
+  const selected = (selection.options ?? []).flatMap((option): ProviderOptionSelection[] => {
+    if (option.id === "fastMode") {
+      changed = true;
+      return [];
+    }
+    if (
+      option.id === "serviceTier" &&
+      typeof option.value === "string" &&
+      FAST_SERVICE_TIER_IDS.has(option.value)
+    ) {
+      changed = true;
+      return [{ id: "serviceTier", value: STANDARD_SERVICE_TIER_ID }];
+    }
+    return [option];
+  });
+  if (options.pinServiceTier && !selected.some((option) => option.id === "serviceTier")) {
+    changed = true;
+    selected.push({ id: "serviceTier", value: STANDARD_SERVICE_TIER_ID });
+  }
+  return changed ? { ...selection, options: selected } : selection;
 }
 
 function getReportedOptionValue(
