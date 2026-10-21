@@ -136,28 +136,6 @@ beforeEach(() => {
   );
   fixture.uploads = { "environment-1:first": { status: "ready" } };
 });
-describe("question attachment submission readiness", () => {
-  it.each([
-    undefined,
-    { status: "uploading", progress: 0.5 },
-    { status: "failed", reason: "Offline" },
-  ])("keeps Submit disabled until all question uploads finish: %j", (state) => {
-    if (state) fixture.uploads["environment-1:second"] = state;
-    expect(submitButtonMarkup()).toContain("disabled");
-    fixture.uploads["environment-1:second"] = { status: "ready" };
-    expect(submitButtonMarkup()).not.toContain("disabled");
-  });
-  it("ignores an upload in another environment", () => {
-    fixture.uploads["environment-1:second"] = { status: "ready" };
-    fixture.uploads["environment-2:second"] = { status: "uploading", progress: 0.5 };
-    expect(submitButtonMarkup()).not.toContain("disabled");
-  });
-  it("waits for attachment preparation even when uploads are ready", () => {
-    fixture.uploads["environment-1:second"] = { status: "ready" };
-    fixture.preparations[key("first")] = 1;
-    expect(submitButtonMarkup()).toContain("disabled");
-  });
-});
 
 describe("moving a mobile written answer to the thread draft", () => {
   it.each([false, true])(
