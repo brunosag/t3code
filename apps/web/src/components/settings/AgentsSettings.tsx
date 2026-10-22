@@ -529,8 +529,6 @@ export function AgentsSettings() {
           provider={activeEntry.driverKind}
           models={activeEntry.models}
           model={definition.model}
-          prompt=""
-          onPromptChange={() => {}}
           modelOptions={
             definition.thinking ? [{ id: "reasoningEffort", value: definition.thinking }] : []
           }

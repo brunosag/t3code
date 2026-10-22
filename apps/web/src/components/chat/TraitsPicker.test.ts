@@ -46,7 +46,7 @@ describe("Claude auto-compaction control", () => {
           },
         ],
         model: "custom",
-        prompt: "",
+        promptUltrathink: "none",
         modelOptions: undefined,
         planModeEnabled: false,
       }),

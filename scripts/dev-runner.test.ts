@@ -940,6 +940,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       { mode: "dev", share: false },
       { mode: "dev:web", share: true },
       { mode: "dev:desktop", share: true },
+      { mode: "dev:desktop:lean", share: true },
     ] as const)("rejects --built for $mode with share=$share", ({ mode, share }) => {
       const spawnerLayer = Layer.succeed(
         ChildProcessSpawner.ChildProcessSpawner,
