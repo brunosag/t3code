@@ -17,6 +17,29 @@ const CITATION_LINK = new RegExp(
 );
 const decodeCitation = Schema.decodeUnknownOption(AssistantCitation);
 
+export function canQuoteAssistantMessage(messageId: string): boolean {
+  // Claude's native thinking IDs survive imports as assistant message IDs.
+  // Echoing those excerpts back can poison the native session with reasoning_extraction errors.
+  const prefix = "message:provider:claudeAgent:native-item:";
+  if (!messageId.startsWith(prefix)) return true;
+  try {
+    return !/:thinking:\d+$/.test(decodeURIComponent(messageId.slice(prefix.length)));
+  } catch {
+    return true;
+  }
+}
+
+export function omitClaudeThinkingCitations(prompt: string): string {
+  return prompt.replace(CITATION_LINK, (source: string, href: string) => {
+    const citation = parseAssistantCitationHref(href);
+    if (!citation || canQuoteAssistantMessage(citation.messageId)) return source;
+    // The bracket marks where the user's comment ends.
+    return citation.comment === undefined
+      ? "[Assistant thinking quote omitted]"
+      : `[Assistant thinking quote omitted. The user's comment on it: ${citation.comment}]`;
+  });
+}
+
 function encodePathPart(value: string): string {
   return encodeURIComponent(value).replace(
     /[!'()*]/g,

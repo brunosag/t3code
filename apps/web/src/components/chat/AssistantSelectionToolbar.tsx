@@ -4,6 +4,7 @@ import {
   type AssistantCitation,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
+import { canQuoteAssistantMessage } from "@t3tools/shared/assistantCitations";
 import { QuoteIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -51,7 +52,7 @@ export function AssistantSelectionToolbar({
       const nativeSelection = window.getSelection();
       const captured = captureAssistantTextSelection(viewport, nativeSelection);
       const messageId = captured?.source.dataset.assistantCitationSource;
-      if (!captured || !messageId) {
+      if (!captured || !messageId || !canQuoteAssistantMessage(messageId)) {
         clear();
         return;
       }

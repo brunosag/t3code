@@ -4,6 +4,7 @@ This fork follows upstream's V2 orchestrator and Pi provider. Pi is an external 
 
 ## Retained changes
 
+- **Claude thinking quotes:** web and desktop do not offer quoting on Claude thinking items; the Claude adapter also removes saved thinking citations while preserving user comments, including sends from mobile. Other providers keep their quoting behavior.
 - **Pi questions:** the T3-owned `t3_ask_user` extension supports batched questions, option descriptions, multiple selections, and written answers. It uses dedicated inherited pipes alongside Pi's RPC transport. Written question drafts survive web reloads and mobile app restarts. Choosing an option moves a written answer into the thread draft on web and mobile.
 - **Pi agent roster:** Settings → Agents stores named definitions for compatible `pi-subagents` extensions, including prompts, models, thinking, tools, skills, extension access, and turn limits. Definitions apply when a Pi session next starts. A configured roster is exclusive; disabled entries are omitted. Registration failures appear as extension errors. Background completion events update the shared agent timeline.
 - **Git preferences:** automatic, manual, or disabled pull-request actions, plus confirmation before pushing to the default branch, are shared across clients and project overrides.

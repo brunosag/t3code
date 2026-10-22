@@ -68,6 +68,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { Tool } from "effect/ai";
 import { formatClaudeResumeCompactionQuestion } from "@t3tools/shared/claudeCompaction";
+import { serializeAssistantCitation } from "@t3tools/shared/assistantCitations";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
@@ -231,6 +232,38 @@ function makeClaudeTestTurnInput(input: {
   };
 }
 
+// A quote of a Claude thinking item, its ID built the way the adapter builds one,
+// so a change to that format fails these tests instead of reopening quoting.
+const thinkingRedirectCitation = serializeAssistantCitation({
+  version: 1,
+  environmentId: EnvironmentId.make("environment"),
+  threadId: ThreadId.make("thread"),
+  messageId: IdAllocator.derive.messageFromProviderItem({
+    driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+    nativeItemId: "msg_011CgEXouEvGUEKEPUG92jNy:thinking:1",
+  }),
+  text: "I will send the message this afternoon.",
+  start: 0,
+  end: 39,
+  prefix: "private thinking before",
+  suffix: "private thinking after",
+  comment: "I'd rather send that tomorrow morning",
+});
+
+describe("ClaudeAdapterV2 thinking citations", () => {
+  it("keeps a user's redirect without echoing a saved thinking quote to the SDK", () => {
+    const message = ClaudeAdapterV2.makeClaudeUserMessage({
+      text: `${thinkingRedirectCitation} Please adjust.`,
+      priority: "now",
+    });
+    assert.strictEqual(
+      message.message.content,
+      "[Assistant thinking quote omitted. The user's comment on it: I'd rather send that tomorrow morning] Please adjust.",
+    );
+    assert.strictEqual(message.priority, "now");
+  });
+});
+
 describe("ClaudeAdapterV2 runtime query policy", () => {
   it.each([
     ["--permission-mode acceptEdits", "acceptEdits"],
@@ -305,10 +338,13 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       ClaudeAdapterV2.claudeSdkUserInputAnswers({
         "Which approach?": ["Simple", "Safe"],
         "Deploy now?": "Yes",
+        "Anything else?": `${thinkingRedirectCitation} Then deploy.`,
       });
     assert.deepEqual(sdkAnswers, {
       "Which approach?": "Simple, Safe",
       "Deploy now?": "Yes",
+      "Anything else?":
+        "[Assistant thinking quote omitted. The user's comment on it: I'd rather send that tomorrow morning] Then deploy.",
     });
     assert.isTrue(
       ClaudeAdapterV2.ClaudeProviderCapabilitiesV2.planning.supportsStructuredQuestions,
@@ -1375,6 +1411,14 @@ describe("ClaudeAdapterV2 resume compaction", () => {
 
 describe("ClaudeAdapterV2 attachments", () => {
   it.effect.each([
+    {
+      name: "a saved thinking redirect",
+      prompt: thinkingRedirectCitation,
+      expectedText:
+        "[Assistant thinking quote omitted. The user's comment on it: I'd rather send that tomorrow morning]",
+      command: undefined,
+      ultrathink: false,
+    },
     {
       name: "ordinary text",
       prompt: "What’s in this image?",

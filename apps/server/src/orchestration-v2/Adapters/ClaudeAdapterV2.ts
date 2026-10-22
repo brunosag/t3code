@@ -57,6 +57,7 @@ import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { applyClaudePromptEffortPrefix } from "@t3tools/shared/model";
+import { omitClaudeThinkingCitations } from "@t3tools/shared/assistantCitations";
 import {
   CLAUDE_RESUME_COMPACTION_NEVER_ANSWER,
   formatClaudeResumeCompactionQuestion,
@@ -1847,13 +1848,14 @@ export function makeClaudeUserMessage(input: {
   readonly skills?: ReadonlyMap<string, ClaudeSkillTarget>;
   readonly uuid?: SDKUserMessage["uuid"];
 }): SDKUserMessage {
+  const text = omitClaudeThinkingCitations(input.text);
   // Claude Code expands a skill only from the LAST text block, and only when
   // `/name` is its first character. A `$skill` chip anywhere in the prompt
   // therefore becomes [whole request, "/name trailing text"] so the CLI runs
   // it natively and the model still reads the full request. See
   // ClaudeSkillDispatch.
   const dispatch =
-    input.skills === undefined ? undefined : planClaudeSkillDispatch(input.text, input.skills);
+    input.skills === undefined ? undefined : planClaudeSkillDispatch(text, input.skills);
   return {
     type: "user",
     message: {
@@ -1865,7 +1867,7 @@ export function makeClaudeUserMessage(input: {
               : [{ type: "text" as const, text: dispatch.leadingText }]),
             { type: "text" as const, text: dispatch.commandText },
           ]
-        : input.text,
+        : text,
     },
     parent_tool_use_id: null,
     ...(input.priority === undefined ? {} : { priority: input.priority }),
@@ -1892,7 +1894,7 @@ const makeClaudeUserMessageWithAttachments = Effect.fnUntraced(function* (input:
   }
 
   const textWithAttachmentPaths = providerMessageTextWithAttachmentPaths({
-    text: input.text,
+    text: omitClaudeThinkingCitations(input.text),
     attachments: input.attachments,
     resolveAttachmentPath: (attachment) =>
       resolveAttachmentPath({ attachmentsDir: input.attachmentsDir, attachment }),
@@ -3708,11 +3710,13 @@ export function claudeSdkUserInputAnswers(
   return Object.fromEntries(
     Object.entries(answers).map(([question, answer]) => [
       question,
-      Array.isArray(answer)
-        ? answer.filter((value): value is string => typeof value === "string").join(", ")
-        : typeof answer === "string"
-          ? answer
-          : String(answer ?? ""),
+      omitClaudeThinkingCitations(
+        Array.isArray(answer)
+          ? answer.filter((value): value is string => typeof value === "string").join(", ")
+          : typeof answer === "string"
+            ? answer
+            : String(answer ?? ""),
+      ),
     ]),
   );
 }

@@ -10,9 +10,11 @@ import {
 } from "@t3tools/contracts";
 import {
   assistantCitationsToPlainText,
+  canQuoteAssistantMessage,
   collectAssistantCitations,
   expandAssistantCitationsForProvider,
   formatAssistantCitationHref,
+  omitClaudeThinkingCitations,
   parseAssistantCitationHref,
   renderAssistantCitationsAsText,
   serializeAssistantCitation,
@@ -52,6 +54,56 @@ function readProviderContext(expanded: string): unknown {
 }
 
 describe("assistant citation references", () => {
+  it("does not offer quotes for Claude thinking, including encoded native item IDs", () => {
+    expect(
+      canQuoteAssistantMessage(
+        "message:provider:claudeAgent:native-item:msg_011CgEXouEvGUEKEPUG92jNy%3Athinking%3A1",
+      ),
+    ).toBe(false);
+    expect(
+      canQuoteAssistantMessage("message:provider:claudeAgent:native-item:msg_1:thinking:0"),
+    ).toBe(false);
+    for (const id of [
+      "message:provider:claudeAgent:native-item:msg_1",
+      "message:provider:claudeAgent:native-item:msg_1%3Atext%3A1",
+      "message:provider:codex:native-item:msg_1%3Athinking%3A1",
+      "message:provider:pi:native-item:msg_1%3Athinking%3A1",
+      "message:provider:cursor:native-item:msg_1%3Athinking%3A1",
+      "message:provider:grok:native-item:msg_1%3Athinking%3A1",
+      "message:provider:opencode:native-item:msg_1%3Athinking%3A1",
+      "message:provider:antigravity:native-item:msg_1%3Athinking%3A1",
+      "message:provider:claudeAgent:native-item:malformed%",
+      "assistant?one",
+    ]) {
+      expect(canQuoteAssistantMessage(id)).toBe(true);
+    }
+  });
+
+  it("omits saved Claude thinking citations and their context but keeps the user's redirect", () => {
+    const thinking: AssistantCitation = {
+      ...citation,
+      messageId: MessageId.make(
+        "message:provider:claudeAgent:native-item:msg_011CgEXouEvGUEKEPUG92jNy%3Athinking%3A1",
+      ),
+      comment: "I'd rather send that tomorrow morning",
+    };
+    const prompt = `${serializeAssistantCitation(thinking)} Continue.`;
+    expect(omitClaudeThinkingCitations(prompt)).toBe(
+      "[Assistant thinking quote omitted. The user's comment on it: I'd rather send that tomorrow morning] Continue.",
+    );
+    expect(
+      omitClaudeThinkingCitations(
+        `See ${serializeAssistantCitation({ ...thinking, comment: undefined })}`,
+      ),
+    ).toBe("See [Assistant thinking quote omitted]");
+    const ordinary = serializeAssistantCitation(citation);
+    expect(omitClaudeThinkingCitations(ordinary)).toBe(ordinary);
+    expect(omitClaudeThinkingCitations(`${ordinary} ${prompt} ${ordinary}`)).toBe(
+      `${ordinary} [Assistant thinking quote omitted. The user's comment on it: I'd rather send that tomorrow morning] Continue. ${ordinary}`,
+    );
+    expect(omitClaudeThinkingCitations("continue")).toBe("continue");
+  });
+
   it("preserves legacy v1 link bytes without adding a comment", () => {
     expect(parseAssistantCitationHref(legacyHref)).toStrictEqual(legacyCitation);
     expect(formatAssistantCitationHref(legacyCitation)).toBe(legacyHref);
