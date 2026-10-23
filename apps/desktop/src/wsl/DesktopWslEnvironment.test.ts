@@ -56,12 +56,15 @@ const awaitHolder = (condition: string) =>
 
 // Holds a cache busy the way a running server does: the holder's argv[0] is the
 // runtime entry, which the prune and install scripts look for in /proc cmdline.
-// It reads a pipe the script keeps open on fd 7, so it exits with the script
-// instead of outliving it on a timer.
+// Use Bash because multicall coreutils can discard a custom argv[0]. The ready
+// line proves the holder has started before pruning. It reads a pipe on fd 7,
+// so it exits with the script instead of outliving it on a timer.
 const holdRuntimeBusy = (entry: string) =>
   [
-    `exec 7> >(exec -a ${entry} cat >/dev/null 2>&1)`,
-    awaitHolder(`grep -qF -- ${entry} /proc/[0-9]*/cmdline 2>/dev/null`),
+    `coproc T3_RUNTIME_HOLDER { exec -a ${entry} bash -c 'printf "ready\\n"; read -r _'; }`,
+    'read -r runtime_ready <&"${T3_RUNTIME_HOLDER[0]}"',
+    '[ "$runtime_ready" = ready ]',
+    'exec 7>&"${T3_RUNTIME_HOLDER[1]}"',
   ].join("\n");
 
 const holdInstallLock = (lock: string) =>
