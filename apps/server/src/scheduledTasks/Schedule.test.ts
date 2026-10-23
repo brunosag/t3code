@@ -26,6 +26,25 @@ describe("scheduled task schedule calculation", () => {
     expect(parts?.minute).toBe(0);
   });
 
+  it("keeps an interval on the grid its previous due time set", () => {
+    const day = 24 * 60 * 60_000;
+    const schedule = { type: "interval", everyMs: day } as const;
+    const dueAt = DateTime.makeUnsafe("2026-10-20T07:00:00.000Z");
+    const at = (iso: string, previous: DateTime.DateTime | null) => {
+      const next = nextScheduledRunAt(schedule, DateTime.makeUnsafe(iso), previous);
+      return next === null ? null : DateTime.formatIso(next);
+    };
+
+    expect(at("2026-10-20T09:34:40.797Z", null)).toBe("2026-10-21T09:34:40.797Z");
+    // Late by hours, or by more than a whole interval: back on 07:00.
+    expect(at("2026-10-20T09:34:40.797Z", dueAt)).toBe("2026-10-21T07:00:00.000Z");
+    expect(at("2026-10-22T18:00:00.000Z", dueAt)).toBe("2026-10-23T07:00:00.000Z");
+    // Exactly on a slot moves to the following one.
+    expect(at("2026-10-21T07:00:00.000Z", dueAt)).toBe("2026-10-22T07:00:00.000Z");
+    // A manual run before the due time leaves it in place.
+    expect(at("2026-10-19T22:00:00.000Z", dueAt)).toBe("2026-10-20T07:00:00.000Z");
+  });
+
   it("compares schedules structurally", () => {
     expect(
       isSameSchedule({ type: "interval", everyMs: 60_000 }, { type: "interval", everyMs: 60_000 }),

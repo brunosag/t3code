@@ -12,13 +12,21 @@ function parseTimeOfDay(value: string): { hour: number; minute: number } | null 
 export function nextScheduledRunAt(
   schedule: ScheduledTaskSchedule,
   from: DateTime.DateTime,
+  previousDueAt: DateTime.DateTime | null = null,
 ): DateTime.DateTime | null {
   if (schedule.type === "webhook") return null;
   if (schedule.type === "interval") {
     // Persisted rows created before the one-minute floor remain readable, but
     // they must not retain their old high-frequency execution rate.
     // Intervals advance elapsed time, including across daylight-saving changes.
-    return DateTime.addDuration(from, Math.max(schedule.everyMs, MIN_SCHEDULED_TASK_INTERVAL_MS));
+    const everyMs = Math.max(schedule.everyMs, MIN_SCHEDULED_TASK_INTERVAL_MS);
+    if (previousDueAt === null) return DateTime.addDuration(from, everyMs);
+    // A run that fires late (the machine was asleep) or early (run by hand)
+    // keeps the task on the grid its previous due time set: the next run is
+    // the first slot after `from`, not `from` plus a whole interval.
+    const elapsedMs = DateTime.toEpochMillis(from) - DateTime.toEpochMillis(previousDueAt);
+    const steps = elapsedMs < 0 ? 0 : Math.floor(elapsedMs / everyMs) + 1;
+    return DateTime.addDuration(previousDueAt, steps * everyMs);
   }
 
   const time = parseTimeOfDay(schedule.timeOfDay);

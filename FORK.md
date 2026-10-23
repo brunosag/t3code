@@ -9,6 +9,7 @@ This fork follows upstream's V2 orchestrator and Pi provider. Pi is an external 
 - **Pi agent roster:** Settings → Agents stores named definitions for compatible `pi-subagents` extensions, including prompts, models, thinking, tools, skills, extension access, and turn limits. Definitions apply when a Pi session next starts. A configured roster is exclusive; disabled entries are omitted. Registration failures appear as extension errors. Background completion events update the shared agent timeline.
 - **Git preferences:** automatic, manual, or disabled pull-request actions, plus confirmation before pushing to the default branch, are shared across clients and project overrides.
 - **Claude history:** the SDK 0.3.276 patch rewrites internal deferred tool references when forking a session. The real SDK fork regression test covers repeated forks and external references. Healthy Claude skill changes invalidate cached workspace inventories so clients rescan them.
+- **Interval schedules keep their slot:** an interval task that fires late (the machine was asleep) or is run by hand stays on the grid its previous due time set, instead of restarting the interval from when it ran. A schedule edit or re-enable still starts a new grid from that moment.
 - **Installation and desktop fixes:** provider updates recognize npm ownership before native-looking layouts; Linux desktop entries match window identities. Development can omit Electron, open DevTools explicitly, and exit when its desktop window closes. Chat line width remains adjustable.
 
 ## Migration

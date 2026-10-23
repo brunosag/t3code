@@ -13,6 +13,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Logger from "effect/Logger";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -402,6 +403,67 @@ it.effect("thread cleanup notifies subscribers and a finishing run cannot recrea
       yield* Deferred.succeed(release, undefined);
       yield* Fiber.join(run);
       assert.lengthOf((yield* service.list()).tasks, 0);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect("an interval run that fires late or by hand keeps its original slot", () =>
+  Effect.gen(function* () {
+    const day = 24 * 60 * 60_000;
+    const createdAt = Date.parse("2026-10-19T07:00:00.000Z");
+    yield* TestClock.setTime(createdAt);
+    const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+          Layer.mock(ThreadManagementService.ThreadManagementService)({
+            sendToThread: () => Effect.succeed({} as never),
+          }),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+            namedProjectsRoot: "/projects",
+            isScratchProject: () => Effect.succeed(false),
+          }),
+          NodeCrypto.layer,
+          Scheduler.layer,
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const { task } = yield* service.upsert({
+        id: ScheduledTaskId.make("task:nightly"),
+        title: "Nightly",
+        prompt: "Merge upstream",
+        enabled: true,
+        schedule: { type: "interval", everyMs: day },
+        projectId: ProjectId.make("project:test"),
+        threadId: ThreadId.make("thread:nightly"),
+        workspaceStrategy: { type: "root" },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+      });
+      assert.equal(task.nextRunAt, "2026-10-20T07:00:00.000Z");
+
+      yield* TestClock.setTime(createdAt + 3 * 60 * 60_000);
+      const manual = yield* service.runNow({ id: task.id });
+      assert.equal(manual.task.nextRunAt, "2026-10-20T07:00:00.000Z");
+
+      // The machine wakes 2h34m after the due time; the poll catches up.
+      yield* TestClock.setTime(Date.parse("2026-10-20T09:34:40.797Z"));
+      const completed = Stream.runHead(
+        service.subscribeList().pipe(
+          Stream.map(({ tasks }) => tasks.find((candidate) => candidate.id === task.id)),
+          Stream.filter(
+            (current) => current?.runCount === 2 && current.lastRunStatus === "succeeded",
+          ),
+        ),
+      ).pipe(Effect.forkChild);
+      const waiter = yield* completed;
+      yield* TestClock.adjust("6 seconds");
+      const late = yield* Fiber.join(waiter);
+      assert.equal(Option.getOrThrow(late)?.nextRunAt, "2026-10-21T07:00:00.000Z");
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );

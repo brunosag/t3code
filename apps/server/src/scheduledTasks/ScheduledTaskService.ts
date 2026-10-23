@@ -282,14 +282,16 @@ function iso(value: DateTime.DateTime): string {
 const localNow = DateTime.withCurrentZoneLocal(DateTime.nowInCurrentZone);
 
 function nextRunAt(
-  task: Pick<ScheduledTask, "enabled" | "schedule">,
+  task: Pick<ScheduledTask, "enabled" | "schedule"> & { readonly nextRunAt?: string | null },
   from: DateTime.DateTime,
 ): string | null {
   if (!task.enabled) return null;
+  const previousDueAt =
+    task.nextRunAt == null ? null : Option.getOrNull(DateTime.make(task.nextRunAt));
   // A stored interval can decode yet overflow the representable DateTime
   // range; an unrepresentable occurrence means the task has no next run.
   try {
-    const next = nextScheduledRunAt(task.schedule, from);
+    const next = nextScheduledRunAt(task.schedule, from, previousDueAt);
     return next !== null && Number.isFinite(DateTime.toEpochMillis(next)) ? iso(next) : null;
   } catch {
     return null;
