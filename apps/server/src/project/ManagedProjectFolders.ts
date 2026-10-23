@@ -2,9 +2,12 @@ import {
   CommandId,
   type GitManagerServiceError,
   ProjectId,
+  type ServerSettingsError,
   type ThreadId,
   VcsProcessSpawnError,
 } from "@t3tools/contracts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { newProjectFolderName } from "@t3tools/shared/path";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -23,6 +26,7 @@ import * as Schema from "effect/Schema";
 import * as ServerConfig from "../config.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectService from "./ProjectService.ts";
 
 export class ScratchUnavailableError extends Schema.TaggedError<ScratchUnavailableError>()(
@@ -84,7 +88,10 @@ export class NamedProjectCreateError extends Schema.TaggedError<NamedProjectCrea
   }
 }
 
-export type NamedProjectError = NamedProjectFolderError | NamedProjectCreateError;
+export type NamedProjectError =
+  | NamedProjectFolderError
+  | NamedProjectCreateError
+  | ServerSettingsError;
 
 export class ManagedProjectFolders extends Context.Service<
   ManagedProjectFolders,
@@ -97,7 +104,7 @@ export class ManagedProjectFolders extends Context.Service<
       readonly threadId: ThreadId;
       readonly text: string;
     }) => Effect.Effect<Option.Option<string>, ScratchFolderError>;
-    readonly namedProjectsRoot: string;
+    readonly resolveNamedProjectsRoot: (baseDirectory: string) => string;
     /**
      * The folder is removed when the create fails or is cancelled before the
      * project exists, never once another project owns it.
@@ -216,6 +223,8 @@ const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const projects = yield* ProjectService.ProjectService;
   const crypto = yield* Crypto.Crypto;
+  const settings = yield* ServerSettings.ServerSettingsService;
+  const homeDirectory = yield* HostProcess.HomeDirectory;
 
   /**
    * Each folder is created without `recursive`, so creating it is the claim: of
@@ -354,36 +363,31 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const namedProjectsRoot = path.resolve(config.baseDir, "projects");
+  const resolveNamedProjectsRoot = (directory: string) =>
+    directory.length === 0
+      ? path.resolve(config.baseDir, "projects")
+      : path.resolve(expandHomePath(directory, homeDirectory));
 
   const claimNamedFolder = Effect.fn("ManagedProjectFolders.claimNamedFolder")(function* (
     name: string,
   ) {
+    const root = resolveNamedProjectsRoot((yield* settings.getSettings).addProjectBaseDirectory);
     yield* fileSystem
-      .makeDirectory(namedProjectsRoot, { recursive: true })
-      .pipe(
-        Effect.mapError(
-          (cause) => new NamedProjectFolderError({ folder: namedProjectsRoot, cause }),
-        ),
-      );
+      .makeDirectory(root, { recursive: true })
+      .pipe(Effect.mapError((cause) => new NamedProjectFolderError({ folder: root, cause })));
     const folderName = newProjectFolderName(name);
     const claimed = yield* claimFreeFolder(
       (attempt) =>
         Effect.succeed(
           attempt > MAX_NAMED_FOLDER_ATTEMPTS
             ? Option.none()
-            : Option.some(
-                path.join(
-                  namedProjectsRoot,
-                  attempt === 1 ? folderName : `${folderName}-${attempt}`,
-                ),
-              ),
+            : Option.some(path.join(root, attempt === 1 ? folderName : `${folderName}-${attempt}`)),
         ),
       (folder, cause) => new NamedProjectFolderError({ folder, cause }),
     );
     if (Option.isSome(claimed)) return claimed.value;
     return yield* new NamedProjectFolderError({
-      folder: path.join(namedProjectsRoot, folderName),
+      folder: path.join(root, folderName),
       cause: `Every folder name for "${folderName}" is taken.`,
     });
   });
@@ -480,7 +484,7 @@ const make = Effect.gen(function* () {
     ensureScratchProject,
     isScratchProject,
     folderForThread,
-    namedProjectsRoot,
+    resolveNamedProjectsRoot,
     createNamedProject,
   });
 });

@@ -246,6 +246,20 @@ describe("resolveNewThreadEnvMode", () => {
     expect(resolveNewThreadEnvMode({ ...newProject, newProjectsRoot: undefined })).toBe("worktree");
   });
 
+  it("keeps the configured default for repos in a configured base directory", () => {
+    const projectSettings = resolveProjectSettings(
+      {
+        ...DEFAULT_SERVER_SETTINGS,
+        defaultThreadEnvMode: "worktree",
+        addProjectBaseDirectory: "/data/projects/",
+      },
+      projectId,
+      null,
+      null,
+    );
+    expect(resolveNewThreadEnvMode({ ...newProject, projectSettings })).toBe("worktree");
+  });
+
   it("lets a project override, or a t3.json the environment defers to, keep worktree mode", () => {
     for (const projectSettings of [
       resolveProjectSettings(

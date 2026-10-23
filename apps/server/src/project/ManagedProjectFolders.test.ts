@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { CommandId, ProjectId, ThreadId, VcsProcessSpawnError } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -77,6 +78,7 @@ const layer = (baseDir: string, options?: HarnessOptions) =>
     Layer.provideMerge(ServerSettings.layerTest()),
     Layer.provideMerge(ServerConfig.layerTest(baseDir, baseDir)),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.succeed(HostProcess.HomeDirectory, `${baseDir}/home`)),
   );
 
 const withScratch = <A, E>(
@@ -87,6 +89,7 @@ const withScratch = <A, E>(
     E,
     | ManagedProjectFolders.ManagedProjectFolders
     | ProjectService.ProjectService
+    | ServerSettings.ServerSettingsService
     | NodeServices.NodeServices
     | Scope.Scope
   >,
@@ -337,6 +340,34 @@ const TEST_IDENTITY = {
 const gitOutput = (cwd: string, args: ReadonlyArray<string>) =>
   git(cwd, args).pipe(Effect.map((result) => result.stdout.trim()));
 
+it.effect("creates named projects in the current configured directory, expanding home paths", () =>
+  withScratch(({ baseDir }) =>
+    withGitEnv(
+      TEST_IDENTITY,
+      Effect.gen(function* () {
+        const folders = yield* ManagedProjectFolders.ManagedProjectFolders;
+        const settings = yield* ServerSettings.ServerSettingsService;
+        const path = yield* Path.Path;
+        yield* settings.updateSettings({ addProjectBaseDirectory: "~/src/" });
+        assert.equal(folders.resolveNamedProjectsRoot("~/src/"), path.join(baseDir, "home", "src"));
+        const first = yield* folders.createNamedProject({ name: "First" });
+        assert.equal(first.workspaceRoot, path.join(baseDir, "home", "src", "first"));
+
+        const absoluteRoot = path.join(baseDir, "other-projects");
+        yield* settings.updateSettings({ addProjectBaseDirectory: absoluteRoot });
+        assert.equal(folders.resolveNamedProjectsRoot(absoluteRoot), absoluteRoot);
+        const second = yield* folders.createNamedProject({ name: "Second" });
+        assert.equal(second.workspaceRoot, path.join(absoluteRoot, "second"));
+
+        yield* settings.updateSettings({ addProjectBaseDirectory: "" });
+        assert.equal(folders.resolveNamedProjectsRoot(""), path.join(baseDir, "projects"));
+        const third = yield* folders.createNamedProject({ name: "Third" });
+        assert.equal(third.workspaceRoot, path.join(baseDir, "projects", "third"));
+      }),
+    ),
+  ),
+);
+
 it.effect("starts a named project as a committed repository, and suffixes a taken name", () =>
   withScratch(({ baseDir }) =>
     withGitEnv(
@@ -347,7 +378,7 @@ it.effect("starts a named project as a committed repository, and suffixes a take
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const root = path.resolve(baseDir, "projects");
-        assert.equal(folders.namedProjectsRoot, root);
+        assert.equal(folders.resolveNamedProjectsRoot(""), root);
 
         const first = yield* folders.createNamedProject({ name: "Pinball Stats" });
         const second = yield* folders.createNamedProject({ name: "pinball stats" });
@@ -442,7 +473,7 @@ it.effect("keeps a folder that another project owns when the create conflicts", 
         const projects = yield* ProjectService.ProjectService;
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const taken = path.join(folders.namedProjectsRoot, "taken");
+        const taken = path.join(folders.resolveNamedProjectsRoot(""), "taken");
         yield* projects.create({
           commandId: CommandId.make("command:owner"),
           projectId: ProjectId.make("project:owner"),

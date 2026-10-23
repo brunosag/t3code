@@ -190,7 +190,10 @@ export function resolveNewThreadEnvMode(input: {
     input.projectHasThreads ||
     input.projectSettings.sources.defaultThreadEnvMode !== "environment" ||
     input.workspaceRoot === null ||
-    input.newProjectsRoot == null
+    input.newProjectsRoot == null ||
+    // A configured base directory makes the new-projects root a place existing
+    // repositories live too, so the path no longer marks a fresh scaffold.
+    input.projectSettings.settings.addProjectBaseDirectory.trim() !== ""
   ) {
     return configured;
   }

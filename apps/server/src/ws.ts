@@ -309,6 +309,7 @@ export const withLateEditorConfig = <E, R>(
   config: ClientServerConfig,
   liveUpdates: Stream.Stream<ServerConfigStreamEvent, E, R>,
   launcher: EditorDiscovery,
+  resolveNamedProjectsRoot: ManagedProjectFolders.ManagedProjectFolders["Service"]["resolveNamedProjectsRoot"],
 ) => {
   const lateEditorConfig = Stream.fromEffect(launcher.resolveAvailableEditors()).pipe(
     Stream.filter(
@@ -348,8 +349,21 @@ export const withLateEditorConfig = <E, R>(
             return [{ ...current, ...event.payload }, [event]];
           case "providerStatuses":
             return [{ ...current, providers: event.payload.providers }, [event]];
-          case "settingsUpdated":
-            return [{ ...current, settings: event.payload.settings }, [event]];
+          case "settingsUpdated": {
+            const next = {
+              ...current,
+              settings: event.payload.settings,
+              newProjectsRoot: resolveNamedProjectsRoot(
+                event.payload.settings.addProjectBaseDirectory,
+              ),
+            };
+            return [
+              next,
+              current.newProjectsRoot === next.newProjectsRoot
+                ? [event]
+                : [{ version: 1, type: "snapshot", config: next }],
+            ];
+          }
           // Themes and usage-limit sources never ride in a snapshot; clients
           // carry their projected values across one.
           default:
@@ -1776,7 +1790,9 @@ export const layerWsRpc = (
             onNone: () => ({}),
             onSome: (root) => ({ scratchWorkspaceRoot: root }),
           }),
-          newProjectsRoot: managedFolders.namedProjectsRoot,
+          newProjectsRoot: managedFolders.resolveNamedProjectsRoot(
+            settings.addProjectBaseDirectory,
+          ),
           ...(lastEventLoopStall === undefined ? {} : { lastEventLoopStall }),
         };
       });
@@ -3128,7 +3144,12 @@ export const layerWsRpc = (
 
               return Stream.concat(
                 rpcInitialItems([{ version: 1 as const, type: "snapshot" as const, config }]),
-                withLateEditorConfig(config, liveUpdates, externalLauncher),
+                withLateEditorConfig(
+                  config,
+                  liveUpdates,
+                  externalLauncher,
+                  managedFolders.resolveNamedProjectsRoot,
+                ),
               );
             }),
           ),

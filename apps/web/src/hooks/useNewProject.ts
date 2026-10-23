@@ -121,7 +121,7 @@ export function useNewProject() {
       return null;
     });
     if (project === null) return true;
-    await handleNewThread(projectRef).catch((error: unknown) => {
+    await handleNewThread(projectRef, { envMode: "local" }).catch((error: unknown) => {
       toastManager.add(
         stackedThreadToast({
           type: "error",

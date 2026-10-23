@@ -123,10 +123,11 @@ Merging a stack lands it through GitCafe, and updating a branch restacks the lay
 
 To start from nothing, choose **New project** in the command palette (`Cmd/Ctrl+K`), or
 **New project** under **Add Project** on any client, and type a name. T3 Code makes a Git
-repository in `~/.t3/projects` (the `projects` folder of your T3 data directory) with a README,
-an icon, and a first commit, then opens a new thread in it. Until the project has a thread, new
-threads work in its folder, even when your default is a new worktree. The folder is named after the project,
-like `pinball-stats` for "Pinball Stats". Turn on **Create private repository on GitHub** to also
+repository in your **Add project starts in** directory (Settings → General), or
+`~/.t3/projects` when empty, with a README, icon,
+and first commit, then opens a thread. Until the project has a thread, new threads work in its
+folder, even when your default is a new worktree. The folder is named after the project, like
+`pinball-stats` for "Pinball Stats". Turn on **Create private repository on GitHub** to also
 publish it. If Git has no name or email on that machine, the project is created without the
 first commit.
 

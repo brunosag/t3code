@@ -333,7 +333,7 @@ it.effect.each(deliveries)(
                   Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
                   Layer.provide(
                     Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-                      namedProjectsRoot: "/projects",
+                      resolveNamedProjectsRoot: () => "/projects",
                       isScratchProject: () => Effect.succeed(false),
                     }),
                   ),

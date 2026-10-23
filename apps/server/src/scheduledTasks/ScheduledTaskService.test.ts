@@ -206,7 +206,7 @@ it.effect(
                     ),
                 }),
                 Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-                  namedProjectsRoot: "/projects",
+                  resolveNamedProjectsRoot: () => "/projects",
                   isScratchProject: () => Effect.succeed(false),
                 }),
                 Layer.mock(ThreadManagementService.ThreadManagementService)({}),
@@ -304,7 +304,7 @@ it.effect(
                     ),
                 }),
                 Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-                  namedProjectsRoot: "/projects",
+                  resolveNamedProjectsRoot: () => "/projects",
                   isScratchProject: () => Effect.succeed(false),
                 }),
                 Layer.mock(ThreadManagementService.ThreadManagementService)({}),
@@ -360,7 +360,7 @@ it.effect("thread cleanup notifies subscribers and a finishing run cannot recrea
           }),
           Layer.mock(SecretRequests.SecretRequests)({}),
           Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-            namedProjectsRoot: "/projects",
+            resolveNamedProjectsRoot: () => "/projects",
             isScratchProject: () => Effect.succeed(false),
           }),
           NodeCrypto.layer,
@@ -421,7 +421,7 @@ it.effect("an interval run that fires late or by hand keeps its original slot", 
           }),
           Layer.mock(SecretRequests.SecretRequests)({}),
           Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-            namedProjectsRoot: "/projects",
+            resolveNamedProjectsRoot: () => "/projects",
             isScratchProject: () => Effect.succeed(false),
           }),
           NodeCrypto.layer,

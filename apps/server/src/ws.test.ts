@@ -115,13 +115,42 @@ import {
 } from "./ws.ts";
 
 const snapshotConfig = (fields: Partial<ServerConfig>) =>
-  ({ availableEditors: [], settings: {}, ...fields }) as unknown as ServerConfig;
+  ({
+    availableEditors: [],
+    settings: {},
+    newProjectsRoot: "/projects",
+    ...fields,
+  }) as unknown as ServerConfig;
 
 const settingsUpdated = (settings: object): ServerConfigStreamEvent => ({
   version: 1,
   type: "settingsUpdated",
   payload: { settings: settings as ServerConfig["settings"] },
 });
+
+it.effect(
+  "refreshes the displayed project directory when settings change without reconnecting",
+  () =>
+    Effect.gen(function* () {
+      const events = yield* withLateEditorConfig(
+        snapshotConfig({ newProjectsRoot: "/old-projects" }),
+        Stream.make(settingsUpdated({ addProjectBaseDirectory: "/new-projects" })),
+        {
+          resolveAvailableEditors: () => Effect.succeed([]),
+          resolveFileManagerRevealKind: () => Effect.succeed(undefined),
+        },
+        (directory) => directory,
+      ).pipe(Stream.runCollect);
+
+      assert.lengthOf(events, 1);
+      const [event] = events;
+      assert.equal(event?.type, "snapshot");
+      if (event?.type === "snapshot") {
+        assert.equal(event.config.settings.addProjectBaseDirectory, "/new-projects");
+        assert.equal(event.config.newProjectsRoot, "/new-projects");
+      }
+    }),
+);
 
 it.effect("resends late editors without rolling back updates already sent", () =>
   Effect.gen(function* () {
@@ -134,6 +163,7 @@ it.effect("resends late editors without rolling back updates already sent", () =
         resolveFileManagerRevealKind: () =>
           Deferred.await(settingsSent).pipe(Effect.as("file-explorer" as const)),
       },
+      () => "/projects",
     ).pipe(
       Stream.tap((event) =>
         event.type === "settingsUpdated" ? Deferred.succeed(settingsSent, undefined) : Effect.void,
@@ -162,6 +192,7 @@ it.effect("resends a file manager reveal kind that missed the snapshot", () =>
         resolveAvailableEditors: () => Effect.succeed(["file-manager"]),
         resolveFileManagerRevealKind: () => Effect.succeed("file-explorer"),
       },
+      () => "/projects",
     ).pipe(Stream.runCollect);
 
     const [late] = Array.from(events);
@@ -413,7 +444,7 @@ it.effect(
         Layer.mock(DirectEndpoints.DirectEndpoints)({ resolve: () => Effect.succeed([]) }),
         Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
           scratchRoot: Effect.succeedNone,
-          namedProjectsRoot: process.cwd(),
+          resolveNamedProjectsRoot: () => process.cwd(),
         }),
         Layer.mock(ServerEnvironment.ServerEnvironment)({
           getDescriptor: Effect.succeed({
