@@ -83,6 +83,8 @@ The fork deploys to `vps` over Tailscale as `bsag` (`ssh vps` from a configured 
 
 Where upstream's lines elsewhere in this file differ, the user's global rules win in this fork and are their standing sign-off: verify user-visible changes in the T3 preview browser without asking, and land finished work on `bsag` (`FORK.md`, Deployment) rather than a feature branch, unless the user asked to review it first.
 
+Run the pre-push check as `vp run check:changed origin/bsag`: its default base, `origin/main`, diffs the whole fork and runs past ten minutes.
+
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
