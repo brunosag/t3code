@@ -10,6 +10,7 @@ This fork follows upstream's V2 orchestrator and Pi provider. Pi is an external 
 - **Git preferences:** automatic, manual, or disabled pull-request actions, plus confirmation before pushing to the default branch, are shared across clients and project overrides.
 - **Claude history:** the SDK 0.3.276 patch rewrites internal deferred tool references when forking a session. The real SDK fork regression test covers repeated forks and external references. Healthy Claude skill changes invalidate cached workspace inventories so clients rescan them.
 - **Interval schedules keep their slot:** an interval task that fires late (the machine was asleep) or is run by hand stays on the grid its previous due time set, instead of restarting the interval from when it ran. A schedule edit or re-enable still starts a new grid from that moment.
+- **Installed web app names:** the server serves `manifest.webmanifest` named `T3 Code (<environment label>)`, so web apps installed from several machines stay apart on a phone.
 - **Installation and desktop fixes:** provider updates recognize npm ownership before native-looking layouts; Linux desktop entries match window identities. Development can omit Electron, open DevTools explicitly, and exit when its desktop window closes. Chat line width remains adjustable.
 
 ## Migration

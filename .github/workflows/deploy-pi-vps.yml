@@ -66,6 +66,7 @@ jobs:
             apps/server/src/background/SleepInhibitor.integration.test.ts \
             packages/shared/src/orchestrationV2PendingBackgroundWork.test.ts \
             apps/server/src/claudeHistoryWorker.test.ts \
+            apps/server/src/webManifest.test.ts \
             packages/provider-core/src/server/maintenanceResolver.test.ts \
             apps/server/src/provider/providerMaintenanceRunner.test.ts \
             apps/web/src/providerInstances.test.ts \

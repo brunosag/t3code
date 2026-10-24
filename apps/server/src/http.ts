@@ -48,6 +48,7 @@ import {
   failEnvironmentInternal,
 } from "./auth/http.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
+import { labelWebManifest } from "./webManifest.ts";
 import { WEBHOOK_ROUTE_PREFIX } from "./scheduledTasks/ScheduledTaskService.ts";
 import {
   browserApiCorsAllowedHeaders,
@@ -716,6 +717,29 @@ const handleStaticAndDevRequest = Effect.fn("handleStaticAndDevRequest")(
     PlatformError: () =>
       Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
   }),
+);
+
+const WEB_MANIFEST_PATH = "/manifest.webmanifest";
+
+export const layerWebManifestRoute = HttpRouter.add(
+  "GET",
+  WEB_MANIFEST_PATH,
+  Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    const staticDir =
+      config.staticDir ?? (config.devUrl ? yield* ServerConfig.resolveStaticDir() : undefined);
+    if (!staticDir) {
+      return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const manifest = yield* fileSystem.readFileString(path.join(staticDir, WEB_MANIFEST_PATH));
+    const { label } = yield* (yield* ServerEnvironment.ServerEnvironment).getDescriptor;
+    return HttpServerResponse.text(labelWebManifest(manifest, label), {
+      contentType: "application/manifest+json",
+      headers: { "Cache-Control": "no-cache" },
+    });
+  }).pipe(Effect.orElseSucceed(() => HttpServerResponse.text("Not Found", { status: 404 }))),
 );
 
 export const layerStaticAndDevRoute = Layer.unwrap(
