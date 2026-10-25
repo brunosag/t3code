@@ -1,13 +1,5 @@
-/**
- * SleepInhibitor - keeps a Linux host awake while any thread has unfinished
- * agent work, by holding a logind block lock through `systemd-inhibit`.
- *
- * The lock includes `handle-lid-switch` because logind ignores plain sleep
- * locks for lid-close suspend by default (`LidSwitchIgnoreInhibited=yes`).
- * Other platforms get a no-op layer.
- *
- * @module SleepInhibitor
- */
+// logind ignores sleep locks on lid close unless handle-lid-switch is also inhibited.
+// Other platforms use a no-op layer.
 import type {
   OrchestrationV2DomainEvent,
   OrchestrationV2ThreadShell,

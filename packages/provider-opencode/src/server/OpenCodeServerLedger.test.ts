@@ -13,6 +13,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Scope from "effect/Scope";
+import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as OpenCodeRuntime from "./OpenCodeRuntime.ts";
@@ -126,6 +127,21 @@ describe.each(observedPlatforms)("OpenCodeServerLedger observing as %s", (platfo
   const provideHost = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(
       Effect.provideService(HostProcess.Platform, platform),
+      Effect.provideServiceEffect(
+        ChildProcessSpawner.ChildProcessSpawner,
+        Effect.map(ChildProcessSpawner.ChildProcessSpawner, (spawner) => ({
+          ...spawner,
+          // NixOS exposes procps through PATH, while macOS provides /bin/ps.
+          string: (command) =>
+            spawner.string(
+              hostPlatform === "linux" &&
+                command._tag === "StandardCommand" &&
+                command.command === "/bin/ps"
+                ? ChildProcess.make("ps", command.args, command.options)
+                : command,
+            ),
+        })),
+      ),
       Effect.provide(NodeServices.layer),
     );
 

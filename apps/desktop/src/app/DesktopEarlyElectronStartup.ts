@@ -37,11 +37,7 @@ export interface EarlyLinuxElectronOptions {
 export const resolveLinuxWmClass = (isDevelopment: boolean): string =>
   isDevelopment ? "t3code-dev" : "t3code";
 
-// The entry is named after the window class because that is the only name KDE
-// and GNOME reliably associate a window with. KDE prefers an entry whose menu id
-// starts with the matched class, so t3code.desktop beats integration copies of
-// the AppImage (appimagekit_<hash>-….desktop) as well as any hand-written
-// launcher declaring the same class.
+// KDE and GNOME associate windows with this class-named entry ahead of AppImage integration copies.
 export const resolveLinuxDesktopEntryName = (isDevelopment: boolean): string =>
   `${resolveLinuxWmClass(isDevelopment)}.desktop`;
 
@@ -102,8 +98,7 @@ const WAYLAND_COLOR_MANAGER_FEATURE = "WaylandWpColorManagerV1";
 const featureListNames = (value: string | null): ReadonlyArray<string> =>
   (value ?? "").split(",").flatMap((entry) => entry.trim().match(/^\*?([^<:]+)/)?.[1] ?? []);
 
-// A stale HYPRLAND_INSTANCE_SIGNATURE is often inherited into other desktops, so only
-// trust the session's desktop names.
+// HYPRLAND_INSTANCE_SIGNATURE can be stale; trust only the session's desktop names.
 const isHyprlandSession = (env: NodeJS.ProcessEnv): boolean =>
   (trimNonEmpty(env.XDG_CURRENT_DESKTOP) ?? trimNonEmpty(env.XDG_SESSION_DESKTOP) ?? "")
     .split(":")
@@ -119,12 +114,8 @@ const HyprctlVersionJson = fromLenientJson(
 );
 const decodeHyprctlVersionJson = Schema.decodeSync(HyprctlVersionJson);
 
-// Hyprland 0.48.0 added wp-color-manager-v1 (hyprwm/Hyprland#9444) advertising
-// FEATURE_SET_PRIMARIES while rejecting set_primaries outside debug mode, which Chromium
-// treats as a fatal protocol error. 0.51.0 accepts them (hyprwm/Hyprland#11499).
-// Only stock builds of these releases count. Matching the commit as well as the tag
-// keeps later development builds that still report an old VERSION and tag (Nix
-// synthesizes `v${VERSION}`) on the default.
+// Hyprland 0.48.0 rejects advertised set_primaries (hyprwm/Hyprland#9444); 0.51.0 accepts it (hyprwm/Hyprland#11499).
+// Check commits because dev and Nix builds can retain release versions and tags.
 const AFFECTED_HYPRLAND_RELEASE_COMMITS: ReadonlyMap<string, string> = new Map([
   ["0.48.0", "5ee35f914f921e5696030698e74fb5566a804768"],
   ["0.48.1", "29e2e59fdbab8ed2cc23a20e3c6043d5decb5cdc"],

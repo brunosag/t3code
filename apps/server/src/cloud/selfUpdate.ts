@@ -43,16 +43,8 @@ import { isExactServiceVersion, SERVICE_LAUNCHER_PROTOCOL } from "./serviceProto
 
 const PREFLIGHT_TIMEOUT = Duration.seconds(30);
 
-/**
- * Whether this build publishes server release artifacts of its own. The stock
- * self-update downloads them from the release base URL; the fork publishes
- * none, so the versions it installs (`<core>-pi.<sha>`) have no archives, and
- * the manual fallback (`npx t3@<version>`) would install stock upstream t3
- * over the Pi runtime. Servers built here therefore advertise
- * `serverUpdateUnavailable` and clients offer no update affordance at all.
- * Flip this when the fork publishes server releases and points its hosts at
- * them with T3CODE_RELEASE_BASE_URL.
- */
+// Fork runtimes publish no server archives; upstream update paths would replace them.
+// Enable this only when fork releases exist at T3CODE_RELEASE_BASE_URL.
 export const SERVER_RELEASES_PUBLISHED = false;
 
 export function resolveServerSelfUpdateCapability(input: {
@@ -391,9 +383,7 @@ export const layer = Layer.effect(ServerSelfUpdate, make()).pipe(
   Layer.provide(ProcessRunner.layer),
 );
 
-// The RPC stream used to own this fiber, so a dropped client socket interrupted
-// the download. Offers after the queue shuts down are ignored; the update
-// still finishes, and the in-flight guard stays as it was.
+// The update outlives client sockets; progress offers to a closed queue are ignored.
 export const updateProgressStream = (
   selfUpdate: ServerSelfUpdate["Service"],
   input: ServerSelfUpdateInput,

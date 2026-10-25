@@ -94,6 +94,7 @@ export function normalizeText(text: string): string {
   );
 }
 
+// oxlint-disable-next-line t3code/no-em-dash-copy -- This is the speech punctuation grammar, not product copy.
 const PUNCTUATION = ';:,.!?¡¿—…"«»“”(){}[]';
 const PUNCTUATION_RUN = new RegExp(
   `(\\s*[${PUNCTUATION.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}]+\\s*)+`,

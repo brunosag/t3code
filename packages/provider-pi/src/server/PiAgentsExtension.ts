@@ -14,18 +14,9 @@ export const PI_AGENTS_ENV = {
   definitionsPath: "T3_PI_AGENTS_PATH",
 } as const;
 
-/**
- * T3-owned Pi extension. It pushes T3's agent definitions into the pi-subagents
- * roster over that extension's cross-extension RPC, so T3 can own agents without
- * writing into Pi's own agent directories. The push is `exclusive`: Pi's own
- * agent files are not part of the roster while this extension is loaded.
- * Every outcome — definitions unreadable, the payload rejected, or no handler
- * at all — is reported back over the side channel as a `subagent.registration`
- * message, because each one otherwise fails silently and lets Pi's agent files
- * run instead of T3's.
- * Written without template literals or escape sequences so it can live in a
- * `String.raw` literal; the env name is substituted from {@link PI_AGENTS_ENV}.
- */
+// Register an exclusive roster through pi-subagents without writing Pi's agent files.
+// Report failures over the side channel so an unregistered roster cannot fail silently.
+// Keep the source free of template literals and escapes for String.raw materialization.
 const PI_AGENTS_EXTENSION_SOURCE = String.raw`
 "use strict";
 import { readFileSync, writeSync } from "node:fs";
@@ -128,7 +119,7 @@ function forward(event, data) {
 
 /**
  * Push T3's roster and wait for the handler's reply envelope. The reply is the
- * only proof that a registerAgents handler exists and accepted the payload —
+ * only proof that a registerAgents handler exists and accepted the payload;
  * a subagents extension without one drops the event without a trace.
  */
 function register() {
@@ -202,7 +193,7 @@ function register() {
   }, ACK_TIMEOUT_MS);
   pending = { timer: timer, unsubscribe: unsubscribe };
   // exclusive: T3 owns this session's roster, so Pi's agent files are not
-  // merged in at all — not for fields, not for names T3 omitted.
+  // merged in at all; not for fields, not for names T3 omitted.
   api.events.emit(RPC_CHANNEL, { requestId: requestId, agents: read.agents, exclusive: true });
   if (read.failure) {
     settle({

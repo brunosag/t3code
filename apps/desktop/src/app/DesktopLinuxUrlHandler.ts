@@ -12,23 +12,7 @@ import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
 
-// Linux ships as an AppImage, so the .desktop entry users end up with is
-// created by whatever integration tool they use (AppImageLauncher names it
-// appimagekit_<hash>-….desktop) and its filename is not under our control.
-// Electron's app.setAsDefaultProtocolClient resolves the desktop id from
-// setDesktopName, which cannot match those files — so the browser keeps
-// prompting "Choose an application" for every OAuth callback. Instead, write
-// our own entry pointing at the current AppImage, refresh the desktop MIME
-// cache, then claim the scheme default via xdg-mime, exactly what the file
-// manager's "set as default" checkbox would record in mimeapps.list.
-//
-// That entry is also the app's identity: the window reaches the compositor with
-// this desktop entry name as its app id, and desktops associate a window with a
-// launcher by that id. KDE is stricter still — it matches StartupWMClass against
-// the window's class and app id *before* it looks at desktop entry names — so the
-// entry declares the class the window carries and is named after it. That
-// combination beats integration copies of the AppImage and hand-written
-// launchers, leaving this entry as the only one users should have to pin.
+// AppImage integrators choose the .desktop filename, so setDesktopName cannot identify it for protocol registration.
 const { logInfo, logWarning } = makeComponentLogger("desktop-linux-url-handler");
 
 export class DesktopLinuxUrlHandlerRegistrationError extends Schema.TaggedError<DesktopLinuxUrlHandlerRegistrationError>()(
@@ -73,9 +57,7 @@ const escapeDesktopEntryString = (value: string): string =>
     .replaceAll("\r", "\\r")
     .replaceAll("\t", "\\t");
 
-// Exec values are unescaped twice by implementations: first the general
-// string-value rules, then the Exec quoting rules — so writing composes the
-// layers in reverse.
+// Exec values undergo general unescaping then Exec unquoting; escape in reverse order.
 export function escapeDesktopEntryExecArgument(value: string): string {
   const quoted = value
     .replaceAll("\\", () => "\\\\")
@@ -86,7 +68,6 @@ export function escapeDesktopEntryExecArgument(value: string): string {
   return escapeDesktopEntryString(`"${quoted}"`);
 }
 
-// Named after the executable, which is what packaging installs into hicolor.
 // Legacy xdg-open looks up the first Exec word without unquoting it.
 const escapeUrlHandlerExecTarget = (value: string): string =>
   /[ \t\n"'\\><~|&;$*?#()`]/.test(value)
@@ -95,13 +76,8 @@ const escapeUrlHandlerExecTarget = (value: string): string =>
 
 const LAUNCHER_ICON_NAME = "t3code";
 
-/**
- * Renders the app's Linux desktop entry. A packaged app is the only one whose
- * Exec can point at itself, so everyone else writes a hidden URL handler: a
- * development Exec target is the dev Electron binary, which is not a launcher
- * worth offering in the app menu. `wmClass` must match the desktop entry name
- * minus `.desktop`: KDE compares StartupWMClass against the window's app id,
- * which is exactly that name, and prefers the entry named after the class.
+/** Packaged entries appear in menus; development entries only handle URLs.
+ * KDE requires the entry name and StartupWMClass to match the window app id.
  */
 export function renderLinuxDesktopEntry(input: {
   readonly displayName: string;
@@ -136,9 +112,7 @@ export function renderLinuxDesktopEntry(input: {
   ].join("\n");
 }
 
-// Some docks and bars look the Wayland app id up in the icon theme when no
-// visible desktop entry matches the window, for example an AppImage run without
-// integration. Theme lookups are case-sensitive, so install both spellings.
+// Docks may look up the Wayland app id without a desktop entry; icon theme lookups are case-sensitive.
 const LINUX_THEME_ICON_SIZE = "256x256";
 
 function linuxThemeIconNames(desktopEntryName: string): readonly string[] {
@@ -156,7 +130,7 @@ export class DesktopLinuxUrlHandler extends Context.Service<
   }
 >()("@t3tools/desktop/app/DesktopLinuxUrlHandler") {}
 
-/** @public Service construction is part of the canonical Effect module API. */
+/** @public */
 export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -174,9 +148,14 @@ export const make = Effect.gen(function* () {
   const themeIconDir = environment.path.join(hicolorDir, LINUX_THEME_ICON_SIZE, "apps");
 
   const writeDesktopEntry = Effect.gen(function* () {
+    // Distribution packages that run on a shared Electron set
+    // T3CODE_DESKTOP_LAUNCHER_PATH, because process.execPath is that Electron.
     // Inside the mounted AppImage, process.execPath points at a transient
     // /tmp/.mount_* path — the handler must launch the AppImage itself.
-    const execTarget = Option.getOrElse(environment.appImagePath, () => process.execPath);
+    const execTarget = environment.desktopLauncherPath.pipe(
+      Option.orElse(() => environment.appImagePath),
+      Option.getOrElse(() => process.execPath),
+    );
     const content = renderLinuxDesktopEntry({
       displayName: environment.displayName,
       execTarget,
@@ -186,8 +165,7 @@ export const make = Effect.gen(function* () {
       isPackaged: environment.isPackaged,
       ...(environment.isPackaged ? { iconPath } : {}),
     });
-    // Pre-ready setup normally wrote this already. Avoid truncating a valid
-    // entry while the portal may be reading it during startup.
+    // Avoid truncating the pre-ready entry while the portal may be reading it.
     const existing = yield* fileSystem
       .readFileString(desktopEntryPath)
       .pipe(Effect.orElseSucceed(() => null));
@@ -271,10 +249,8 @@ export const make = Effect.gen(function* () {
       yield* fileSystem.writeFile(target, icon);
       changed = true;
     }
-    // Only keep an existing cache current. Creating one would leave GTK reading
-    // a cache that other tools installing user icons do not update. An icon
-    // newer than the cache also retries a refresh that failed on an earlier
-    // launch.
+    // Creating a cache would leave GTK reading stale icons from other installers.
+    // A newer icon retries a refresh that failed on an earlier launch.
     const cachePath = environment.path.join(hicolorDir, "icon-theme.cache");
     const cachedAt = yield* modifiedAt(cachePath).pipe(Effect.option);
     if (Option.isNone(cachedAt)) return;
@@ -349,10 +325,7 @@ export const make = Effect.gen(function* () {
     yield* installThemeIcons;
 
     yield* updateDesktopDatabase.pipe(
-      // Some MIME implementations, including GIO, use mimeinfo.cache to verify
-      // that a desktop entry is associated with a scheme. Cache refresh is
-      // independently best-effort so a missing update-desktop-database executable
-      // does not prevent xdg-mime from recording the requested default.
+      // GIO verifies scheme associations through mimeinfo.cache. A missing cache updater must not block xdg-mime.
       Effect.catch((error) =>
         logWarning("desktop MIME cache refresh failed", {
           applicationsDir: environment.linuxApplicationsDir,

@@ -39,6 +39,7 @@ export function ReadAloudButton({
     () => readAloud.getSnapshot(key),
     getServerSnapshot,
   );
+  if (environmentId === undefined) return null;
   const active = state !== null && state.status !== "error";
   const label = active ? "Stop reading aloud" : "Read aloud";
   return (
@@ -51,10 +52,10 @@ export function ReadAloudButton({
             variant="ghost-muted"
             aria-label={label}
             aria-pressed={active}
-            disabled={streaming || !text.trim() || environmentId === undefined}
+            disabled={streaming || !text.trim()}
             onClick={() => {
               if (active) readAloud.stopMessage(key);
-              else if (environmentId !== undefined) {
+              else {
                 void readAloud.start(key, {
                   environmentId,
                   text: speechTextFromMarkdown(text),
@@ -90,7 +91,7 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
     [threadKey],
   );
 
-  if (!state) return null;
+  if (!state || parseScopedThreadKey(threadKey) === null) return null;
   const preparing = state.status === "preparing";
   const buffering = state.status === "buffering";
   // Buffering still means the user asked to listen, so it offers Pause.

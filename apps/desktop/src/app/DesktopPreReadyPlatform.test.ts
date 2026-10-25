@@ -160,11 +160,7 @@ describe("DesktopPreReadyPlatform", () => {
         assert.equal(identity.desktopName, "t3code.desktop");
         assert.include(identity.desktopEntry ?? "", "Exec=/Applications/current.AppImage %U");
         assert.include(identity.desktopEntry ?? "", "Name=T3 Code (Beta)");
-        // Packaged runs pre-write the launcher entry users pin, not just a
-        // hidden URL handler.
-        // KDE matches StartupWMClass before desktop entry names, and prefers
-        // the entry named after the class, so the app's own entry owns the
-        // window rather than an integration copy of the same AppImage.
+        // The visible class-named launcher must own the window ahead of integration copies.
         assert.include(identity.desktopEntry ?? "", "StartupWMClass=t3code");
         assert.notInclude(identity.desktopEntry ?? "", "NoDisplay=true");
         assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/t3code;");
@@ -178,6 +174,28 @@ describe("DesktopPreReadyPlatform", () => {
         ]);
         assert.include(identity.desktopEntry ?? "", "Icon=/xdg/icons/t3code.desktop.png");
         assert.isTrue(identity.iconInstalled);
+      }),
+    ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+  });
+
+  it.effect("points the early portal entry at a configured distribution launcher", () => {
+    vi.stubEnv("VITE_DEV_SERVER_URL", "");
+    vi.stubEnv("XDG_DATA_HOME", "/xdg");
+    vi.stubEnv("APPIMAGE", "/Applications/current.AppImage");
+    vi.stubEnv("T3CODE_DESKTOP_LAUNCHER_PATH", " /opt/T3 Code/t3code ");
+    getSwitchValueMock.mockReturnValue("");
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* Layer.build(
+          DesktopPreReadyPlatform.layer.pipe(
+            Layer.provide(Layer.succeed(HostProcess.Platform, "linux")),
+          ),
+        );
+        const entry = writeFileSyncMock.mock.calls.find(
+          ([path]) => path === "/xdg/applications/t3code.desktop",
+        )?.[1];
+        assert.include(entry, 'Exec="/opt/T3 Code/t3code" %U');
       }),
     ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
   });

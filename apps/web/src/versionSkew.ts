@@ -89,11 +89,7 @@ export function resolveServerSelfUpdateCapability(
   return serverConfig?.environment.capabilities.serverSelfUpdate ?? null;
 }
 
-/** True when this server runs a build with no releases of its own, so no
-    client can update it in place. Both the launcher path (release archives
-    that this build never publishes) and the manual `npx t3@<version>`
-    fallback (stock upstream t3 over a forked runtime) are traps there, so
-    clients must offer no update affordance at all. */
+/** Fork builds have no release archives; upstream updater paths would replace the runtime. */
 export function isServerUpdateUnavailable(
   serverConfig: Pick<ServerConfig, "environment"> | null | undefined,
 ): boolean {

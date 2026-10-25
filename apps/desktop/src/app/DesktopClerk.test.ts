@@ -21,6 +21,8 @@ const { createClerkBridgeMock, requestSingleInstanceLockMock, storageAdapter, st
     storageMock: vi.fn(),
   }));
 
+vi.mock("electron", () => ({}));
+
 vi.mock("@clerk/electron", () => ({
   createClerkBridge: createClerkBridgeMock,
 }));

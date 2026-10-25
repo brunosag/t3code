@@ -1,18 +1,6 @@
-/**
- * Source of the speech engine process, run with `node -e` under the server's own Node
- * (Electron's, in the desktop app). It stays in a separate process because:
- *
- * - ONNX Runtime's Node binding runs inference synchronously on the calling thread, which
- *   would stall the server for seconds per sentence.
- * - The binding cannot be loaded a second time in one process, so idle release has to end
- *   the process rather than a worker thread.
- * - phonemizer's espeak-ng build installs process-wide `uncaughtException` and
- *   `unhandledRejection` handlers that rethrow.
- *
- * Protocol: one JSON object per line on stdin and stdout. The process answers
- * `{ id: 0 }` once the model is loaded, then each request in order, and exits when
- * stdin closes.
- */
+// Keep synchronous ONNX inference and phonemizer's process-wide handlers off the server.
+// Releasing the native binding requires exiting this process rather than a worker thread.
+// JSON lines carry requests and replies; id 0 signals readiness, and closing stdin exits.
 export const KOKORO_ENGINE_SCRIPT = String.raw`
 "use strict";
 const fs = require("node:fs");

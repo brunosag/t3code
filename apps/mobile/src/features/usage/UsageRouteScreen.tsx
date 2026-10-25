@@ -56,6 +56,7 @@ import { UsageLimitsSection } from "./UsageLimitsPooled";
 import { Menu } from "../../components/ui/Menu";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
+import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
 import type { UsageChartMetric } from "./usageChartData";
 import { PROVIDER_LABEL, useProviderColors, useUsageMixColors } from "./usageProviders";
 
@@ -245,8 +246,31 @@ function UsageScreen(props: {
     <SettingsScreen title="Usage" trailing={environmentFilter} workspaceRoot={props.workspace}>
       {Platform.OS === "ios" ? (
         <NativeStackScreenOptions
-          optionsVersion={environmentFilter}
-          options={{ headerRight: () => environmentFilter }}
+          optionsVersion={JSON.stringify({ showEnvironmentFilter, filterIcon, environmentActions })}
+          options={{
+            // A native menu item, unlike a custom view, moves into the Duo's vertical bar.
+            unstable_headerRightItems: () =>
+              showEnvironmentFilter
+                ? [
+                    withNativeGlassHeaderItem({
+                      accessibilityLabel: "Filter usage environments",
+                      icon: { name: filterIcon, type: "sfSymbol" },
+                      label: "",
+                      type: "menu",
+                      menu: {
+                        title: "Environments",
+                        items: environmentActions.map((action) => ({
+                          type: "action" as const,
+                          label: action.title,
+                          description: action.subtitle,
+                          state: action.state === "on" ? ("on" as const) : undefined,
+                          onPress: () => selectEnvironment(action.id),
+                        })),
+                      },
+                    }),
+                  ]
+                : [],
+          }}
         />
       ) : null}
       <ScrollView
@@ -595,7 +619,7 @@ function ProviderSection(props: {
   const colors = useProviderColors();
   if (merged.providers.length === 0 && props.cursorAccessEnvironments.length === 0) return null;
 
-  // .sort() on a copy, not .toSorted(): Hermes doesn't ship the ES2023 method.
+  // Hermes lacks toSorted.
   const ordered = [...merged.providers].sort((a, b) =>
     metric === "cost" ? b.costUsd - a.costUsd : b.totalTokens - a.totalTokens,
   );
@@ -819,7 +843,7 @@ function ModelsSection(props: { readonly merged: MergedUsage; readonly metric: U
   const colors = useProviderColors();
   if (merged.models.length === 0) return null;
 
-  // .sort() on a copy, not .toSorted(): Hermes doesn't ship the ES2023 method.
+  // Hermes lacks toSorted.
   const ordered = [...merged.models].sort((a, b) =>
     metric === "cost"
       ? b.costUsd - a.costUsd || b.totalTokens - a.totalTokens
