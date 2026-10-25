@@ -165,7 +165,7 @@ const ListScheduledTasksTool = Tool.make("list_scheduled_tasks", {
 
 const UpdateScheduledTaskTool = Tool.make("update_scheduled_task", {
   description:
-    "Update an existing scheduled task by scheduledTaskId (from list_scheduled_tasks). Webhook schedule dedupe accepts replayKey, coalesceKey, and coalesceWindowSeconds (10–3600, default 120) to suppress replays for 7 days and retain the latest payload in each fixed window. Only the provided fields change; omit a field to leave it as-is. Use enabled=false to pause a task without deleting it. Set bindToCurrentThread to move the task between posting into this thread and launching a fresh thread per run. A webhook schedule without filters keeps the stored filters; pass filters to replace them, or filters:[] to clear them.",
+    "Update an existing scheduled task by scheduledTaskId (from list_scheduled_tasks). Webhook schedule dedupe accepts replayKey, coalesceKey, and coalesceWindowSeconds (10–3600, default 120) to suppress replays for 7 days and retain the latest payload in each fixed window. Only the provided fields change; omit a field to leave it as-is. Use enabled=false to pause a task without deleting it. Set bindToCurrentThread to move the task between posting into this thread and launching a fresh thread per run. Pass target to change the model or its options for later runs. A webhook schedule without filters keeps the stored filters; pass filters to replace them, or filters:[] to clear them.",
   parameters: OrchestratorMcpUpdateScheduledTaskInput,
   success: OrchestratorMcpScheduleTaskResult,
   failure: OrchestratorMcpFailure,

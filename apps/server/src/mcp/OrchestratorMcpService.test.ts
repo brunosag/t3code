@@ -10,6 +10,7 @@ import {
   type OrchestrationV2ThreadShell,
   type ScheduledTask,
   ScheduledTaskId,
+  type ScheduledTaskUpsertInput,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -2296,6 +2297,166 @@ describe("OrchestratorMcpService provider resolution", () => {
       }),
     );
   });
+  describe("retargeting a scheduled task", () => {
+    const claudeInstanceId = ProviderInstanceId.make("claude-pool");
+    const effortDescriptor = (values: ReadonlyArray<string>) => ({
+      id: "effort",
+      label: "Effort",
+      type: "select" as const,
+      options: values.map((id) => ({ id, label: id })),
+    });
+    const withModel = (
+      provider: ServerProvider,
+      slug: string,
+      optionDescriptors: ReadonlyArray<unknown>,
+    ): ServerProvider =>
+      ({
+        ...provider,
+        models: [{ slug, name: slug, isCustom: false, capabilities: { optionDescriptors } }],
+      }) as ServerProvider;
+    const providers = [
+      withModel(
+        providerSnapshot({ instanceId: codexInstanceId, driver: ProviderDriverKind.make("codex") }),
+        "gpt-6",
+        [effortDescriptor(["medium", "high"]), { id: "fastMode", label: "Fast", type: "boolean" }],
+      ),
+      withModel(
+        providerSnapshot({
+          instanceId: claudeInstanceId,
+          driver: ProviderDriverKind.make("claudeAgent"),
+        }),
+        "claude-opus-5-5",
+        [effortDescriptor(["medium", "high", "max"])],
+      ),
+    ];
+    const nightly: ScheduledTask = {
+      id: ScheduledTaskId.make("scheduled-task:nightly"),
+      title: "Nightly",
+      prompt: "Merge upstream",
+      enabled: true,
+      schedule: { type: "interval", everyMs: 86_400_000 },
+      projectId,
+      threadId: null,
+      workspaceStrategy: { type: "root" },
+      modelSelection: {
+        instanceId: codexInstanceId,
+        model: "gpt-6",
+        options: [
+          { id: "effort", value: "medium" },
+          { id: "fastMode", value: false },
+        ],
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdBy: "agent",
+      creationSource: "mcp",
+      createdAt: "2026-10-05T00:00:00.000Z",
+      updatedAt: "2026-10-05T00:00:00.000Z",
+      nextRunAt: "2026-10-26T07:00:00.000Z",
+      lastRunAt: null,
+      lastRunStatus: "never",
+      lastRunError: null,
+      runCount: 0,
+    };
+    const client: McpInvocationScope = {
+      environmentId: EnvironmentId.make("environment:scheduled-target"),
+      requestNamespace: "client:scheduled-target",
+      thread: undefined,
+      client: { sessionId: "scheduled-target", label: "Claude Code", access: "full-access" },
+      capabilities: new Set(["orchestration"]),
+      issuedAt: 1,
+    };
+    const retarget = (target: OrchestratorMcpTarget) =>
+      OrchestratorMcpService.OrchestratorMcpService.pipe(
+        Effect.flatMap((service) =>
+          service.updateScheduledTask(client, { scheduledTaskId: nightly.id, target }),
+        ),
+      );
+    const layer = (
+      saved: Ref.Ref<ReadonlyArray<ScheduledTaskUpsertInput>>,
+      enabledInstanceIds: ReadonlyArray<ProviderInstanceId> = [codexInstanceId, claudeInstanceId],
+    ) =>
+      layerOrchestratorService.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            NodeServices.layer,
+            Layer.mock(ThreadManagementService.ThreadManagementService)({
+              isProviderInstanceEnabledForProject: ({ instanceId }) =>
+                Effect.succeed(enabledInstanceIds.includes(instanceId)),
+            }),
+            ServerSettings.layerTest(),
+            providerRegistryLayer(providers),
+            adapterRegistryLayer([codexInstanceId, claudeInstanceId]),
+            Layer.mock(ProjectService.ProjectService)({}),
+            Layer.mock(SecretRequests.SecretRequests)({}),
+            Layer.mock(ScheduledTaskService.ScheduledTaskService)({
+              list: () => Effect.succeed({ tasks: [nightly] }),
+              upsert: (input) =>
+                Ref.update(saved, (inputs) => [...inputs, input]).pipe(
+                  Effect.as({ task: { ...nightly, modelSelection: input.modelSelection } }),
+                ),
+            }),
+          ),
+        ),
+      );
+
+    it.effect("moves later runs to another provider's model and effort", () =>
+      Effect.gen(function* () {
+        const saved = yield* Ref.make<ReadonlyArray<ScheduledTaskUpsertInput>>([]);
+        const updated = yield* retarget({
+          providerInstanceId: claudeInstanceId,
+          model: "claude-opus-5-5",
+          options: [{ id: "effort", value: "high" }],
+        }).pipe(Effect.provide(layer(saved)));
+        const expected = {
+          instanceId: claudeInstanceId,
+          model: "claude-opus-5-5",
+          options: [{ id: "effort", value: "high" }],
+        };
+        const [input] = yield* Ref.get(saved);
+        assert.deepEqual(input?.modelSelection, expected);
+        assert.deepEqual(input?.schedule, nightly.schedule);
+        assert.equal(input?.prompt, nightly.prompt);
+        assert.deepEqual(updated.modelSelection, expected);
+      }),
+    );
+
+    it.effect("overrides one option of the task's model and keeps the rest", () =>
+      Effect.gen(function* () {
+        const saved = yield* Ref.make<ReadonlyArray<ScheduledTaskUpsertInput>>([]);
+        yield* retarget({ options: [{ id: "effort", value: "high" }] }).pipe(
+          Effect.provide(layer(saved)),
+        );
+        const [input] = yield* Ref.get(saved);
+        assert.deepEqual(input?.modelSelection, {
+          instanceId: codexInstanceId,
+          model: "gpt-6",
+          options: [
+            { id: "effort", value: "high" },
+            { id: "fastMode", value: false },
+          ],
+        });
+      }),
+    );
+
+    it.effect("saves nothing for an unadvertised option or a provider the project turned off", () =>
+      Effect.gen(function* () {
+        const saved = yield* Ref.make<ReadonlyArray<ScheduledTaskUpsertInput>>([]);
+        const badOption = yield* retarget({ options: [{ id: "effort", value: "ultra" }] }).pipe(
+          Effect.flip,
+          Effect.provide(layer(saved)),
+        );
+        assert.equal(badOption.code, "invalid_request");
+        const disabled = yield* retarget({
+          providerInstanceId: claudeInstanceId,
+          model: "claude-opus-5-5",
+        }).pipe(Effect.flip, Effect.provide(layer(saved, [codexInstanceId])));
+        assert.equal(disabled.code, "provider_unavailable");
+        assert.equal((yield* Ref.get(saved)).length, 0);
+      }),
+    );
+  });
+
   it.effect(
     "reports the child run's selection after a restart and the thread selection before launch",
     () =>

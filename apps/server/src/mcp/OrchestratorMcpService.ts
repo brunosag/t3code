@@ -296,6 +296,7 @@ function scheduledTaskSummary(task: ScheduledTask, mayRun: boolean): Orchestrato
     projectId: task.projectId,
     boundThreadId: task.threadId,
     schedule: task.schedule,
+    modelSelection: task.modelSelection,
     nextRunAt: task.nextRunAt,
     lastRunStatus: task.lastRunStatus,
     ...(task.webhook?.url == null || !mayRun ? {} : { webhookUrl: task.webhook.url }),
@@ -1324,7 +1325,13 @@ const make = Effect.gen(function* () {
   };
 
   const resolveTarget = Effect.fn("OrchestratorMcpService.resolveTarget")(function* (input: {
-    readonly parent: Pick<OrchestrationV2ThreadProjection, "thread">;
+    /** What an unset target inherits from: a parent thread, or a scheduled task being retargeted. */
+    readonly parent: {
+      readonly thread: Pick<
+        OrchestrationV2ThreadProjection["thread"],
+        "projectId" | "modelSelection"
+      >;
+    };
     readonly target: OrchestratorMcpTarget | undefined;
     readonly providers: ReadonlyArray<ServerProvider>;
     /** Receipt replays bypass current settings because they start no work. Dispatch must reuse the checked command ID. */
@@ -1884,6 +1891,27 @@ const make = Effect.gen(function* () {
           input.bindToCurrentThread === undefined
             ? existing.workspaceStrategy
             : scheduledTaskWorkspaceStrategy(input.bindToCurrentThread);
+        let modelSelection = existing.modelSelection;
+        let runtimeMode = existing.runtimeMode;
+        if (input.target !== undefined) {
+          const target = yield* resolveTargetRechecking({
+            parent: { thread: existing },
+            target: input.target,
+            providers: yield* loadProviders,
+          });
+          const enabledForProject = yield* threadManagement.isProviderInstanceEnabledForProject({
+            projectId: existing.projectId,
+            instanceId: target.modelSelection.instanceId,
+          });
+          if (!enabledForProject) {
+            return yield* failure(
+              "provider_unavailable",
+              `Provider ${target.modelSelection.instanceId} is not enabled for this task's project.`,
+            );
+          }
+          modelSelection = target.modelSelection;
+          runtimeMode = yield* resolveRuntimeMode(existing.runtimeMode, undefined, target);
+        }
         const upsertInput: ScheduledTaskUpsertInput = {
           id: existing.id,
           title: input.title ?? existing.title,
@@ -1893,8 +1921,8 @@ const make = Effect.gen(function* () {
           projectId: existing.projectId,
           threadId,
           workspaceStrategy,
-          modelSelection: existing.modelSelection,
-          runtimeMode: existing.runtimeMode,
+          modelSelection,
+          runtimeMode,
           interactionMode: existing.interactionMode,
           createdBy: existing.createdBy,
           creationSource: existing.creationSource,
