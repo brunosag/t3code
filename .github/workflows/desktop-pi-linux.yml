@@ -149,9 +149,9 @@ jobs:
           grep -q -- "${{ steps.version.outputs.version }}" release/nightly-linux.yml
 
       # Keep the build retrievable even when publishing fails, so a bad release
-      # step never costs another full Electron build. Three days covers a rerun;
-      # the releases keep the builds, and longer retention filled the artifact
-      # storage the account's other repositories need for their Pages deploys.
+      # step never costs another full Electron build. A day covers a rerun; the
+      # releases keep the builds, and three days of nightlies still filled the
+      # artifact storage the account's other repositories need for Pages deploys.
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -160,7 +160,7 @@ jobs:
             release/*.AppImage
             release/nightly-linux.yml
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 1
 
       # Stage the release as a draft and publish it only after every asset is
       # uploaded. electron-updater reads the manifest without checking that the
