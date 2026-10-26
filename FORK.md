@@ -1,12 +1,11 @@
 # T3 Code fork
 
-This fork follows upstream's V2 orchestrator and Pi provider. Pi is an external CLI: install and authenticate it on the machine running the T3 server, then configure its executable in Settings → Providers. Upstream owns Pi model discovery, permissions, sessions, compaction, MCP integration, and auxiliary text generation.
+This fork follows upstream's V2 orchestrator. Its Pi provider is upstream's, without fork changes.
 
 ## Retained changes
 
 - **Claude thinking quotes:** web and desktop do not offer quoting on Claude thinking items; the Claude adapter also removes saved thinking citations while preserving user comments, including sends from mobile. Other providers keep their quoting behavior.
-- **Pi questions:** the T3-owned `t3_ask_user` extension supports batched questions, option descriptions, multiple selections, and written answers. It uses dedicated inherited pipes alongside Pi's RPC transport. Written question drafts survive web reloads and mobile app restarts. Choosing an option moves a written answer into the thread draft on web and mobile.
-- **Pi agent roster:** Settings → Agents stores named definitions for compatible `pi-subagents` extensions, including prompts, models, thinking, tools, skills, extension access, and turn limits. Definitions apply when a Pi session next starts. A configured roster is exclusive; disabled entries are omitted. Registration failures appear as extension errors. Background completion events update the shared agent timeline.
+- **Question drafts:** written answers to agent questions survive web reloads and mobile app restarts. Choosing an option moves a written answer into the thread draft on web and mobile.
 - **Git preferences:** automatic, manual, or disabled pull-request actions, plus confirmation before pushing to the default branch, are shared across clients and project overrides.
 - **Claude history:** the SDK 0.3.276 patch rewrites internal deferred tool references when forking a session. The real SDK fork regression test covers repeated forks and external references. Healthy Claude skill changes invalidate cached workspace inventories so clients rescan them.
 - **Interval schedules keep their slot:** an interval task that fires late (the machine was asleep) or is run by hand stays on the grid its previous due time set, instead of restarting the interval from when it ran. A schedule edit or re-enable still starts a new grid from that moment.
@@ -38,4 +37,4 @@ The npm-installed server loads `@ff-labs/fff-node` through an ESM import. Upstre
 
 Merge upstream into a review worktree and run focused tests plus typechecks for affected packages before updating `bsag`. In a conflict, take upstream's side unless it touches a retained change above.
 
-Keep upstream's scheduled workflows disabled on the fork (`gh workflow disable -R brunosag/t3code <file>`; currently `release.yml`, `mobile-android-apk.yml`, `relay-preview-cleanup.yml`, and `stale-needs-more-info.yml`). Their stuck runs got the fork's Actions paused, which stopped deploys. After each upstream merge, disable any newly arrived workflow with a `schedule:` trigger. Pi transport, adapter, and retained extension tests live in `packages/provider-pi/src/server`. Do not restore the removed V1 adapter or permission layer.
+Keep upstream's scheduled workflows disabled on the fork (`gh workflow disable -R brunosag/t3code <file>`; currently `release.yml`, `mobile-android-apk.yml`, `relay-preview-cleanup.yml`, and `stale-needs-more-info.yml`). Their stuck runs got the fork's Actions paused, which stopped deploys. After each upstream merge, disable any newly arrived workflow with a `schedule:` trigger. Keep `packages/provider-pi` identical to upstream. Do not restore the removed V1 adapter or permission layer.

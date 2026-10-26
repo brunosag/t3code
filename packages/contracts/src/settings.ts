@@ -1144,30 +1144,6 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
-/**
- * A T3-owned subagent definition. T3 stores these and pushes them into Pi's
- * subagent roster over its cross-extension RPC, so an agent can be configured
- * here without writing files into Pi's own agent directories. `name` is the
- * roster key; disabled entries stay stored but are never registered.
- */
-export const AgentDefinition = Schema.Struct({
-  name: TrimmedNonEmptyString,
-  displayName: Schema.optional(TrimmedNonEmptyString),
-  description: Schema.optional(TrimmedNonEmptyString),
-  systemPrompt: TrimmedNonEmptyString,
-  model: Schema.optional(TrimmedNonEmptyString),
-  thinking: Schema.optional(TrimmedNonEmptyString),
-  // `true` inherits every extension/skill, `false` inherits none, and a list
-  // allows only those names. Omitted uses the extension's loader default.
-  extensions: Schema.optional(Schema.Union([Schema.Boolean, Schema.Array(TrimmedNonEmptyString)])),
-  skills: Schema.optional(Schema.Union([Schema.Boolean, Schema.Array(TrimmedNonEmptyString)])),
-  maxTurns: Schema.optional(Schema.Finite),
-  promptMode: Schema.optional(Schema.Literals(["replace", "append", "auto"])),
-  tools: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-});
-export type AgentDefinition = typeof AgentDefinition.Type;
-
 export const ServerSettings = Schema.Struct({
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1333,10 +1309,6 @@ export const ServerSettings = Schema.Struct({
 
   usagePriceOverrides: Schema.Record(TrimmedNonEmptyString, UsageModelPriceOverride).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
-  ),
-  /** T3-owned subagent definitions, registered with Pi at session start. */
-  agentDefinitions: Schema.Array(AgentDefinition).pipe(
-    Schema.withDecodingDefault(Effect.succeed([])),
   ),
   /**
    * Exact model ID to the model its usage counts as, such as a preview slug to
@@ -1560,7 +1532,6 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   defaultAutoPull: Schema.optionalKey(Schema.Boolean),
   defaultProjectScripts: Schema.optionalKey(Schema.Array(ProjectScript)),
-  agentDefinitions: Schema.optionalKey(Schema.Array(AgentDefinition)),
   projectScriptOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(Schema.Array(ProjectScript))),
   ),

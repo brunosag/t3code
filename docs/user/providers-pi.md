@@ -51,17 +51,6 @@ Pi loads its normal user and project extensions. Blocking `select`, `confirm`, `
 dialogs work in T3 Code. Notifications appear in the work log. Pi terminal decoration such as
 titles, status lines, and widgets does not have a T3 Code equivalent.
 
-## Questions and Named Agents
-
-Pi's `t3_ask_user` tool can ask several questions together with multiple selections and written
-answers. Written answers survive a client reload; clear them before choosing an option.
-
-Settings → Agents stores a named roster for compatible `pi-subagents` extensions. Configure each
-agent's prompt, model, thinking, tools, skills, and extension access there. Changes apply when a Pi
-session next starts. A configured roster replaces agents discovered by the extension, and disabled
-entries are omitted. Registration errors appear in the work log. Background task completion updates
-the shared agent timeline; those agents do not have resumable T3 child threads.
-
 ## Permission Modes
 
 T3 Code applies the composer permission mode through Pi's blocking tool hook:

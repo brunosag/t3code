@@ -69,17 +69,10 @@ export interface PiRpcSpawnOptions {
   readonly args: ReadonlyArray<string>;
   readonly cwd: string | undefined;
   readonly env: NodeJS.ProcessEnv;
-  readonly extensionChannel?: boolean;
 }
 
 export interface PiRpcConnection {
   readonly send: (record: PiRpcRecord) => Effect.Effect<void, PiRpcError>;
-  readonly sendExtension: (record: PiRpcRecord) => Effect.Effect<void, PiRpcError>;
-  /**
-   * Correlated request: assigns an `id`, waits for the matching response
-   * record, and returns its `data` (undefined when the command carries none).
-   * Fails on `success: false`, transport death, or timeout.
-   */
   readonly request: (
     record: PiRpcRecord,
     timeoutMs?: number,
@@ -192,9 +185,6 @@ export const makePiRpcConnection = Effect.fnUntraced(function* (options: PiRpcSp
         extendEnv: false,
         shell: spawnCommand.shell,
         detached: platform !== "win32",
-        ...(options.extensionChannel
-          ? { additionalFds: { fd3: { type: "output" as const }, fd4: { type: "input" as const } } }
-          : {}),
       }),
     )
     .pipe(Effect.mapError((cause) => new PiRpcError({ operation: "spawn", cause })));
@@ -244,7 +234,6 @@ export const makePiRpcConnection = Effect.fnUntraced(function* (options: PiRpcSp
   const pendingRequests = new Map<string, PendingPiRequest>();
   const events = yield* Queue.unbounded<PiRpcRecord, PiRpcError>();
   const outgoing = yield* Queue.unbounded<Uint8Array, PiRpcError>();
-  const extensionOutgoing = yield* Queue.unbounded<Uint8Array, PiRpcError>();
   const transportDown = yield* Deferred.make<never, PiRpcError>();
   const exitDeferred = yield* Deferred.make<number, PiRpcError>();
   let nextRequestId = 0;
@@ -257,7 +246,6 @@ export const makePiRpcConnection = Effect.fnUntraced(function* (options: PiRpcSp
       yield* Deferred.fail(pending.deferred, error);
     }
     yield* Queue.fail(outgoing, error);
-    yield* Queue.fail(extensionOutgoing, error);
     yield* Queue.fail(events, error);
   });
 
@@ -356,38 +344,6 @@ export const makePiRpcConnection = Effect.fnUntraced(function* (options: PiRpcSp
     Effect.forkIn(scope),
   );
 
-  // Surface stderr as debug logs; pi reserves stdout for the protocol.
-  if (options.extensionChannel) {
-    yield* Effect.gen(function* () {
-      const frame = makeJsonlFramer();
-      yield* child.getOutputFd(3).pipe(
-        Stream.decodeText(),
-        Stream.runForEach((chunk) =>
-          Effect.forEach(
-            frame(chunk),
-            (line) => {
-              const record = parsePiRecord(line);
-              return record === undefined ? Effect.void : Queue.offer(events, record);
-            },
-            { discard: true },
-          ),
-        ),
-      );
-    }).pipe(
-      Effect.catchCause((cause) =>
-        failTransport(new PiRpcError({ operation: "extension-read", cause })),
-      ),
-      Effect.forkIn(scope),
-    );
-    yield* Stream.fromQueue(extensionOutgoing).pipe(
-      Stream.run(child.getInputFd(4)),
-      Effect.catchCause((cause) =>
-        failTransport(new PiRpcError({ operation: "extension-write", cause })),
-      ),
-      Effect.forkIn(scope),
-    );
-  }
-
   yield* child.stderr.pipe(
     Stream.decodeText(),
     Stream.runForEach((chunk) =>
@@ -451,18 +407,6 @@ export const makePiRpcConnection = Effect.fnUntraced(function* (options: PiRpcSp
 
   return {
     send,
-    sendExtension: Effect.fn("PiRpc.sendExtension")(function* (record) {
-      if (!options.extensionChannel)
-        return yield* new PiRpcError({
-          operation: "extension-write",
-          detail: "extension channel is unavailable",
-        });
-      const accepted = yield* Queue.offer(
-        extensionOutgoing,
-        new TextEncoder().encode(`${encodeJsonLine(record)}\n`),
-      );
-      if (!accepted) return yield* Deferred.await(transportDown);
-    }),
     request,
     events,
     exited: Deferred.await(exitDeferred),

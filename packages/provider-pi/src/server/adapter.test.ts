@@ -1,4 +1,3 @@
-import * as TestClock from "effect/testing/TestClock";
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -13,7 +12,6 @@ import {
   RunAttemptId,
   RunId,
   ThreadId,
-  type AgentDefinition,
   type ChatAttachment,
   type ModelSelection,
   type OrchestrationV2AppThread,
@@ -24,7 +22,6 @@ import {
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -156,8 +153,6 @@ const modelSelection = (model: string): ModelSelection => ({
 
 interface FakePi {
   readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
-  readonly emitExtension: (record: PiRpcRecord) => Effect.Effect<void>;
-  readonly takeExtensionResponse: Effect.Effect<PiRpcRecord>;
   readonly emit: (record: PiRpcRecord, chunkBytes?: number) => Effect.Effect<void>;
   readonly takeRequest: (type: string) => Effect.Effect<PiRpcRecord>;
   readonly queueEntries: (data: unknown) => void;
@@ -198,9 +193,6 @@ const recordedIdleState = (sessionFile: string) => ({
 const makeFakePi: Effect.Effect<FakePi> = Effect.gen(function* () {
   const stdout = yield* Queue.unbounded<Uint8Array, Cause.Done>();
   const requests = yield* Queue.unbounded<PiRpcRecord>();
-  const extensionEvents = yield* Queue.unbounded<Uint8Array>();
-  const extensionResponses = yield* Queue.unbounded<PiRpcRecord>();
-  let extensionBuffer = "";
   const entriesQueue: Array<unknown> = [];
   const messagesQueue: Array<unknown> = [];
   const stateQueue: Array<Record<string, unknown>> = [];
@@ -334,22 +326,8 @@ const makeFakePi: Effect.Effect<FakePi> = Effect.gen(function* () {
         stdout: Stream.fromQueue(stdout),
         stderr: Stream.empty,
         all: Stream.empty,
-        getInputFd: () =>
-          Sink.forEach((chunk: Uint8Array) =>
-            Effect.gen(function* () {
-              extensionBuffer += new TextDecoder().decode(chunk);
-              let newline = extensionBuffer.indexOf("\n");
-              while (newline !== -1) {
-                yield* Queue.offer(
-                  extensionResponses,
-                  decodeJsonLine(extensionBuffer.slice(0, newline)) as PiRpcRecord,
-                );
-                extensionBuffer = extensionBuffer.slice(newline + 1);
-                newline = extensionBuffer.indexOf("\n");
-              }
-            }),
-          ),
-        getOutputFd: () => Stream.fromQueue(extensionEvents),
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
       });
     }),
   );
@@ -364,11 +342,6 @@ const makeFakePi: Effect.Effect<FakePi> = Effect.gen(function* () {
 
   return {
     spawner,
-    emitExtension: (record) =>
-      Queue.offer(extensionEvents, new TextEncoder().encode(`${encodeJsonLine(record)}\n`)).pipe(
-        Effect.asVoid,
-      ),
-    takeExtensionResponse: Queue.take(extensionResponses),
     emit,
     takeRequest,
     queueEntries: (data) => entriesQueue.push(data),
@@ -423,21 +396,7 @@ const makeAdapter = Effect.fnUntraced(function* (
   launchArgs = "",
   forkFake?: FakePi,
   continuationRequests?: PiAdapterV2Options["continuationRequests"],
-  getAgentDefinitions?: Effect.Effect<ReadonlyArray<AgentDefinition>>,
 ) {
-  const host = yield* ProviderHost.ProviderHost;
-  const configuredHost =
-    getAgentDefinitions === undefined
-      ? host
-      : {
-          ...host,
-          settings: {
-            ...host.settings,
-            get: Effect.all([host.settings.get, getAgentDefinitions]).pipe(
-              Effect.map(([settings, agentDefinitions]) => ({ ...settings, agentDefinitions })),
-            ),
-          },
-        };
   const spawner =
     forkFake === undefined
       ? fake.spawner
@@ -466,10 +425,7 @@ const makeAdapter = Effect.fnUntraced(function* (
     instanceId: PI_INSTANCE_ID,
     settings: { enabled: true, binaryPath: "pi", launchArgs, customModels: [] },
     environment: {},
-  }).pipe(
-    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-    Effect.provideService(ProviderHost.ProviderHost, configuredHost),
-  );
+  }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
 });
 
 const openRuntime = Effect.fnUntraced(function* (
@@ -4175,56 +4131,6 @@ describe("PiAdapterV2", () => {
 });
 
 describe("PiRpc framing", () => {
-  it.live("exchanges RPC and extension records through real child-process descriptors", () =>
-    Effect.gen(function* () {
-      const connection = yield* makePiRpcConnection({
-        command: process.execPath,
-        args: [
-          "--input-type=module",
-          "--eval",
-          String.raw`
-          import { createReadStream, writeSync } from "node:fs";
-          function readLines(stream, onLine) {
-            let buffer = "";
-            stream.setEncoding("utf8");
-            stream.on("data", (chunk) => {
-              buffer += chunk;
-              let newline;
-              while ((newline = buffer.indexOf("\n")) !== -1) {
-                const line = buffer.slice(0, newline);
-                buffer = buffer.slice(newline + 1);
-                onLine(line);
-              }
-            });
-          }
-          readLines(process.stdin, (line) => {
-            const request = JSON.parse(line);
-            process.stdout.write(JSON.stringify({
-              type: "response", id: request.id, success: true, data: "rpc-ok"
-            }) + "\n");
-          });
-          readLines(createReadStream(null, { fd: 4 }), (line) => {
-            const response = JSON.parse(line);
-            writeSync(3, JSON.stringify({ type: "extension-answer", response }) + "\n");
-          });
-          writeSync(3, '{"type":"extension-ready"}\r\n');
-        `,
-        ],
-        cwd: undefined,
-        env: process.env,
-        extensionChannel: true,
-      });
-      assert.equal((yield* Queue.take(connection.events))["type"], "extension-ready");
-      assert.equal(yield* connection.request({ type: "get_state" }), "rpc-ok");
-      const answer = { requestId: "question-1", answer: "Português\u2028日本語" };
-      yield* connection.sendExtension(answer);
-      assert.deepEqual(yield* Queue.take(connection.events), {
-        type: "extension-answer",
-        response: answer,
-      });
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
   it.effect("reassembles records across chunk boundaries and strips CR", () =>
     Effect.gen(function* () {
       const stdout = yield* Queue.unbounded<Uint8Array>();
@@ -4319,281 +4225,5 @@ describe("PiRpc early process exit", () => {
       assert.isFalse(error.message.includes("API_KEY"));
       assert.isFalse(error.message.includes("super-secret"));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
-  it.effect("round-trips batched rich questions through the dedicated extension pipes", () =>
-    Effect.gen(function* () {
-      const fake = yield* makeFakePi;
-      const { runtime, takeEvent } = yield* openRuntime(fake);
-      const questions = [
-        {
-          id: "scope",
-          header: "Scope",
-          question: "Choose a scope",
-          multiSelect: true,
-          options: [
-            { label: "Web", description: "Web client" },
-            { label: "Mobile", description: "Mobile client" },
-          ],
-        },
-        { id: "reason", header: "Reason", question: "Why?", options: [], multiSelect: false },
-      ];
-      yield* fake.emitExtension({ type: "user-input.request", requestId: "rich-1", questions });
-      const item = yield* takeEvent(
-        (event) =>
-          event.type === "turn_item.updated" && event.turnItem.type === "user_input_request",
-      );
-      assert.isTrue(
-        item.type === "turn_item.updated" && item.turnItem.type === "user_input_request",
-      );
-      if (item.type !== "turn_item.updated" || item.turnItem.type !== "user_input_request") return;
-      assert.deepStrictEqual(item.turnItem.questions, questions);
-      // Rich questions have no native dialog timeout and stay answerable while
-      // the user works through the batch.
-      yield* TestClock.adjust(Duration.minutes(10));
-      yield* runtime.respondToRuntimeRequest({
-        requestId: item.turnItem.requestId,
-        answers: { scope: ["Web", "Mobile"], reason: "Both clients" },
-      });
-      assert.deepStrictEqual(yield* fake.takeExtensionResponse, {
-        type: "user-input.response",
-        requestId: "rich-1",
-        answers: { scope: ["Web", "Mobile"], reason: "Both clients" },
-      });
-      yield* fake.emitExtension({ type: "user-input.request", requestId: "rich-2", questions });
-      const pending = yield* takeEvent(
-        (event) =>
-          event.type === "runtime_request.updated" && event.runtimeRequest.status === "pending",
-      );
-      if (pending.type !== "runtime_request.updated") return;
-      yield* runtime.respondToRuntimeRequest({
-        requestId: pending.runtimeRequest.id,
-        decision: "cancel",
-      });
-      assert.isTrue((yield* fake.takeExtensionResponse)["cancelled"] === true);
-      yield* fake.emitExtension({
-        type: "user-input.request",
-        requestId: "rich-bad",
-        questions: [],
-      });
-      assert.equal((yield* fake.takeExtensionResponse)["requestId"], "rich-bad");
-    }).pipe(Effect.scoped, Effect.provide(layerTest)),
-  );
-
-  it.effect("expires rich questions through the extension pipe and rejects stale answers", () =>
-    Effect.gen(function* () {
-      const fake = yield* makeFakePi;
-      const { runtime, takeEvent } = yield* openRuntime(fake);
-      yield* fake.emitExtension({
-        type: "user-input.request",
-        requestId: "rich-timed",
-        timeout: 1000,
-        questions: [
-          { id: "reason", header: "Reason", question: "Why?", options: [], multiSelect: false },
-        ],
-      });
-      const pending = yield* takeEvent(
-        (event) =>
-          event.type === "runtime_request.updated" && event.runtimeRequest.status === "pending",
-      );
-      if (pending.type !== "runtime_request.updated") return;
-      yield* TestClock.adjust(Duration.seconds(1));
-      yield* takeEvent(
-        (event) =>
-          event.type === "runtime_request.updated" &&
-          event.runtimeRequest.id === pending.runtimeRequest.id &&
-          event.runtimeRequest.status === "cancelled",
-      );
-      assert.deepStrictEqual(yield* fake.takeExtensionResponse, {
-        type: "user-input.response",
-        requestId: "rich-timed",
-        cancelled: true,
-      });
-      const late = yield* Effect.result(
-        runtime.respondToRuntimeRequest({
-          requestId: pending.runtimeRequest.id,
-          answers: { reason: "Too late" },
-        }),
-      );
-      assert.equal(late._tag, "Failure");
-    }).pipe(Effect.scoped, Effect.provide(layerTest)),
-  );
-
-  it.effect("preserves roster extensions through scoped launches and refreshes each session", () =>
-    Effect.gen(function* () {
-      const fake = yield* makeFakePi;
-      const fs = yield* FileSystem.FileSystem;
-      const scopedLaunches: Array<{ args: ReadonlyArray<string>; env: NodeJS.ProcessEnv }> = [];
-      let definitions: ReadonlyArray<AgentDefinition> = [
-        { name: "scout", systemPrompt: "Inspect", enabled: false },
-      ];
-      const adapter = yield* makeAdapter(
-        fake,
-        "",
-        undefined,
-        undefined,
-        Effect.sync(() => definitions),
-      ).pipe(
-        Effect.provideService(AgentScope, {
-          wrap: (input) =>
-            Effect.sync(() => {
-              scopedLaunches.push({ args: input.args, env: input.env ?? {} });
-              return { command: input.command, args: ["--scoped-launch", ...input.args] };
-            }),
-          stop: () => Effect.void,
-          oomKilled: () => Effect.succeed(false),
-          clear: () => Effect.void,
-        }),
-      );
-      const open = (providerSessionId: ProviderSessionId) =>
-        adapter.openSession({
-          threadId: THREAD_ID,
-          providerSessionId,
-          modelSelection: modelSelection("default"),
-          runtimePolicy,
-        });
-      const definitionsPath = () => fake.lastSpawn().env["T3_PI_AGENTS_PATH"];
-      yield* open(SESSION_ID);
-      const disabledPath = definitionsPath();
-      assert.isDefined(disabledPath);
-      assert.equal(scopedLaunches[0]?.env["T3_PI_AGENTS_PATH"], disabledPath);
-      assert.equal(fake.lastSpawn().args[0], "--scoped-launch");
-      assert.isTrue(scopedLaunches[0]!.args.some((arg) => arg.includes("/t3-user-input-")));
-      assert.isTrue(scopedLaunches[0]!.args.some((arg) => arg.includes("/t3-agents-")));
-      assert.deepEqual(decodeJsonLine(yield* fs.readFileString(disabledPath!)), []);
-      definitions = [{ name: "scout", systemPrompt: "Inspect", enabled: true }];
-      yield* open(ProviderSessionId.make("next-roster-session"));
-      const refreshedPath = definitionsPath();
-      assert.isDefined(refreshedPath);
-      assert.notEqual(refreshedPath, disabledPath);
-      assert.deepEqual(decodeJsonLine(yield* fs.readFileString(refreshedPath!)), [
-        { name: "scout", systemPrompt: "Inspect" },
-      ]);
-      assert.deepEqual(decodeJsonLine(yield* fs.readFileString(disabledPath!)), []);
-      definitions = [];
-      yield* open(ProviderSessionId.make("native-roster-session"));
-      assert.isUndefined(definitionsPath());
-    }).pipe(Effect.scoped, Effect.provide(layerTest)),
-  );
-
-  it.effect("reconciles agent completion arriving before the tool result on the other pipe", () =>
-    Effect.gen(function* () {
-      const fake = yield* makeFakePi;
-      const { runtime, takeEvent } = yield* openRuntime(fake);
-      const providerThread = yield* runtime.ensureThread({
-        threadId: THREAD_ID,
-        modelSelection: modelSelection("default"),
-        runtimePolicy,
-      });
-      yield* startTurn(runtime, providerThread);
-      yield* fake.emitExtension({
-        type: "subagent.activity",
-        agentId: "early-agent",
-        event: "completed",
-        result: "Finished early",
-      });
-      yield* fake.emitExtension({
-        type: "extension_ui_request",
-        id: "early-barrier",
-        method: "notify",
-        message: "Completion delivered",
-      });
-      yield* takeEvent(
-        (event) =>
-          event.type === "turn_item.updated" &&
-          event.turnItem.type === "system_notice" &&
-          event.turnItem.message === "Completion delivered",
-      );
-      yield* fake.emit({
-        type: "tool_execution_end",
-        toolCallId: "call-early-agent",
-        toolName: "Agent",
-        result: {
-          details: { agentId: "early-agent", subagentType: "researcher", status: "background" },
-        },
-      });
-      const done = yield* takeEvent((event) => event.type === "subagent.updated");
-      assert.isTrue(
-        done.type === "subagent.updated" &&
-          done.subagent.status === "completed" &&
-          done.subagent.result === "Finished early",
-      );
-    }).pipe(Effect.scoped, Effect.provide(layerTest)),
-  );
-
-  it.effect("tracks configured background agents through completion without reopening them", () =>
-    Effect.gen(function* () {
-      const fake = yield* makeFakePi;
-      const { runtime, takeEvent } = yield* openRuntime(fake);
-      const providerThread = yield* runtime.ensureThread({
-        threadId: THREAD_ID,
-        modelSelection: modelSelection("default"),
-        runtimePolicy,
-      });
-      yield* startTurn(runtime, providerThread);
-      yield* fake.emit({
-        type: "tool_execution_end",
-        toolCallId: "call-agent",
-        toolName: "Agent",
-        isError: false,
-        result: {
-          content: [{ type: "text", text: "Working in background" }],
-          details: {
-            agentId: "agent-1",
-            subagentType: "researcher",
-            description: "Inspect source",
-            status: "background",
-          },
-        },
-      });
-      const running = yield* takeEvent((event) => event.type === "subagent.updated");
-      assert.isTrue(running.type === "subagent.updated" && running.subagent.status === "running");
-      yield* fake.emit({ type: "agent_settled" });
-      yield* takeEvent((event) => event.type === "turn.terminal");
-      yield* startTurn(runtime, providerThread, "default", [], "Next task", undefined, 2);
-      yield* fake.emitExtension({
-        type: "subagent.activity",
-        agentId: "agent-1",
-        event: "completed",
-        result: "Found the answer",
-      });
-      const done = yield* takeEvent((event) => event.type === "subagent.updated");
-      assert.isTrue(
-        done.type === "subagent.updated" &&
-          done.subagent.status === "completed" &&
-          done.subagent.result === "Found the answer",
-      );
-      assert.isTrue(
-        done.type === "subagent.updated" &&
-          running.type === "subagent.updated" &&
-          done.subagent.runId === running.subagent.runId,
-      );
-      yield* fake.emit({
-        type: "tool_execution_update",
-        toolCallId: "call-agent",
-        toolName: "Agent",
-        partialResult: { details: { agentId: "agent-1", status: "background" } },
-      });
-      yield* fake.emitExtension({
-        type: "subagent.activity",
-        agentId: "agent-1",
-        event: "failed",
-        error: "Late signal",
-      });
-      yield* fake.emit({
-        type: "extension_ui_request",
-        id: "barrier",
-        method: "notify",
-        message: "finished",
-      });
-      const next = yield* takeEvent(
-        (event) =>
-          event.type === "subagent.updated" ||
-          (event.type === "turn_item.updated" &&
-            event.turnItem.type === "system_notice" &&
-            event.turnItem.message === "finished"),
-      );
-      assert.equal(next.type, "turn_item.updated");
-    }).pipe(Effect.scoped, Effect.provide(layerTest)),
   );
 });

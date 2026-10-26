@@ -226,6 +226,27 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("loads settings saved with a retired agent roster and drops it on the next save", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      yield* fs.writeFileString(
+        config.settingsPath,
+        `{
+          "enableAgentBrowserAccess": false,
+          "agentDefinitions": [{ "name": "scout", "systemPrompt": "Inspect source.", "enabled": true }]
+        }`,
+      );
+
+      assert.isFalse((yield* service.getSettings).enableAgentBrowserAccess);
+      yield* service.updateSettings({ responseStreamingMode: "turn" });
+      const persisted = JSON.parse(yield* fs.readFileString(config.settingsPath));
+      assert.isFalse(persisted.enableAgentBrowserAccess);
+      assert.notProperty(persisted, "agentDefinitions");
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect("tells clients it reads idle compaction modes before any settings are saved", () =>
     Effect.gen(function* () {
       const service = yield* ServerSettingsModule.ServerSettingsService;

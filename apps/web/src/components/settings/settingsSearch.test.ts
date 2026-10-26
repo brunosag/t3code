@@ -86,14 +86,6 @@ describe("searchSettings", () => {
     ).toEqual(["network-access", "connections-environment"]);
   });
 
-  it.each(["subagent", "delegate", "system prompt"])("finds the Agents panel by %s", (query) => {
-    expect(searchSettings(query)[0]).toMatchObject({
-      id: "agents",
-      to: "/settings/agents",
-      scope: "environment",
-    });
-  });
-
   it("hides desktop-only settings from browser search", () => {
     expect(SETTINGS_SEARCH_ITEMS.some((item) => item.id === "quit-confirmation")).toBe(true);
     expect(searchSettings("hold to quit")).toEqual([]);
@@ -160,7 +152,6 @@ describe("searchSettings", () => {
   it("serves anchor props to panels from the catalog", () => {
     expect(searchableSetting("word-wrap")).toEqual({ id: "word-wrap", title: "Word wrap" });
     expect(searchableSetting("archive")).toEqual({ id: "archive", title: "Archived threads" });
-    expect(searchableSetting("agents")).toEqual({ id: "agents", title: "Agents" });
   });
 });
 

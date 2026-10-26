@@ -53,19 +53,6 @@ describe("fallbackTextGenerationModelSelection", () => {
 });
 
 describe("serverSettings helpers", () => {
-  it("replaces the entire configured agent roster, including removals", () => {
-    const first = { name: "scout", systemPrompt: "Inspect source.", enabled: true };
-    const second = { name: "reviewer", systemPrompt: "Review changes.", enabled: true };
-    const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
-      agentDefinitions: [first, second],
-    });
-    const edited = applyServerSettingsPatch(saved, {
-      agentDefinitions: [{ ...second, enabled: false }],
-    });
-    expect(edited.agentDefinitions).toEqual([{ ...second, enabled: false }]);
-    expect(applyServerSettingsPatch(edited, { agentDefinitions: [] }).agentDefinitions).toEqual([]);
-  });
-
   it("translates a shipped client's idle compaction switch into a mode", () => {
     const off = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, { idleCompaction: "off" });
     expect([off.idleCompaction, off.compactIdleThreads]).toEqual(["off", false]);

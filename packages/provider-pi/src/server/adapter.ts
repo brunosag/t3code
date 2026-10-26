@@ -18,7 +18,6 @@ import {
   type OrchestrationV2RuntimeRequest,
   type OrchestrationV2TurnItem,
   type OrchestrationV2UserInputQuestion,
-  OrchestrationV2UserInputQuestion as PiQuestionSchema,
   type ProviderApprovalDecision,
   type ProviderInstanceId,
   type OrchestrationV2ProviderTurnTokenUsage,
@@ -43,13 +42,6 @@ import { providerMessageTextWithAttachmentPaths } from "@t3tools/provider-core/s
 import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { parsePiCompactCommand, type PiCompactCommand } from "./commands.ts";
-import { materializePiUserInputExtension } from "./PiUserInputExtension.ts";
-import {
-  materializePiAgentsExtension,
-  piAgentDefinitionsPath,
-  withPiAgentsEnvironment,
-  writePiAgentDefinitions,
-} from "./PiAgentsExtension.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
@@ -388,7 +380,7 @@ interface PiTurnTreeRefs {
 
 interface PendingPiPrompt {
   readonly nativeRequestId: string;
-  readonly method: "select" | "confirm" | "input" | "editor" | "rich";
+  readonly method: "select" | "confirm" | "input" | "editor";
   readonly questionId: string;
   readonly approvalKey: string;
   readonly expiresAt: number | null;
@@ -476,50 +468,12 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         extensionPath,
         runtimeMode: input.runtimePolicy.runtimeMode,
       });
-      const userInputExtensionPath = yield* provideCacheFs(
-        Effect.tryPromise({
-          try: () => materializePiUserInputExtension(host.paths.providerStatusCacheDir),
-          catch: (cause) =>
-            new ProviderAdapter.ProviderAdapterOpenSessionError({
-              driver: PI_PROVIDER,
-              providerSessionId: input.providerSessionId,
-              cause,
-            }),
-        }),
-      );
-      const extensionArgs = ["--extension", userInputExtensionPath];
-      let extensionEnvironment = launch.env;
-      const definitions = yield* provideCacheFs(
-        host.settings.get.pipe(Effect.map((settings) => settings.agentDefinitions)),
-      );
-      if (definitions.length > 0) {
-        const agentsStateDir = `${host.paths.providerStatusCacheDir}/agents-${input.providerSessionId}`;
-        const agentsExtensionPath = yield* provideCacheFs(
-          Effect.tryPromise({
-            try: async () => {
-              await writePiAgentDefinitions(agentsStateDir, definitions);
-              return materializePiAgentsExtension(host.paths.providerStatusCacheDir);
-            },
-            catch: (cause) =>
-              new ProviderAdapter.ProviderAdapterOpenSessionError({
-                driver: PI_PROVIDER,
-                providerSessionId: input.providerSessionId,
-                cause,
-              }),
-          }),
-        );
-        extensionArgs.push("--extension", agentsExtensionPath);
-        extensionEnvironment = withPiAgentsEnvironment(
-          launch.env,
-          piAgentDefinitionsPath(agentsStateDir),
-        );
-      }
       const scopedLaunch = yield* agentScope.wrap({
         command: options.settings.binaryPath || "pi",
-        args: [...launch.args, ...extensionArgs],
+        args: launch.args,
         name: "pi",
         threadId: input.threadId,
-        env: extensionEnvironment,
+        env: launch.env,
       });
       // Finalizers run in reverse order: reap detached work after terminating Pi.
       const scopeUnit = scopedLaunch.unit;
@@ -530,8 +484,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         command: scopedLaunch.command,
         args: scopedLaunch.args,
         cwd,
-        env: extensionEnvironment,
-        extensionChannel: true,
+        env: launch.env,
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.mapError(
@@ -569,13 +522,6 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
       >();
       const pendingPrompts = new Map<string, PendingPiPrompt>();
       const sessionApprovals = new Set<string>();
-      const configuredAgents = new Map<
-        string,
-        | { terminal: true }
-        | { turn: ActivePiTurn; toolCallId: string; details: unknown; terminal: false }
-      >();
-      const configuredAgentCalls = new Map<string, string>();
-      const earlyAgentCompletions = new Map<string, PiRpcRecord>();
       // Pi can settle immediately after dialog response; serialize so terminal cannot overtake request resolution.
       const sessionEventPermit = yield* Semaphore.make(1);
       let threadState: PiThreadState | null = null;
@@ -1123,13 +1069,6 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         });
         if (toolName === "subagent") {
           yield* emitSubagentTasks(turn, toolCallId, resultRecord, completed);
-        } else if (toolName === "Agent") {
-          yield* emitConfiguredAgent(
-            turn,
-            toolCallId,
-            recordField(resultRecord, "details"),
-            outputText,
-          );
         }
       });
 
@@ -1150,9 +1089,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
           const agent = recordString(result, "agent");
           const task = recordString(result, "task");
           if (agent === undefined || task === undefined) continue;
-          const nativeTaskId =
-            recordString(result, "nativeTaskId") ??
-            `${toolCallId}:subagent:${recordNumber(result, "step") ?? index}`;
+          const nativeTaskId = `${toolCallId}:subagent:${recordNumber(result, "step") ?? index}`;
           const subagentId = idAllocator.derive.nodeFromProviderItem({
             driver: PI_PROVIDER,
             nativeItemId: nativeTaskId,
@@ -1173,7 +1110,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
               : finished
                 ? "completed"
                 : "running";
-          const outputText = recordString(result, "output") ?? piSubagentOutput(result);
+          const outputText = piSubagentOutput(result);
           const progress =
             !finished && outputText.length > 0 ? { progress: outputText.slice(0, 200) } : {};
           const resultText = finished && outputText.length > 0 ? outputText.slice(0, 10_000) : null;
@@ -1225,87 +1162,18 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         }
       });
 
-      // pi-subagents uses an Agent tool and emits completion separately for
-      // background work. Keep its original turn owner after the parent settles.
-      const emitConfiguredAgent = Effect.fnUntraced(function* (
-        turn: ActivePiTurn,
-        toolCallId: string,
-        details: unknown,
-        output: string,
-        completion?: PiRpcRecord,
-      ) {
-        const role = recordString(details, "subagentType");
-        const reportedId = recordString(details, "agentId");
-        if (!role && !reportedId) return;
-        const key = configuredAgentCalls.get(toolCallId) ?? reportedId ?? toolCallId;
-        configuredAgentCalls.set(toolCallId, key);
-        const previous = configuredAgents.get(key);
-        if (previous?.terminal) return;
-        const final =
-          completion ?? (reportedId ? earlyAgentCompletions.get(reportedId) : undefined);
-        if (reportedId) earlyAgentCompletions.delete(reportedId);
-        const status = recordString(final, "status") ?? recordString(details, "status");
-        const failed = status === "error" || recordString(final, "event") === "failed";
-        const interrupted = status === "aborted" || status === "stopped";
-        const finished =
-          final !== undefined ||
-          failed ||
-          interrupted ||
-          status === "completed" ||
-          status === "steered";
-        const owner = previous?.turn ?? turn;
-        // Keep a terminal marker against late updates, without retaining the
-        // completed agent's entire turn for the rest of this session.
-        const entry = finished
-          ? ({ terminal: true } as const)
-          : ({ turn: owner, toolCallId, details, terminal: false } as const);
-        configuredAgents.set(key, entry);
-        if (reportedId) configuredAgents.set(reportedId, entry);
-        yield* emitSubagentTasks(
-          owner,
-          toolCallId,
-          {
-            details: {
-              results: [
-                {
-                  nativeTaskId: `${toolCallId}:configured-agent`,
-                  agent: recordString(details, "displayName") ?? role ?? "Agent",
-                  task: recordString(details, "description") ?? "",
-                  model: recordString(details, "modelName"),
-                  finished,
-                  stopReason: interrupted ? "aborted" : failed ? "error" : undefined,
-                  output: finished
-                    ? (recordString(final, "error") ??
-                      recordString(final, "result") ??
-                      recordString(details, "error") ??
-                      output)
-                    : (recordString(details, "activity") ?? output),
-                },
-              ],
-            },
-          },
-          false,
-        );
-      });
-
       const cancelPrompt = Effect.fn("PiAdapter.cancelPrompt")(function* (
         pending: PendingPiPrompt,
         resolvedAt: DateTime.Utc,
       ) {
         if (pending.expirationFiber !== null) yield* Fiber.interrupt(pending.expirationFiber);
-        yield* (
-          pending.method === "rich"
-            ? connection.sendExtension({
-                type: "user-input.response",
-                requestId: pending.nativeRequestId,
-                cancelled: true,
-              })
-            : connection.send({
-                type: "extension_ui_response",
-                id: pending.nativeRequestId,
-                cancelled: true,
-              })
-        ).pipe(Effect.ignore);
+        yield* connection
+          .send({
+            type: "extension_ui_response",
+            id: pending.nativeRequestId,
+            cancelled: true,
+          })
+          .pipe(Effect.ignore);
         pending.runtimeRequest = {
           ...pending.runtimeRequest,
           status: "cancelled",
@@ -1374,27 +1242,12 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
           method !== "select" &&
           method !== "confirm" &&
           method !== "input" &&
-          method !== "editor" &&
-          method !== "rich"
+          method !== "editor"
         ) {
           yield* Effect.logDebug("Ignoring pi extension UI update.", { method });
           return;
         }
         if (nativeRequestId === undefined) return;
-        const richQuestions =
-          method === "rich"
-            ? Schema.decodeUnknownOption(
-                Schema.Array(PiQuestionSchema).check(Schema.isMinLength(1)),
-              )(event["questions"])
-            : Option.none();
-        if (method === "rich" && Option.isNone(richQuestions)) {
-          yield* connection.sendExtension({
-            type: "user-input.response",
-            requestId: nativeRequestId,
-            error: "Invalid questions in t3_ask_user request.",
-          });
-          return;
-        }
         const approvalTitle = recordString(event, "title") ?? "";
         const approvalKey = `${approvalTitle.length}:${approvalTitle}${recordString(event, "message") ?? ""}`;
         if (method === "confirm" && sessionApprovals.has(approvalKey)) {
@@ -1482,17 +1335,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
                 ...itemBase,
                 type: "user_input_request",
                 requestId,
-                questions:
-                  method === "rich" && Option.isSome(richQuestions)
-                    ? richQuestions.value
-                    : [
-                        piQuestion(
-                          nativeRequestId,
-                          method as "select" | "input" | "editor",
-                          title,
-                          event,
-                        ),
-                      ],
+                questions: [piQuestion(nativeRequestId, method, title, event)],
               };
         const pending: PendingPiPrompt = {
           nativeRequestId,
@@ -2039,49 +1882,6 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
           }
           case "extension_ui_request":
             yield* handleExtensionUiRequest(event);
-            return;
-          case "user-input.request":
-            yield* handleExtensionUiRequest({
-              ...event,
-              id: recordString(event, "requestId"),
-              method: "rich",
-              title: "Questions",
-            });
-            return;
-          case "user-input.cancel": {
-            const nativeId = recordString(event, "requestId");
-            for (const [id, prompt] of pendingPrompts) {
-              if (prompt.method === "rich" && prompt.nativeRequestId === nativeId) {
-                pendingPrompts.delete(id);
-                yield* cancelPrompt(prompt, yield* DateTime.now);
-              }
-            }
-            return;
-          }
-          case "subagent.activity": {
-            const agentId = recordString(event, "agentId");
-            if (!agentId) return;
-            const entry = configuredAgents.get(agentId);
-            if (entry && !entry.terminal)
-              yield* emitConfiguredAgent(entry.turn, entry.toolCallId, entry.details, "", event);
-            else if (!entry) {
-              // The independent pipes can deliver completion before the tool
-              // result. Bound unmatched events from other Pi agent activity.
-              if (earlyAgentCompletions.size >= 128) {
-                const oldest = earlyAgentCompletions.keys().next().value;
-                if (oldest !== undefined) earlyAgentCompletions.delete(oldest);
-              }
-              earlyAgentCompletions.set(agentId, event);
-            }
-            return;
-          }
-          case "subagent.registration":
-            if (event["ok"] !== true)
-              yield* emitExtensionError({
-                extensionPath: "T3 agent roster",
-                event: "registration",
-                error: recordString(event, "error") ?? "Pi did not accept the configured agents.",
-              });
             return;
           case "extension_error": {
             yield* emitExtensionError(event);
@@ -2891,20 +2691,11 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
               );
             }
             const response = piUiResponse(pending, requestInput.decision, requestInput.answers);
-            yield* pending.method === "rich"
-              ? connection.sendExtension({
-                  type: "user-input.response",
-                  requestId: pending.nativeRequestId,
-                  answers: requestInput.answers ?? {},
-                  ...(requestInput.decision === "cancel" ? { cancelled: true } : {}),
-                })
-              : connection.send({
-                  type: "extension_ui_response",
-                  id: pending.nativeRequestId,
-                  ...response,
-                });
-            // Dropped only once Pi has the answer, so a failed send leaves the
-            // request retryable and still cancellable during teardown.
+            yield* connection.send({
+              type: "extension_ui_response",
+              id: pending.nativeRequestId,
+              ...response,
+            });
             pendingPrompts.delete(String(requestInput.requestId));
             if (pending.expirationFiber !== null) yield* Fiber.interrupt(pending.expirationFiber);
             if (pending.method === "confirm" && requestInput.decision === "acceptForSession") {

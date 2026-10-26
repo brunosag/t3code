@@ -53,12 +53,11 @@ jobs:
           cache: true
           run-install: true
 
-      # The fork's own surface: Pi provider, the provider/registry regression
-      # tests its integration points touch, and the dev-runner/desktop changes.
+      # The fork's own surface: the provider/registry regression tests its
+      # integration points touch, and the dev-runner/desktop changes.
       - name: Focused fork tests
         run: |
           vp test run \
-            packages/provider-pi/src/server \
             apps/server/src/provider/ProviderRegistry.test.ts \
             apps/server/src/scheduledTasks/Schedule.test.ts \
             apps/server/src/scheduledTasks/ScheduledTaskService.test.ts \

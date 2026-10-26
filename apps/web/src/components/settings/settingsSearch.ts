@@ -24,7 +24,6 @@ export type SettingsPath =
   | "/settings/keybindings"
   | "/settings/snap-shot"
   | "/settings/providers"
-  | "/settings/agents"
   | "/settings/integrations"
   | "/settings/scheduled-tasks"
   | "/settings/source-control"
@@ -84,7 +83,6 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/keybindings": "Keybindings",
   "/settings/snap-shot": "SnapShots",
   "/settings/providers": "Providers",
-  "/settings/agents": "Agents",
   "/settings/integrations": "Integrations",
   "/settings/scheduled-tasks": "Scheduled tasks",
   "/settings/source-control": "Source control",
@@ -709,13 +707,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
-    id: "agents",
-    title: "Agents",
-    to: "/settings/agents",
-    scope: "environment",
-    searchTerms: ["subagent delegate agent model system prompt tools roster pi definitions"],
-  },
-  {
     id: "usage-providers",
     title: "Usage providers",
     to: "/settings/providers",
@@ -1078,7 +1069,6 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/snap-shot": null,
   "/settings/keybindings": null,
   "/settings/providers": null,
-  "/settings/agents": "environment",
   "/settings/integrations": null,
   "/settings/source-control": "environment-defaults",
   "/settings/storage": "project-defaults",
