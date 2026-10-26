@@ -1,4 +1,4 @@
-name: Deploy Pi fork to vps
+name: Deploy fork to vps
 
 # Fork-only pipeline: push bsag -> test, build, and install the server on
 # the vps VPS through the stock service launcher. The host details live in
@@ -15,7 +15,7 @@ permissions:
 
 # Never run two deploys at once: both would install and restart the same service.
 concurrency:
-  group: deploy-pi-tutor-prod # Stable lock key shared with previously published workflows.
+  group: deploy-fork-vps
   cancel-in-progress: false
 
 jobs:
@@ -106,7 +106,7 @@ jobs:
             --run-number "$GITHUB_RUN_NUMBER" \
             --sha "$GITHUB_SHA" | sed -n 's/^base_version=//p')"
           test -n "$base"
-          version="${base}-pi.$(git rev-parse --short=9 HEAD)"
+          version="${base}-fork.$(git rev-parse --short=9 HEAD)"
           node -e 'const fs = require("node:fs"); const file = "apps/server/package.json"; const pkg = JSON.parse(fs.readFileSync(file, "utf8")); pkg.version = process.argv[1]; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");' "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Deploy version: $version"

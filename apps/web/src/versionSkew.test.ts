@@ -97,8 +97,8 @@ describe("versionSkew", () => {
     // The fork's server runtime never reaches npm, so its version has to carry
     // the same core as the fork's desktop builds. On the release core the client
     // reads it as older and offers an update the fork can never honor.
-    expect(resolveVersionMismatch("0.0.41-pi.3843f07b5")).toBeNull();
-    expect(resolveVersionMismatch("0.0.40-pi.3843f07b5")).not.toBeNull();
+    expect(resolveVersionMismatch("0.0.41-fork.3843f07b5")).toBeNull();
+    expect(resolveVersionMismatch("0.0.40-fork.3843f07b5")).not.toBeNull();
   });
 
   it("still warns when a nightly client outruns the server by a release", () => {
@@ -151,7 +151,7 @@ describe("versionSkew", () => {
         environmentId: EnvironmentId.make("environment-fork"),
         label: "vps",
         platform: { os: "linux", arch: "x64" } as const,
-        serverVersion: "0.0.41-pi.b4afb578a",
+        serverVersion: "0.0.41-fork.b4afb578a",
         capabilities: {
           repositoryIdentity: true,
           // The capability still names the launcher; it is the missing release

@@ -1,4 +1,4 @@
-name: Build Pi fork desktop (Linux)
+name: Build fork desktop (Linux)
 
 # Fork-only pipeline: push bsag -> test, build an unsigned Linux AppImage,
 # publish it as a prerelease on this fork. Installed AppImages update themselves
@@ -20,7 +20,7 @@ permissions:
 # Only the newest push is worth building: each run publishes a release that
 # supersedes the previous one.
 concurrency:
-  group: desktop-pi-linux
+  group: desktop-fork-linux
   cancel-in-progress: true
 
 jobs:
@@ -154,7 +154,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: t3-pi-linux-${{ steps.version.outputs.version }}
+          name: t3-fork-linux-${{ steps.version.outputs.version }}
           path: |
             release/*.AppImage
             release/nightly-linux.yml
@@ -178,7 +178,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: Pi fork ${{ steps.version.outputs.version }} (${{ steps.version.outputs.short_sha }})
+          name: Fork ${{ steps.version.outputs.version }} (${{ steps.version.outputs.short_sha }})
           draft: true
           prerelease: true
           make_latest: false
