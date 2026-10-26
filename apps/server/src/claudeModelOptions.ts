@@ -1,5 +1,4 @@
 import type { ModelSelection } from "@t3tools/contracts";
-import { CLAUDE_AUTO_COMPACT_WINDOWS } from "@t3tools/shared/claudeCompaction";
 import {
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
@@ -22,7 +21,6 @@ export interface CompiledClaudeModelSelection {
   readonly effort: string | undefined;
   readonly promptEffort: string | undefined;
   readonly settings: Readonly<Record<string, boolean>>;
-  readonly autoCompactWindow: number | undefined;
   readonly queryIdentity: string;
 }
 
@@ -43,18 +41,10 @@ export function compileClaudeModelSelection(
   const thinking = supportsBoolean("thinking")
     ? getModelSelectionBooleanOptionValue(selection, "thinking")
     : undefined;
-  const autoCompact = getModelSelectionStringOptionValue(selection, "autoCompact");
-  const autoCompactWindow = CLAUDE_AUTO_COMPACT_WINDOWS.find(
-    (tokens) =>
-      String(tokens) === getModelSelectionStringOptionValue(selection, "autoCompactWindow"),
-  );
   const settings = {
     ...(typeof thinking === "boolean" ? { alwaysThinkingEnabled: thinking } : {}),
     ...(typeof fastMode === "boolean" ? { fastMode } : {}),
     ...(isClaudeCatalogUltracodeEffort(resolvedEffort) ? { ultracode: true } : {}),
-    ...(autoCompact === "on" || autoCompact === "off"
-      ? { autoCompactEnabled: autoCompact === "on" }
-      : {}),
   };
   const apiModelId = resolveClaudeCatalogApiModelId(catalog, selection);
   const promptEffort = resolvePromptInjectedEffort(capabilities, rawEffort) ?? undefined;
@@ -63,12 +53,6 @@ export function compileClaudeModelSelection(
     effort,
     promptEffort,
     settings,
-    autoCompactWindow,
-    queryIdentity: JSON.stringify({
-      apiModelId,
-      effort: effort ?? null,
-      settings,
-      autoCompactWindow,
-    }),
+    queryIdentity: JSON.stringify({ apiModelId, effort: effort ?? null, settings }),
   };
 }

@@ -1,5 +1,4 @@
 import { AudioPreviewUnmountContext } from "../files/AudioPreview";
-import { ReadAloudPlayer } from "./ReadAloud";
 import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { MarkdownFindContext } from "./markdownFindContext";
 import { useChatCanvas } from "./ChatCanvasContext";
@@ -640,8 +639,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
   );
-  // Re-measure the minimap gutter when the chat column changes width without a viewport resize.
-  const lineWidth = useClientSettings((settings) => settings.lineWidth);
+  const chatWidth = useClientSettings((settings) => settings.chatWidth);
   const {
     target: readyCitationRequest,
     positioning: citationPositioning,
@@ -908,8 +906,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       cancelAnimationFrame(frame);
       stopObserving();
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Rows and line width resize the content without resizing the viewport.
-  }, [timelineViewportElement, rows.length, reportContentOverflow, lineWidth]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Rows and chat width resize the content without resizing the viewport.
+  }, [timelineViewportElement, rows.length, reportContentOverflow, chatWidth]);
 
   const sharedState: TimelineRowSharedState = {
     citationRequest: readyCitationRequest,
@@ -1130,7 +1128,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         <TimelineRowActivityCtx value={activityState}>
           <TooltipScrollDismissArea
             ref={setTimelineViewportElement}
-            className="relative flex h-full min-h-0 flex-col"
+            className="relative h-full min-h-0"
             data-assistant-citation-viewport="true"
           >
             {onCiteAssistantText && citationThreadRef ? (
@@ -1140,7 +1138,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
                 onCite={onCiteAssistantText}
               />
             ) : null}
-            <ReadAloudPlayer threadKey={routeThreadKey} />
             <LegendList<MessagesTimelineRow>
               ref={setTimelineList}
               data={rows}
@@ -1181,7 +1178,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               onScroll={handleScroll}
               onItemSizeChanged={handleItemSizeChanged}
               className={cn(
-                "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 flex-1 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
+                "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain [overflow-anchor:none]",
                 topFadeEnabled && "topbar-scroll-fade",
               )}
               ListHeaderComponent={listHeader}

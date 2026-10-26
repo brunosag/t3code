@@ -46,8 +46,8 @@ function startClientAppearance(): void {
     if (previous?.diffColorScheme !== settings.diffColorScheme) {
       root.dataset.diffColorScheme = settings.diffColorScheme;
     }
-    if (previous?.lineWidth !== settings.lineWidth) {
-      root.style.setProperty("--chat-content-max-width", `${settings.lineWidth}px`);
+    if (previous?.chatWidth !== settings.chatWidth) {
+      root.dataset.chatWidth = settings.chatWidth;
     }
     if (previous?.redesignEnabled !== settings.redesignEnabled) {
       root.toggleAttribute("data-redesign", settings.redesignEnabled);

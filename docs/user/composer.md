@@ -31,8 +31,8 @@ it. Very large code blocks are shown without syntax highlighting.
 
 ## Listen to a response
 
-On web and desktop, choose **Read aloud** beneath a completed agent response.
-The player stays available while you scroll, with pause, resume, stop, a seek bar,
+On web and desktop, hover a completed agent response and choose **Read aloud**
+beside Copy. A player above the composer has pause, resume, stop, a seek bar,
 and playback speed from 0.5× to 2×. Starting another response stops the current one.
 Switching threads stops playback.
 

@@ -1,4 +1,3 @@
-import { isClaudeCompactionOption } from "@t3tools/shared/claudeCompaction";
 import type {
   ModelSelection,
   ProviderDriverKind,
@@ -117,7 +116,6 @@ export function buildTraitsTriggerDisplay(input: {
   let reasoningLabelIndex = -1;
   const labels: Array<string> = [];
   for (const descriptor of input.descriptors) {
-    if (input.provider === "claudeAgent" && isClaudeCompactionOption(descriptor.id)) continue;
     if (descriptor.id === "fastMode" && descriptor.type === "boolean") {
       speedLabel = descriptor.currentValue === true ? "Fast" : null;
       fastModeFallbackLabel = speedLabel ?? "Normal";

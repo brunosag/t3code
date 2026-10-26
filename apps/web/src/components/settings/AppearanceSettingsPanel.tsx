@@ -3,8 +3,7 @@ import { useState } from "react";
 import {
   DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
   DEFAULT_UNIFIED_SETTINGS,
-  MAX_LINE_WIDTH,
-  MIN_LINE_WIDTH,
+  type ChatWidth,
   type EnvironmentIdentificationMode,
   MAX_APPEARANCE_CONTRAST,
   MAX_GLASS_OPACITY,
@@ -39,6 +38,12 @@ const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, s
   none: "None",
 };
 
+const CHAT_WIDTH_LABELS: Record<ChatWidth, string> = {
+  comfortable: "Comfortable",
+  wide: "Wide",
+  full: "Full",
+};
+
 export function AppearanceSettingsPanel() {
   const {
     appearanceMode,
@@ -69,11 +74,6 @@ export function AppearanceSettingsPanel() {
   const appearanceContrastSliderStyle = {
     "--settings-slider-progress": `${appearanceContrastRatio * 100}%`,
     "--settings-slider-fill-offset": `${0.5 - appearanceContrastRatio}rem`,
-  } as CSSProperties;
-  const lineWidthRatio = (settings.lineWidth - MIN_LINE_WIDTH) / (MAX_LINE_WIDTH - MIN_LINE_WIDTH);
-  const lineWidthSliderStyle = {
-    "--settings-slider-progress": `${lineWidthRatio * 100}%`,
-    "--settings-slider-fill-offset": `${0.5 - lineWidthRatio}rem`,
   } as CSSProperties;
   const panelAnimationDurationRatio =
     (settings.panelAnimationDurationMs - MIN_PANEL_ANIMATION_DURATION_MS) /
@@ -320,45 +320,34 @@ export function AppearanceSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("setting-line-width")}
-          description="Set the maximum width of chat messages and the composer."
+          {...searchableSetting("chat-width")}
+          description="Set how wide messages and the composer can grow on large screens."
           resetAction={
-            settings.lineWidth !== DEFAULT_UNIFIED_SETTINGS.lineWidth ? (
+            settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? (
               <SettingResetButton
-                label="line width"
-                onClick={() => updateSettings({ lineWidth: DEFAULT_UNIFIED_SETTINGS.lineWidth })}
+                label="chat width"
+                onClick={() => updateSettings({ chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth })}
               />
             ) : null
           }
           control={
-            <div className="flex w-full items-center gap-3 sm:w-52">
-              <output
-                className="min-w-16 rounded-md bg-muted px-2 py-1 text-center font-mono text-xs font-medium tabular-nums text-foreground"
-                htmlFor="line-width"
-              >
-                {settings.lineWidth}px
-              </output>
-              <input
-                aria-label="Line width"
-                className="settings-slider min-w-0 flex-1"
-                id="line-width"
-                max={MAX_LINE_WIDTH}
-                min={MIN_LINE_WIDTH}
-                onChange={(event) => {
-                  const lineWidth = Number(event.currentTarget.value);
-                  if (
-                    Number.isInteger(lineWidth) &&
-                    lineWidth >= MIN_LINE_WIDTH &&
-                    lineWidth <= MAX_LINE_WIDTH
-                  ) {
-                    updateSettings({ lineWidth });
-                  }
+            <div className="w-full sm:w-40">
+              <Select
+                value={settings.chatWidth}
+                onValueChange={(value) => {
+                  if (value === "comfortable" || value === "wide" || value === "full")
+                    updateSettings({ chatWidth: value });
                 }}
-                step={16}
-                style={lineWidthSliderStyle}
-                type="range"
-                value={settings.lineWidth}
-              />
+              >
+                <SelectTrigger size="sm" className="w-full min-w-0" aria-label="Chat width">
+                  <SelectValue>{CHAT_WIDTH_LABELS[settings.chatWidth]}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem value="comfortable">Comfortable (default)</SelectItem>
+                  <SelectItem value="wide">Wide</SelectItem>
+                  <SelectItem value="full">Full</SelectItem>
+                </SelectPopup>
+              </Select>
             </div>
           }
         />

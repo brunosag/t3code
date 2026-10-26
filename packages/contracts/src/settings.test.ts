@@ -198,24 +198,6 @@ describe("ClientSettings notifications", () => {
   });
 });
 
-describe("ClientSettings line width", () => {
-  it("defaults to the standard chat column width", () => {
-    expect(decodeClientSettings({}).lineWidth).toBe(768);
-  });
-
-  it.each([479, 1201, 768.5])("rejects an invalid line width: %s", (value) => {
-    expect(() => decodeClientSettings({ lineWidth: value })).toThrow();
-    expect(() => decodeClientSettingsPatch({ lineWidth: value })).toThrow();
-  });
-
-  it.each([480, 768, 1200])("accepts a line width in range: %s", (value) => {
-    const settings = decodeClientSettings({ lineWidth: value });
-    expect(settings.lineWidth).toBe(value);
-    expect(encodeClientSettings(settings).lineWidth).toBe(value);
-    expect(decodeClientSettingsPatch({ lineWidth: value }).lineWidth).toBe(value);
-  });
-});
-
 describe("ClientSettings quit confirmation", () => {
   it.each([
     [true, "hold"],

@@ -7,10 +7,6 @@ import {
 } from "./ContextWindowMeter.logic";
 import { Minimize2Icon } from "lucide-react";
 import { composerFloatingLayerProps } from "./composerEventScope";
-import {
-  ClaudeCompactionControls,
-  type ClaudeCompactionControlsProps,
-} from "./ClaudeCompactionControls";
 
 function formatPercentage(value: number | null): string | null {
   if (value === null || !Number.isFinite(value)) {
@@ -23,27 +19,19 @@ function formatPercentage(value: number | null): string | null {
 }
 
 export function ContextWindowMeter(props: {
-  usage: ContextWindowSnapshot | null;
-  claudeCompaction?: ClaudeCompactionControlsProps | undefined;
+  usage: ContextWindowSnapshot;
   modelDisplayName?: string | null;
   onCompact?: (() => void) | undefined;
   compactDisabled?: boolean | undefined;
   compactDisabledReason?: string | null | undefined;
 }) {
-  const {
-    usage,
-    claudeCompaction,
-    modelDisplayName,
-    onCompact,
-    compactDisabled,
-    compactDisabledReason,
-  } = props;
-  const usedPercentage = formatPercentage(usage?.usedPercentage ?? null);
-  const normalizedPercentage = Math.max(0, Math.min(100, usage?.usedPercentage ?? 0));
+  const { usage, modelDisplayName, onCompact, compactDisabled, compactDisabledReason } = props;
+  const usedPercentage = formatPercentage(usage.usedPercentage);
+  const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
   const radius = 9.75;
   const circumference = 2 * Math.PI * radius;
   const dashOffset = circumference * (1 - normalizedPercentage / 100);
-  const totalProcessedTokens = usage?.totalProcessedTokens ?? null;
+  const totalProcessedTokens = usage.totalProcessedTokens ?? null;
   const showTotalProcessed = totalProcessedTokens !== null && totalProcessedTokens > 0;
   const isOverloaded = normalizedPercentage > 90;
   const usageColor = isOverloaded
@@ -55,18 +43,16 @@ export function ContextWindowMeter(props: {
       <PopoverTrigger
         openOnHover
         delay={150}
-        closeDelay={onCompact || claudeCompaction ? 150 : 0}
+        closeDelay={onCompact ? 150 : 0}
         render={
           <Button
             size="icon-sm"
             variant="ghost-muted"
             className="size-7"
             aria-label={
-              usage?.maxTokens != null && usedPercentage
+              usage.maxTokens !== null && usedPercentage
                 ? `Context window ${usedPercentage} used`
-                : usage
-                  ? `Context window ${formatContextWindowTokens(usage.usedTokens)} tokens used`
-                  : "Context window"
+                : `Context window ${formatContextWindowTokens(usage.usedTokens)} tokens used`
             }
           >
             <span className="relative flex size-5 items-center justify-center">
@@ -102,7 +88,7 @@ export function ContextWindowMeter(props: {
       />
       <PopoverPopup
         {...composerFloatingLayerProps}
-        tooltipStyle={!claudeCompaction}
+        tooltipStyle
         side="top"
         align="end"
         padding="none"
@@ -112,7 +98,7 @@ export function ContextWindowMeter(props: {
         <div className="flex flex-col gap-2 p-(--floating-content-inset)">
           <div className="flex items-center justify-between gap-3">
             <div className="font-medium text-muted-foreground text-xs">Context Window</div>
-            {usage?.maxTokens != null && usedPercentage ? (
+            {usage.maxTokens !== null && usedPercentage ? (
               <div className="text-secondary-label text-2xs tabular-nums">
                 <span>{usedPercentage}</span>
                 <span className="mx-1">·</span>
@@ -121,13 +107,13 @@ export function ContextWindowMeter(props: {
                   {formatContextWindowTokens(usage.maxTokens ?? null)}
                 </span>
               </div>
-            ) : usage ? (
+            ) : (
               <div className="text-secondary-label text-2xs tabular-nums">
                 {formatContextWindowTokens(usage.usedTokens)}
               </div>
-            ) : null}
+            )}
           </div>
-          {usage?.maxTokens != null ? (
+          {usage.maxTokens !== null ? (
             <div
               className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
               role="progressbar"
@@ -150,7 +136,7 @@ export function ContextWindowMeter(props: {
               </span>
             </div>
           ) : null}
-          {usage?.cost != null ? (
+          {usage.cost != null ? (
             <div className="flex items-center justify-between gap-3 text-2xs leading-4">
               <span className="text-secondary-label">Cost</span>
               <span className="font-medium tabular-nums text-secondary-label">
@@ -158,13 +144,12 @@ export function ContextWindowMeter(props: {
               </span>
             </div>
           ) : null}
-          {!claudeCompaction && usage?.compactsAutomatically ? (
+          {usage.compactsAutomatically ? (
             <div className="mt-1 text-pretty text-secondary-label text-2xs font-medium">
               {formatContextWindowCompactionMessage(modelDisplayName, usage.autoCompactThreshold)}
             </div>
           ) : null}
-          {claudeCompaction ? <ClaudeCompactionControls {...claudeCompaction} /> : null}
-          {onCompact && usage ? (
+          {onCompact ? (
             <>
               <Button
                 size="xs"

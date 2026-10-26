@@ -1337,23 +1337,13 @@ function canApplyClaudeSelectionLive(
   );
 }
 
-function claudeAutoCompactWindow(
-  selection: CompiledClaudeModelSelection,
-  instanceWindow: string | undefined,
-) {
-  return selection.autoCompactWindow ?? (instanceWindow ? Number(instanceWindow) : undefined);
-}
-
 function claudeLiveSelectionFlagSettings(
   selection: CompiledClaudeModelSelection,
-  instanceWindow: string,
 ): ClaudeFlagSettings {
   return {
     ...(selection.effort === undefined ? {} : { effortLevel: selection.effort as EffortLevel }),
     fastMode: selection.settings.fastMode ?? null,
     ultracode: selection.settings.ultracode ?? null,
-    autoCompactEnabled: selection.settings.autoCompactEnabled ?? null,
-    autoCompactWindow: claudeAutoCompactWindow(selection, instanceWindow) ?? null,
   };
 }
 
@@ -1471,16 +1461,12 @@ export function makeClaudeQueryOptions(input: {
       : typeof input.sdkSettings === "object" && input.sdkSettings !== null
         ? ({ ...input.sdkSettings, ...selectionSettings } as ClaudeSdkSettings)
         : selectionSettings;
-  const autoCompactWindow = claudeAutoCompactWindow(
-    compiledSelection,
-    input.settings?.autoCompactWindow,
-  );
   const compactQuerySettings =
-    autoCompactWindow === undefined
+    input.settings?.autoCompactWindow === undefined || input.settings.autoCompactWindow.length === 0
       ? querySettings
       : ({
           ...(typeof querySettings === "object" && querySettings !== null ? querySettings : {}),
-          autoCompactWindow,
+          autoCompactWindow: Number(input.settings.autoCompactWindow),
         } as ClaudeSdkSettings);
   // A settings file path cannot take extra keys, so it goes through unchanged.
   const effectiveQuerySettings =
@@ -9657,12 +9643,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             const live = existing;
             yield* live.query.setModel(compiledSelection.apiModelId).pipe(
               Effect.andThen(
-                live.query.applyFlagSettings(
-                  claudeLiveSelectionFlagSettings(
-                    compiledSelection,
-                    adapterOptions.settings.autoCompactWindow,
-                  ),
-                ),
+                live.query.applyFlagSettings(claudeLiveSelectionFlagSettings(compiledSelection)),
               ),
               Effect.tapError(() =>
                 Effect.sync(() => {

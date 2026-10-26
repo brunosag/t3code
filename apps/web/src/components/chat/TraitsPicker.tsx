@@ -1,4 +1,3 @@
-import { isClaudeCompactionOption } from "@t3tools/shared/claudeCompaction";
 import {
   buildTraitsTriggerDisplay,
   getDescriptorStringValue,
@@ -141,8 +140,7 @@ function getSelectedTraits(
       });
   const selectDescriptors = descriptors.filter(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "select" }> =>
-      descriptor.type === "select" &&
-      !(provider === "claudeAgent" && isClaudeCompactionOption(descriptor.id)),
+      descriptor.type === "select",
   );
   const booleanDescriptors = descriptors.filter(
     (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "boolean" }> =>

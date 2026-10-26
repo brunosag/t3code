@@ -14,48 +14,6 @@ const selection = (
 });
 
 describe("compileClaudeModelSelection", () => {
-  it.each([100000, 200000, 300000, 500000, 750000, 1000000])(
-    "compiles the %s token compaction threshold for custom models",
-    (tokens) => {
-      expect(
-        compileClaudeModelSelection(
-          selection("router", [{ id: "autoCompactWindow", value: String(tokens) }]),
-        ),
-      ).toMatchObject({ autoCompactWindow: tokens });
-    },
-  );
-
-  it.each(["default", "99999", "1000001", "NaN", "1e6"])(
-    "inherits the threshold for %s",
-    (value) => {
-      expect(
-        compileClaudeModelSelection(selection("router", [{ id: "autoCompactWindow", value }]))
-          .autoCompactWindow,
-      ).toBeUndefined();
-    },
-  );
-
-  it.each([
-    ["on", true],
-    ["off", false],
-  ] as const)("compiles auto-compaction %s for any Claude model", (value, enabled) => {
-    expect(
-      compileClaudeModelSelection(selection("custom-router-model", [{ id: "autoCompact", value }]))
-        .settings,
-    ).toEqual({ autoCompactEnabled: enabled });
-  });
-
-  it.each([undefined, "default", "invalid"])(
-    "leaves auto-compaction configuration to Claude for %s",
-    (value) => {
-      expect(
-        compileClaudeModelSelection(
-          selection("custom-router-model", value ? [{ id: "autoCompact", value }] : []),
-        ).settings,
-      ).not.toHaveProperty("autoCompactEnabled");
-    },
-  );
-
   it("compiles context, effort, and settings together", () => {
     expect(
       compileClaudeModelSelection(

@@ -13,7 +13,6 @@ import {
   resolveClaudeModelSlug,
   resolveClaudeUpdateRequiredModels,
   scopeClaudeModelCatalog,
-  withClaudeSessionOptions,
 } from "./ClaudeModelCatalog.ts";
 
 const manifest = (): ModelManifestData => ({
@@ -70,45 +69,6 @@ const catalogFromManifest = (data: ModelManifestData) =>
   resolveClaudeModelCatalog(resolveProviderCatalog(data, CLAUDE) ?? undefined);
 
 describe("Claude model catalog", () => {
-  it("offers auto-compaction for built-in and custom Claude models without replacing their options", () => {
-    const models = [
-      ...resolveClaudeModelsForVersion(catalogFromManifest(manifest()), "3.2.0"),
-      withClaudeSessionOptions({
-        slug: "router-model",
-        name: "Router",
-        isCustom: true,
-        capabilities: null,
-      }),
-    ];
-    for (const model of models) {
-      const descriptor = model.capabilities?.optionDescriptors?.find(
-        (option) => option.id === "autoCompact",
-      );
-      assert.equal(descriptor?.type, "select");
-      if (descriptor?.type === "select") {
-        assert.deepEqual(
-          descriptor.options.map((option) => option.id),
-          ["default", "on", "off"],
-        );
-        assert.equal(descriptor.options.find((option) => option.isDefault)?.id, "default");
-      }
-      const threshold = model.capabilities?.optionDescriptors?.find(
-        (option) => option.id === "autoCompactWindow",
-      );
-      assert.equal(threshold?.type, "select");
-      if (threshold?.type === "select") {
-        assert.deepEqual(
-          threshold.options.map((option) => option.id),
-          ["default", "100000", "200000", "300000", "500000", "750000", "1000000"],
-        );
-      }
-      assert.deepEqual(withClaudeSessionOptions(model), model);
-    }
-    assert.isTrue(
-      models[0]?.capabilities?.optionDescriptors?.some((option) => option.id === "effort"),
-    );
-  });
-
   it("resolves capacity from selected options and fixed catalog windows without guessing custom models", () => {
     const source = manifest();
     const profile = source.providers!.claudeAgent!.profiles.synthetic!;

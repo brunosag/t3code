@@ -1,4 +1,3 @@
-import type { ClaudeCompactionControlsProps } from "./ClaudeCompactionControls";
 import type {
   ModelSelection,
   ProviderInstanceId,
@@ -142,7 +141,6 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   compact: boolean;
   canOperateThread: boolean;
   activeContextWindow: ContextWindowSnapshot | null;
-  claudeCompaction: ClaudeCompactionControlsProps | undefined;
   reserveContextWindowMeter: boolean;
   activeThreadModelDisplayName: string | null;
   isPreparingWorktree: boolean;
@@ -182,10 +180,9 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
 }) {
   return (
     <>
-      {props.activeContextWindow || props.claudeCompaction ? (
+      {props.activeContextWindow ? (
         <ContextWindowMeter
           usage={props.activeContextWindow}
-          claudeCompaction={props.claudeCompaction}
           modelDisplayName={props.activeThreadModelDisplayName}
           onCompact={props.onCompactContext}
           compactDisabled={props.compactDisabled}

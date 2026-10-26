@@ -4275,91 +4275,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
-  it.effect.each([
-    { instanceWindow: "", fallback: null },
-    { instanceWindow: "300000", fallback: 300000 },
-  ])(
-    "changes auto-compaction and threshold without replacing the live process (instance $instanceWindow)",
-    ({ instanceWindow, fallback }) =>
-      Effect.gen(function* () {
-        const harness = yield* makeWakeHarnessWithOptions({
-          settings: { ...DEFAULT_CLAUDE_SETTINGS, autoCompactWindow: instanceWindow },
-        });
-        const now = yield* DateTime.now;
-        const selection = {
-          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
-          model: "claude-opus-5-5",
-        } satisfies ModelSelection;
-        const start = (ordinal: number, value: string, window: string) =>
-          harness.runtime.startTurn(
-            makeClaudeTestTurnInput({
-              threadId: harness.threadId,
-              providerThread: harness.providerThread,
-              now,
-              attemptId: RunAttemptId.make(`attempt-auto-compact:${ordinal}`),
-              text: `Request ${ordinal}`,
-              attachments: [],
-              providerTurnOrdinal: ordinal,
-              modelSelection: {
-                ...selection,
-                options: [
-                  { id: "autoCompact", value },
-                  { id: "autoCompactWindow", value: window },
-                ],
-              },
-            }),
-          );
-        const settle = Effect.gen(function* () {
-          yield* harness.offerAndWait(turnOneResult);
-          yield* Queue.take(harness.terminalReceipts);
-        });
-
-        yield* start(1, "off", "500000");
-        const originalOptions = harness.getOpenedOptions();
-        assert.propertyVal(originalOptions?.settings, "autoCompactEnabled", false);
-        assert.propertyVal(originalOptions?.settings, "autoCompactWindow", 500000);
-        yield* harness.offerAndWait(wakeTaskStarted);
-        yield* settle;
-        for (const [index, [value, window]] of [
-          ["on", "500000"],
-          ["on", "750000"],
-          ["off", "750000"],
-          ["default", "default"],
-        ].entries()) {
-          yield* start(index + 2, value!, window!);
-          yield* settle;
-        }
-        const appliedSettings = harness.liveSelectionChanges.filter(
-          (change) => typeof change === "object" && change !== null && !("model" in change),
-        );
-        assert.deepEqual(
-          appliedSettings.map((settings) =>
-            typeof settings === "object" && settings !== null && "autoCompactEnabled" in settings
-              ? settings.autoCompactEnabled
-              : "missing",
-          ),
-          [true, true, false, null],
-        );
-        assert.deepEqual(
-          appliedSettings.map((settings) =>
-            typeof settings === "object" && settings !== null && "autoCompactWindow" in settings
-              ? settings.autoCompactWindow
-              : "missing",
-          ),
-          [500000, 750000, 750000, fallback],
-        );
-        assert.strictEqual(harness.getOpenedOptions(), originalOptions);
-        assert.lengthOf(harness.processQueues, 1);
-        assert.lengthOf(harness.offeredMessages, 5);
-        assert.isTrue(yield* harness.hasPendingBackgroundWork);
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
-        ),
-      ),
-  );
-
   it.effect(
     "applies model, effort and Fast changes to a process running a background shell, but not thinking or a cleared effort",
     () =>
@@ -4412,21 +4327,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           yield* settle;
           assert.deepEqual(harness.liveSelectionChanges, [
             { model: "claude-opus-5-5" },
-            {
-              effortLevel: "xhigh",
-              fastMode: true,
-              ultracode: true,
-              autoCompactEnabled: null,
-              autoCompactWindow: null,
-            },
+            { effortLevel: "xhigh", fastMode: true, ultracode: true },
             { model: "claude-sonnet-4-6" },
-            {
-              effortLevel: "high",
-              fastMode: null,
-              ultracode: null,
-              autoCompactEnabled: null,
-              autoCompactWindow: null,
-            },
+            { effortLevel: "high", fastMode: null, ultracode: null },
           ]);
           assert.strictEqual(harness.getOpenedOptions(), originalOptions);
           assert.lengthOf(harness.offeredMessages, 4);

@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore, type CSSProperties } from "react";
 import { PauseIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { speechTextFromMarkdown } from "@t3tools/client-runtime/read-aloud";
@@ -8,6 +8,7 @@ import { readAloud } from "~/lib/readAloud";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { ComposerBanner } from "./ComposerBanner";
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const getServerSnapshot = () => null;
@@ -25,12 +26,10 @@ export function ReadAloudButton({
   threadKey,
   messageId,
   text,
-  streaming,
 }: {
   threadKey: string;
   messageId: string;
   text: string;
-  streaming: boolean;
 }) {
   const key = messageKey(threadKey, messageId);
   const environmentId = parseScopedThreadKey(threadKey)?.environmentId;
@@ -39,7 +38,7 @@ export function ReadAloudButton({
     () => readAloud.getSnapshot(key),
     getServerSnapshot,
   );
-  if (environmentId === undefined) return null;
+  if (environmentId === undefined || !text.trim()) return null;
   const active = state !== null && state.status !== "error";
   const label = active ? "Stop reading aloud" : "Read aloud";
   return (
@@ -51,8 +50,6 @@ export function ReadAloudButton({
             size="xs"
             variant="ghost-muted"
             aria-label={label}
-            aria-pressed={active}
-            disabled={streaming || !text.trim()}
             onClick={() => {
               if (active) readAloud.stopMessage(key);
               else {
@@ -66,14 +63,18 @@ export function ReadAloudButton({
           />
         }
       >
-        {active ? <SquareIcon className="size-3" /> : <Volume2Icon className="size-3" />}
+        {active ? (
+          <SquareIcon className="size-3 fill-current" />
+        ) : (
+          <Volume2Icon className="size-3" />
+        )}
       </TooltipTrigger>
-      <TooltipPopup>{streaming ? "Read aloud when the response finishes" : label}</TooltipPopup>
+      <TooltipPopup side="top">{label}</TooltipPopup>
     </Tooltip>
   );
 }
 
-/** Lives outside the virtualized list so playback stays controllable when a row scrolls away. */
+/** Sits above the composer so playback stays controllable after its message scrolls away. */
 export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
   const prefix = `${threadKey}\0`;
   const state = useSyncExternalStore(
@@ -84,6 +85,7 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
     },
     getServerSnapshot,
   );
+  // oxlint-disable-next-line t3code/react-effect-budget -- Leaving a thread stops its audio, which plays outside React.
   useEffect(
     () => () => {
       if (readAloud.getSnapshot()?.messageKey.startsWith(`${threadKey}\0`)) readAloud.stop();
@@ -93,52 +95,70 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
 
   if (!state || parseScopedThreadKey(threadKey) === null) return null;
   const preparing = state.status === "preparing";
-  const buffering = state.status === "buffering";
   // Buffering still means the user asked to listen, so it offers Pause.
-  const playing = state.status === "playing" || buffering;
+  const playing = state.status === "playing" || state.status === "buffering";
   const playable = !preparing && state.status !== "error";
+  // The total keeps growing until every sentence has been generated.
+  const total = state.progress ? "–:––" : formatTime(state.duration);
+  const ratio = state.duration > 0 ? Math.min(1, state.position / state.duration) : 0;
+  const seekStyle = {
+    "--settings-slider-progress": `${ratio * 100}%`,
+    "--settings-slider-fill-offset": `${0.5 - ratio}rem`,
+  } as CSSProperties;
+
   return (
-    <section
-      aria-label="Read-aloud player"
-      className="shrink-0 border-b border-border bg-background"
+    <ComposerBanner.Root
+      role="region"
+      aria-label="Read aloud"
+      placement="floating"
+      density="comfortable"
+      className="mb-2"
     >
-      <div className="chat-content-lane flex flex-col gap-1.5 py-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <Volume2Icon aria-hidden="true" className="size-3.5 text-muted-foreground" />
-          <span className="text-xs font-medium">Read aloud</span>
-          {playable ? (
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              aria-label={playing ? "Pause reading" : "Play reading"}
-              onClick={() => {
-                if (playing) readAloud.pause();
-                else void readAloud.resume();
-              }}
-            >
-              {playing ? <PauseIcon className="size-3" /> : <PlayIcon className="size-3" />}
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Stop reading"
-            onClick={() => readAloud.stop()}
-          >
-            <SquareIcon className="size-3" />
-          </Button>
+      <ComposerBanner.Row>
+        <ComposerBanner.Icon>
+          <Volume2Icon />
+        </ComposerBanner.Icon>
+        <ComposerBanner.Content className="gap-2 text-muted-foreground tabular-nums">
+          {state.error ? (
+            <span role="status" className="truncate">
+              {state.error}
+            </span>
+          ) : preparing ? (
+            <span role="status" className="truncate">
+              {state.progress?.label ?? "Preparing speech…"}
+              {state.progress?.percent != null ? ` ${state.progress.percent}%` : ""}
+            </span>
+          ) : (
+            <>
+              <span>{formatTime(state.position)}</span>
+              <input
+                type="range"
+                aria-label="Seek within response"
+                aria-valuetext={`${formatTime(state.position)} of ${total}`}
+                className="settings-slider min-w-0 flex-1"
+                min={0}
+                max={state.duration || 1}
+                step={0.1}
+                value={state.position}
+                disabled={state.duration === 0}
+                style={seekStyle}
+                onChange={(event) => readAloud.seek(Number(event.currentTarget.value))}
+              />
+              <span>{total}</span>
+            </>
+          )}
+        </ComposerBanner.Content>
+        <ComposerBanner.Actions className="flex-nowrap">
           <Select
             value={state.speed}
             onValueChange={(value) => {
               if (value !== null) readAloud.setSpeed(value);
             }}
           >
-            <SelectTrigger size="compact" variant="ghost" aria-label="Reading speed">
+            <SelectTrigger size="xs" variant="ghost" aria-label="Reading speed">
               <SelectValue>{state.speed}×</SelectValue>
             </SelectTrigger>
-            <SelectPopup>
+            <SelectPopup side="top">
               {SPEEDS.map((speed) => (
                 <SelectItem key={speed} value={speed}>
                   {speed}×
@@ -146,43 +166,22 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
               ))}
             </SelectPopup>
           </Select>
-          {playable ? (
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {formatTime(state.position)} / {formatTime(state.duration)}
-            </span>
-          ) : null}
-        </div>
-        {preparing || buffering ? (
-          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-            <p role="status">
-              {state.progress?.label}
-              {state.progress?.percent !== null && state.progress?.percent !== undefined
-                ? ` ${state.progress.percent}%`
-                : ""}
-            </p>
-            {preparing ? <p>The first read on an environment downloads its speech model.</p> : null}
-          </div>
-        ) : null}
-        {playable ? (
-          <input
-            type="range"
-            aria-label="Seek within response"
-            aria-valuetext={`${formatTime(state.position)} of ${formatTime(state.duration)}`}
-            className="w-full min-w-0 accent-primary"
-            min={0}
-            max={state.duration || 1}
-            step={0.1}
-            value={state.position}
-            disabled={state.duration === 0}
-            onChange={(event) => readAloud.seek(Number(event.currentTarget.value))}
-          />
-        ) : null}
-        {state.error ? (
-          <p role="status" className="text-xs text-muted-foreground">
-            {state.error}
-          </p>
-        ) : null}
-      </div>
-    </section>
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="ghost-muted"
+            aria-label={playing ? "Pause reading" : "Play reading"}
+            disabled={!playable}
+            onClick={() => {
+              if (playing) readAloud.pause();
+              else void readAloud.resume();
+            }}
+          >
+            {playing ? <PauseIcon /> : <PlayIcon />}
+          </Button>
+          <ComposerBanner.Dismiss aria-label="Stop reading" onClick={() => readAloud.stop()} />
+        </ComposerBanner.Actions>
+      </ComposerBanner.Row>
+    </ComposerBanner.Root>
   );
 }

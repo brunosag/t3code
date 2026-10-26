@@ -1,4 +1,5 @@
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
+import { ReadAloudPlayer } from "./chat/ReadAloud";
 import { ScrollToEndButton, WorkspaceFileDropOverlay } from "./chat/TimelineOverlays";
 import { usePasteToFocusComposer } from "./chat/usePasteToFocusComposer";
 import { announcedRun, isDetailBehindShell } from "./chat/threadActivityAnnouncement";
@@ -3417,6 +3418,7 @@ export default function ChatView(props: ChatViewProps) {
                       </div>
                     </div>
                   ) : null}
+                  {isDraftHeroState ? null : <ReadAloudPlayer threadKey={routeThreadKey} />}
                   <div
                     ref={draftHeroComposerAnchorRef}
                     className="relative z-10"

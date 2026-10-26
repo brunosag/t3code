@@ -15,7 +15,6 @@ import {
   normalizeModelSlug,
 } from "@t3tools/shared/model";
 import type { ReactNode } from "react";
-import { isClaudeCompactionOption } from "@t3tools/shared/claudeCompaction";
 
 import type { DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
@@ -136,8 +135,7 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
   const descriptors = getProviderOptionDescriptors({ caps, selections });
   const primarySelectDescriptor = descriptors.find(
     (descriptor): descriptor is Extract<(typeof descriptors)[number], { type: "select" }> =>
-      descriptor.type === "select" &&
-      !(provider === "claudeAgent" && isClaudeCompactionOption(descriptor.id)),
+      descriptor.type === "select",
   );
   const primaryValue = getProviderOptionCurrentValue(primarySelectDescriptor ?? null);
   const promptEffort = typeof primaryValue === "string" ? primaryValue : null;

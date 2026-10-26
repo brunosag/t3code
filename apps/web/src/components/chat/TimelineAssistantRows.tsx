@@ -62,22 +62,15 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             onOpenTurnDiff={ctx.onOpenTurnDiff}
           />
         ) : null}
-        <div className="mt-1.5 flex items-center gap-2">
-          <ReadAloudButton
-            threadKey={ctx.routeThreadKey}
-            messageId={row.message.id}
-            text={row.message.text}
-            streaming={Boolean(row.message.streaming)}
+        {row.showAssistantMeta ? (
+          <AssistantMessageMeta
+            className="mt-1.5"
+            projectedItem={row.projectedItem}
+            message={row.message}
+            showCopyButton={row.showAssistantCopyButton}
+            copyStreaming={row.assistantCopyStreaming}
           />
-          {row.showAssistantMeta ? (
-            <AssistantMessageMeta
-              projectedItem={row.projectedItem}
-              message={row.message}
-              showCopyButton={row.showAssistantCopyButton}
-              copyStreaming={row.assistantCopyStreaming}
-            />
-          ) : null}
-        </div>
+        ) : null}
       </div>
     </>
   );
@@ -186,6 +179,13 @@ function AssistantMessageMeta({
         showCopyButton={showCopyButton}
         streaming={copyStreaming}
       />
+      {!message.streaming ? (
+        <ReadAloudButton
+          threadKey={ctx.routeThreadKey}
+          messageId={message.id}
+          text={message.text}
+        />
+      ) : null}
       {projectedItem?.item.type === "assistant_message" ? (
         <AssistantForkButton projectedItem={projectedItem} />
       ) : null}

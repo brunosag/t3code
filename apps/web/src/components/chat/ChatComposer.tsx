@@ -1,4 +1,3 @@
-import type { ClaudeCompactionControlsProps } from "./ClaudeCompactionControls";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { insertAttachmentReferencesForDraft } from "./composerAttachmentReferences";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
@@ -828,7 +827,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           })
       : null);
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
-  const setComposerModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
   const addComposerDraftFiles = useComposerDraftStore((store) => store.addFiles);
@@ -1014,31 +1012,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const selectedPromptEffort = composerProviderState.promptEffort;
   const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
-  const onCompactionOptionsChange = (options: Parameters<typeof setComposerModelOptions>[2]) => {
-    if (!canOperateThread) return;
-    setComposerModelOptions(composerDraftTarget, selectedProvider, options, {
-      instanceId: selectedInstanceId,
-      model: selectedModel,
-      persistSticky: true,
-    });
-  };
-  const onCompactionOptionsChangeStable = useStableCallback(onCompactionOptionsChange);
-  const claudeCompaction = ((): ClaudeCompactionControlsProps | undefined => {
-    if (!settings.contextWindowMeterEnabled || selectedProvider !== "claudeAgent") return undefined;
-    const threshold = selectedProviderModels
-      .find((model) => model.slug === selectedModel)
-      ?.capabilities?.optionDescriptors?.find(
-        (descriptor) => descriptor.id === "autoCompactWindow",
-      );
-    return threshold?.type === "select"
-      ? {
-          options: selectedModelOptionsForDispatch,
-          thresholds: threshold.options,
-          disabled: !canOperateThread,
-          onChange: onCompactionOptionsChangeStable,
-        }
-      : undefined;
-  })();
   const { enabled: planModeUiEnabled, interactionMode } = resolveComposerInteractionMode({
     planModeEnabled: settings.planModeEnabled,
     provider: selectedProviderStatus,
@@ -3914,7 +3887,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   <ComposerFooterPrimaryActions
                     compact={isComposerResting || isComposerPrimaryActionsCompact}
                     canOperateThread={canOperateThread}
-                    claudeCompaction={claudeCompaction}
                     activeContextWindow={
                       settings.contextWindowMeterEnabled ? activeContextWindow : null
                     }

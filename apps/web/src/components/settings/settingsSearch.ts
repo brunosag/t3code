@@ -258,11 +258,10 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["red green blue orange additions deletions changes counts palette colorblind"],
   },
   {
-    // Prefixed because the slider control already owns the `line-width` id.
-    id: "setting-line-width",
-    title: "Line width",
+    id: "chat-width",
+    title: "Chat width",
     to: "/settings/appearance",
-    searchTerms: ["chat messages composer column width readable text slider"],
+    searchTerms: ["wide full width column layout messages composer monitor"],
   },
   {
     id: "math-rendering",
