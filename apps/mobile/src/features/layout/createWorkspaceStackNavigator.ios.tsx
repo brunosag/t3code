@@ -29,8 +29,10 @@ import {
   useState,
   type ComponentProps,
 } from "react";
-import { View } from "react-native";
+import { StyleSheet, useWindowDimensions, View } from "react-native";
 import { Split, type SplitHostCommands } from "react-native-screens";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { WorkspaceTabsProvider, useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
@@ -39,10 +41,10 @@ import { workspaceUsesColumns } from "../workspace/workspace-tabs-state";
 import { isSettingsRoute, settingsOpenIn } from "../settings/settings-navigation";
 import { workspaceRoutesOf } from "./workspace-overlay-routes";
 import { setNativelyPoppingWorkspaceRoute } from "../workspace/workspace-detail-selection";
-import { useWorkspaceSidebarHeaderItem } from "./useWorkspaceSidebarHeaderItem";
 import { useDeviceType, useNativeLayoutMetrics } from "../../native/native-layout-metrics";
 
 import { useAdaptiveWorkspaceLayout } from "./AdaptiveWorkspaceLayout";
+import { WorkspacePaneDivider } from "./workspace-pane-divider";
 import { WorkspaceEmptyDetail } from "./WorkspaceEmptyDetail";
 import { NativeColumnContent as ColumnContent } from "../../native/NativeColumnContent.ios";
 import {
@@ -94,26 +96,15 @@ function ColumnScreen(props: {
   readonly onDismiss: (routeKey: string, native: boolean) => void;
   readonly onAppearance: (type: "willAppear" | "didAppear" | "willDisappear", key: string) => void;
   readonly onCompose?: () => void;
-  /** Settings pages don't draw their own sidebar toggle, unlike threads and pull requests. */
-  readonly sidebarToggle?: boolean;
   readonly navigation: ViewProps["navigation"];
 }) {
   const { descriptor } = props;
   // Options a screen set inside this workspace tab slot, over its route's.
-  const slotOptions = slotScreenOptions(
+  const options = slotScreenOptions(
     use(WorkspaceSlotOptionsContext),
     descriptor.route.key,
     descriptor.options,
   );
-  const sidebarItem = useWorkspaceSidebarHeaderItem();
-  // Swapping header components would unmount the native header config, which hides the bar.
-  const options =
-    props.sidebarToggle && !slotOptions.unstable_headerLeftItems
-      ? ({
-          ...slotOptions,
-          unstable_headerLeftItems: () => [sidebarItem],
-        } as AppNativeStackNavigationOptions as typeof slotOptions)
-      : slotOptions;
   const [presented, setPresented] = useState(false);
   const primaryColumn = useMemo(
     () =>
@@ -194,8 +185,18 @@ function WorkspaceColumns(
     toggleAuxiliaryPane,
     startNewTask,
     openWorkspaceTab,
+    sidebarByOrientation,
   } = useAdaptiveWorkspaceLayout();
   const deviceType = useDeviceType();
+  const windowDimensions = useWindowDimensions();
+  const nativeMetrics = useNativeLayoutMetrics();
+  const viewportWidth = nativeMetrics?.width ?? windowDimensions.width;
+  const [inspectorWidthFraction, setInspectorWidthFraction] = useState(0.4);
+  const inspectorWidth = Math.max(
+    260,
+    Math.min(viewportWidth * 0.6, viewportWidth * inspectorWidthFraction),
+  );
+  const resizeStartWidth = useRef(inspectorWidth);
   const settingsDetailIn = (detail: readonly Route[]) =>
     layout.usesSplitView && detail[0] && isSettingsRoute(detail[0].name) ? detail[0] : undefined;
   // Split screens must remain mounted while UIKit animates a detached route away.
@@ -314,7 +315,13 @@ function WorkspaceColumns(
     <Split.Host
       ref={hostRef}
       testID="adaptive-workspace-layout"
-      preferredSplitBehavior={layout.primarySidebarOverlaysContent ? "overlay" : "tile"}
+      preferredSplitBehavior={
+        !sidebarByOrientation && layout.primarySidebarOverlaysContent ? "overlay" : "tile"
+      }
+      portraitPreferredSplitBehavior={sidebarByOrientation ? "overlay" : undefined}
+      portraitPreferredDisplayMode={
+        sidebarByOrientation ? sidebarDisplayMode(sidebarByOrientation.portrait, true) : undefined
+      }
       primaryBackgroundStyle={deviceType === "pad" ? "none" : "default"}
       topColumnForCollapsing={compactColumn}
       onCollapse={() => {
@@ -338,14 +345,17 @@ function WorkspaceColumns(
         openWorkspaceTab(tab ?? "threads", { columns: true });
       }}
       preferredDisplayMode={
-        // UIKit applies the mode as a collapsed split expands, before the new width reaches JS, so a
-        // collapsed split already carries the sidebar the expanded one will show.
-        (layout.usesSplitView ? panes.primarySidebarVisible : panes.primarySidebarWhenExpanded) ||
-        (!layout.usesSplitView && !activeDetailKey)
-          ? layout.primarySidebarOverlaysContent
-            ? "oneOverSecondary"
-            : "oneBesideSecondary"
-          : "secondaryOnly"
+        sidebarByOrientation
+          ? sidebarDisplayMode(sidebarByOrientation.landscape, false)
+          : sidebarDisplayMode(
+              // UIKit applies the mode as a collapsed split expands, before the new width reaches
+              // JS, so a collapsed split already carries the sidebar the expanded one will show.
+              (layout.usesSplitView
+                ? panes.primarySidebarVisible
+                : panes.primarySidebarWhenExpanded) ||
+                (!layout.usesSplitView && !activeDetailKey),
+              layout.primarySidebarOverlaysContent,
+            )
       }
       onDisplayModeWillChange={({ nativeEvent }) => {
         if (!layout.primarySidebarOverlaysContent) return;
@@ -363,6 +373,10 @@ function WorkspaceColumns(
         maximumPrimaryColumnWidth: Math.max(380, layout.listPaneWidth ?? 0),
         preferredPrimaryColumnWidthOrFraction: layout.listPaneWidth ?? 320,
         minimumSecondaryColumnWidth: 320,
+        // UIKit can retain its automatic width despite a new preference; constrain both edges.
+        minimumInspectorColumnWidth: inspectorWidth,
+        maximumInspectorColumnWidth: inspectorWidth,
+        preferredInspectorColumnWidthOrFraction: inspectorWidth,
       }}
     >
       <Split.Column>
@@ -420,7 +434,6 @@ function WorkspaceColumns(
                 key={screenKey}
                 screenKey={screenKey}
                 descriptor={descriptor}
-                sidebarToggle={inSettingsSlot}
                 attached={props.detail.some((current) => current.key === route.key)}
                 onDismiss={handleNativeDismiss}
                 onAppearance={followCollapsedSplit}
@@ -436,7 +449,45 @@ function WorkspaceColumns(
         {/* Inspector panes host their own native stacks, which UIKit insets for the Duo's
             vertical bar wherever they sit, so each pane insets its own content instead. */}
         <ColumnContent insetHorizontally={false}>
-          <View className="flex-1 bg-screen">{inspector.render?.()}</View>
+          <View className="flex-1 bg-screen">
+            {inspector.render?.()}
+            {inspector.visible ? (
+              <GestureHandlerRootView
+                style={[StyleSheet.absoluteFill, { zIndex: 100 }]}
+                pointerEvents="box-none"
+                collapsable={false}
+              >
+                <SafeAreaView
+                  style={{ flex: 1 }}
+                  edges={["left", "right"]}
+                  pointerEvents="box-none"
+                >
+                  <View className="flex-1" pointerEvents="box-none">
+                    <View
+                      className="absolute inset-y-0 left-0 w-[22px] flex-row"
+                      pointerEvents="box-none"
+                    >
+                      <WorkspacePaneDivider
+                        accessibilityLabel="Resize inspector"
+                        currentWidth={inspectorWidth}
+                        resizeDirection={-1}
+                        onResizeStart={() => {
+                          resizeStartWidth.current = inspectorWidth;
+                        }}
+                        onResizeBy={(delta) => {
+                          const width = Math.max(
+                            260,
+                            Math.min(viewportWidth * 0.6, resizeStartWidth.current + delta),
+                          );
+                          setInspectorWidthFraction(width / viewportWidth);
+                        }}
+                      />
+                    </View>
+                  </View>
+                </SafeAreaView>
+              </GestureHandlerRootView>
+            ) : null}
+          </View>
         </ColumnContent>
       </Split.Inspector>
     </Split.Host>
@@ -616,4 +667,9 @@ export function createWorkspaceStackNavigator<
   const Config extends StaticConfig<TypeBag> = StaticConfig<TypeBag>,
 >(config?: Config): TypedNavigator<TypeBag, Config> {
   return createNavigatorFactory(WorkspaceStackNavigator)(config);
+}
+
+function sidebarDisplayMode(visible: boolean, overlay: boolean) {
+  if (!visible) return "secondaryOnly";
+  return overlay ? "oneOverSecondary" : "oneBesideSecondary";
 }

@@ -488,6 +488,7 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
         const path = yield* Path.Path;
         const { baseDir, versionsDir } = yield* setup(["1.0.0", "1.1.0"]);
         const entry = path.join(versionsDir, "1.0.0", "t3");
+        // Multicall coreutils (Ubuntu's uutils) refuse to run renamed, so copy Node instead.
         yield* fs.copyFile(process.execPath, entry);
         yield* fs.chmod(entry, 0o755);
         const link = path.join(baseDir, "t3");

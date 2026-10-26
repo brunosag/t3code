@@ -54,58 +54,55 @@ const make = Effect.gen(function* () {
     Stream.callback<SpeechSynthesisEvent, SpeechSynthesisFailure>(
       (queue: Queue.Queue<SpeechSynthesisEvent, SpeechSynthesisFailure | Cause.Done>) => {
         const emit = (event: SpeechSynthesisEvent) => Queue.offer(queue, event).pipe(Effect.asVoid);
-        return emit({ type: "progress", stage: "starting", completed: 0, total: null })
-          .pipe(
-            Effect.andThen(
-              permit.withPermit(
-                Effect.scoped(
-                  Effect.gen(function* () {
-                    const session = yield* engine.acquire({
-                      voice,
-                      onDownloadProgress: (completed, total) =>
-                        emit({ type: "progress", stage: "downloading-model", completed, total }),
+        return emit({ type: "progress", stage: "starting", completed: 0, total: null }).pipe(
+          Effect.andThen(
+            permit.withPermit(
+              Effect.scoped(
+                Effect.gen(function* () {
+                  const session = yield* engine.acquire({
+                    voice,
+                    onDownloadProgress: (completed, total) =>
+                      emit({ type: "progress", stage: "downloading-model", completed, total }),
+                  });
+                  const chunks = splitSpeechText(text);
+                  for (const [index, chunk] of chunks.entries()) {
+                    yield* emit({
+                      type: "progress",
+                      stage: "generating",
+                      completed: index,
+                      total: chunks.length,
                     });
-                    const chunks = splitSpeechText(text);
-                    for (const [index, chunk] of chunks.entries()) {
-                      yield* emit({
-                        type: "progress",
-                        stage: "generating",
-                        completed: index,
-                        total: chunks.length,
-                      });
-                      const phonemes = finishPhonemes(
-                        yield* Effect.forEach(phonemeSections(chunk), (section) =>
-                          section.punctuation
-                            ? Effect.succeed(section.text)
-                            : session
-                                .phonemize(section.text, phonemeLanguage(voice))
-                                .pipe(Effect.map((lines) => lines.join(" "))),
-                        ),
-                        voice,
-                      );
-                      const samples = concatSamples(
-                        yield* Effect.forEach(fitPhonemes(phonemes, session.vocab), (piece) =>
-                          session.infer(modelInputIds(piece, session.vocab)),
-                        ),
-                      );
-                      // Text with nothing to pronounce, such as a lone symbol, yields no audio.
-                      if (samples.length === 0) continue;
-                      yield* emit({
-                        type: "chunk",
-                        audio: encodeWav(samples),
-                        durationSeconds: samples.length / KOKORO_SAMPLE_RATE,
-                      });
-                    }
-                  }),
-                ),
+                    const phonemes = finishPhonemes(
+                      yield* Effect.forEach(phonemeSections(chunk), (section) =>
+                        section.punctuation
+                          ? Effect.succeed(section.text)
+                          : session
+                              .phonemize(section.text, phonemeLanguage(voice))
+                              .pipe(Effect.map((lines) => lines.join(" "))),
+                      ),
+                      voice,
+                    );
+                    const samples = concatSamples(
+                      yield* Effect.forEach(fitPhonemes(phonemes, session.vocab), (piece) =>
+                        session.infer(modelInputIds(piece, session.vocab)),
+                      ),
+                    );
+                    // Text with nothing to pronounce, such as a lone symbol, yields no audio.
+                    if (samples.length === 0) continue;
+                    yield* emit({
+                      type: "chunk",
+                      audio: encodeWav(samples),
+                      durationSeconds: samples.length / KOKORO_SAMPLE_RATE,
+                    });
+                  }
+                }),
               ),
             ),
-          )
-          .pipe(
-            Effect.catch((error) => Queue.fail(queue, error)),
-            Effect.andThen(Queue.end(queue)),
-            Effect.forkScoped,
-          );
+          ),
+          Effect.catch((error) => Queue.fail(queue, error)),
+          Effect.andThen(Queue.end(queue)),
+          Effect.forkScoped,
+        );
       },
     );
 
