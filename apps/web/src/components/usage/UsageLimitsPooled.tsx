@@ -23,6 +23,7 @@ import {
   EllipsisIcon,
   EyeOffIcon,
   ExternalLinkIcon,
+  ListChecksIcon,
   TicketIcon,
 } from "lucide-react";
 import {
@@ -45,7 +46,17 @@ import { providerClients } from "../settings/providerDriverMeta";
 import { Button } from "../ui/button";
 import { OpenAI } from "../Icons";
 import { Alert, AlertTitle } from "../ui/alert";
-import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "../ui/menu";
 import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { AccountChip } from "./AccountChip";
 import {
@@ -108,6 +119,14 @@ function AccountName({
       {name ? <span className="min-w-0 truncate">{name}</span> : null}
     </span>
   );
+}
+
+/** Bars show only the avatar; the name is in the segment popover. */
+function AccountMark({ account }: { readonly account: LimitAccount }) {
+  if (account.image || account.email) {
+    return <AccountChip email={account.email} image={account.image} />;
+  }
+  return <AccountName account={account} className="min-w-0 truncate font-medium text-foreground" />;
 }
 
 function Row({ label, children }: { readonly label: string; readonly children: ReactNode }) {
@@ -377,12 +396,7 @@ function SegmentTriggers({
           {index}
         </span>
         <div className="relative hidden h-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md px-2 text-xs @2xl/pool:flex">
-          {showAccountName ? (
-            <AccountName
-              account={account}
-              className="min-w-0 truncate font-medium text-foreground"
-            />
-          ) : null}
+          {showAccountName ? <AccountMark account={account} /> : null}
           {/* A single-account bar repeats the headline percentage. */}
           {showAccountName ? (
             <span className="shrink-0 font-semibold text-foreground tabular-nums">
@@ -548,13 +562,31 @@ function PoolWindowCard({
   );
 }
 
+function windowLabel(pool: LimitPool, window: LimitPoolWindow) {
+  return (
+    (pool.driver === "cursor" ? cursorUsageWindowDetails(window.id)?.label : undefined) ??
+    window.label
+  );
+}
+
+function limitKey(pool: LimitPool, window: LimitPoolWindow) {
+  return `${pool.driver}:${window.id}`;
+}
+
 function PoolActions({
   label,
+  limits,
   onMoveUp,
   onMoveDown,
   onHide,
 }: {
   readonly label: string;
+  readonly limits: ReadonlyArray<{
+    readonly key: string;
+    readonly label: string;
+    readonly shown: boolean;
+    readonly onToggle: () => void;
+  }>;
   readonly onMoveUp: (() => void) | null;
   readonly onMoveDown: (() => void) | null;
   readonly onHide: () => void;
@@ -576,6 +608,26 @@ function PoolActions({
           Move down
         </MenuItem>
         <MenuSeparator />
+        {limits.length > 1 ? (
+          <MenuSub>
+            <MenuSubTrigger>
+              <ListChecksIcon aria-hidden />
+              Limits
+            </MenuSubTrigger>
+            <MenuSubPopup>
+              {limits.map((limit) => (
+                <MenuCheckboxItem
+                  key={limit.key}
+                  checked={limit.shown}
+                  closeOnClick={false}
+                  onCheckedChange={limit.onToggle}
+                >
+                  {limit.label}
+                </MenuCheckboxItem>
+              ))}
+            </MenuSubPopup>
+          </MenuSub>
+        ) : null}
         <MenuItem onClick={onHide}>
           <EyeOffIcon aria-hidden />
           Hide {label}
@@ -589,14 +641,18 @@ function PoolSection({
   pool,
   now,
   actions,
+  hiddenLimits,
 }: {
   readonly pool: LimitPool;
   readonly now: number;
   readonly actions: ReactNode;
+  readonly hiddenLimits: ReadonlySet<string>;
 }) {
   const color = barColor(pool.driver);
   const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
-  const windows = displayLimitWindows(pool);
+  const windows = displayLimitWindows(pool).filter(
+    (window) => !hiddenLimits.has(limitKey(pool, window)),
+  );
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
@@ -636,6 +692,8 @@ export function UsageLimitsPooled({
   providerOrder = PROVIDER_ORDER,
   onProviderOrderChange,
   onHideProvider,
+  hiddenLimits = new Set(),
+  onHiddenLimitsChange,
 }: {
   readonly presentations: Parameters<typeof collectLimitAccounts>[0];
   readonly now: number;
@@ -643,6 +701,8 @@ export function UsageLimitsPooled({
   readonly providerOrder?: readonly UsageProviderKind[];
   readonly onProviderOrderChange?: (order: readonly UsageProviderKind[]) => void;
   readonly onHideProvider?: (provider: UsageProviderKind) => void;
+  readonly hiddenLimits?: ReadonlySet<string>;
+  readonly onHiddenLimitsChange?: (hiddenLimits: readonly string[]) => void;
 }) {
   const [segmentPopover] = useState(() => PopoverCreateHandle<SegmentPayload>());
   const segmentPopoverActions = useRef<PopoverPrimitive.Root.Actions | null>(null);
@@ -656,13 +716,27 @@ export function UsageLimitsPooled({
   const shownProviders = pools.flatMap((pool) => usageProviderForDriver(pool.driver) ?? []);
   const poolActions = (pool: LimitPool) => {
     const provider = usageProviderForDriver(pool.driver);
-    if (!provider || !onProviderOrderChange || !onHideProvider) return null;
+    if (!provider || !onProviderOrderChange || !onHideProvider || !onHiddenLimitsChange)
+      return null;
     const index = shownProviders.indexOf(provider);
     const move = (offset: -1 | 1) => () =>
       onProviderOrderChange(moveProvider(providerOrder, shownProviders, provider, offset));
     return (
       <PoolActions
         label={providerClients.get(pool.driver)?.label ?? String(pool.driver)}
+        limits={displayLimitWindows(pool).map((window) => {
+          const key = limitKey(pool, window);
+          const shown = !hiddenLimits.has(key);
+          return {
+            key,
+            label: windowLabel(pool, window),
+            shown,
+            onToggle: () =>
+              onHiddenLimitsChange(
+                shown ? [...hiddenLimits, key] : [...hiddenLimits].filter((entry) => entry !== key),
+              ),
+          };
+        })}
         onMoveUp={index > 0 ? move(-1) : null}
         onMoveDown={index < shownProviders.length - 1 ? move(1) : null}
         onHide={() => onHideProvider(provider)}
@@ -687,7 +761,12 @@ export function UsageLimitsPooled({
         {pools.map((pool, index) => (
           <Fragment key={pool.driver}>
             {index === cursorPromptAt ? cursorPrompt : null}
-            <PoolSection pool={pool} now={now} actions={poolActions(pool)} />
+            <PoolSection
+              pool={pool}
+              now={now}
+              actions={poolActions(pool)}
+              hiddenLimits={hiddenLimits}
+            />
           </Fragment>
         ))}
       </SegmentPopoverContext>

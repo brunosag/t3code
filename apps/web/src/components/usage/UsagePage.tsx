@@ -207,6 +207,7 @@ export function UsagePage() {
     useState<ReadonlySet<EnvironmentId> | null>(null);
   const hiddenProviders = new Set(preferences.hiddenProviders);
   const providerOrder = orderedProviders(preferences.providerOrder);
+  const hiddenLimits = new Set(preferences.hiddenLimits);
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
   const {
@@ -533,6 +534,8 @@ export function UsagePage() {
                 onHideProvider={(provider) =>
                   updatePreferences({ hiddenProviders: [...hiddenProviders, provider] })
                 }
+                hiddenLimits={hiddenLimits}
+                onHiddenLimitsChange={(next) => updatePreferences({ hiddenLimits: next })}
                 cursorPrompt={
                   cursorAccessEnvironments.length > 0 ? (
                     <CursorEnableLimits

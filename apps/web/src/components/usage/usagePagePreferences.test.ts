@@ -24,9 +24,16 @@ afterEach(() => {
 });
 
 describe("Usage page preferences", () => {
-  it("round-trips hidden providers and reads older saves without them", () => {
-    saveUsagePagePreferences({ metric: "cost", windowDays: 7, hiddenProviders: ["codex"] });
-    expect(readUsagePagePreferences().hiddenProviders).toEqual(["codex"]);
+  it("round-trips hidden providers, order and limits, and reads older saves without them", () => {
+    const saved = {
+      metric: "cost",
+      windowDays: 7,
+      hiddenProviders: ["codex"],
+      providerOrder: ["antigravity", "claude"],
+      hiddenLimits: ["claudeAgent:seven_day_fable"],
+    } as const;
+    saveUsagePagePreferences(saved);
+    expect(readUsagePagePreferences()).toEqual(saved);
 
     values.set(key, '{"metric":"tokens","windowDays":30}');
     expect(readUsagePagePreferences()).toEqual({ metric: "tokens", windowDays: 30 });

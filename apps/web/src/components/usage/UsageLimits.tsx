@@ -371,6 +371,8 @@ export function UsageLimitsSection({
   readonly providerOrder: readonly UsageProviderKind[];
   readonly onProviderOrderChange: (order: readonly UsageProviderKind[]) => void;
   readonly onHideProvider: (provider: UsageProviderKind) => void;
+  readonly hiddenLimits: ReadonlySet<string>;
+  readonly onHiddenLimitsChange: (hiddenLimits: readonly string[]) => void;
 }) {
   const presentations = useAtomValue(environmentPresentations.presentationsWithProvidersAtom);
   const hiddenDrivers = new Set<ServerProvider["driver"]>(

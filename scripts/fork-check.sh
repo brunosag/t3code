@@ -23,6 +23,8 @@ vp test run \
   apps/web/src/components/GitActionsControl.logic.test.ts \
   apps/web/src/pendingUserInput.test.ts \
   apps/web/src/versionSkew.test.ts \
+  apps/web/src/components/usage/usagePagePreferences.test.ts \
+  apps/web/src/components/usage/usageProviders.test.ts \
   packages/contracts/src/settings.test.ts \
   apps/desktop/src/app/DesktopEnvironment.test.ts \
   apps/desktop/src/window/DesktopWindow.test.ts \

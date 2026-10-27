@@ -9,6 +9,7 @@ const UsagePagePreferencesSchema = Schema.Struct({
   windowDays: Schema.Literals([1, 7, 30, 90]),
   hiddenProviders: Schema.optional(Schema.Array(UsageProviderKind)),
   providerOrder: Schema.optional(Schema.Array(UsageProviderKind)),
+  hiddenLimits: Schema.optional(Schema.Array(Schema.String)),
 });
 export type UsagePagePreferences = typeof UsagePagePreferencesSchema.Type;
 
