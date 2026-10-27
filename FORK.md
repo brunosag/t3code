@@ -7,7 +7,7 @@ This fork follows upstream's V2 orchestrator. Its Pi provider is upstream's, wit
 - **Claude thinking quotes:** web and desktop do not offer quoting on Claude thinking items; the Claude adapter also removes saved thinking citations while preserving user comments, whichever client sent them. Other providers keep their quoting behavior.
 - **Question drafts:** written answers to agent questions survive web reloads. Choosing an option moves a written answer into the thread draft.
 - **Interval schedules keep their slot:** an interval task that fires late (the machine was asleep) or is run by hand stays on the grid its previous due time set, instead of restarting the interval from when it ran. A schedule edit or re-enable still starts a new grid from that moment.
-- **Scheduled task models:** `update_scheduled_task` takes a `delegate_task`-style `target`, so agents can move a task to another provider, model or options; scheduled task summaries include the model.
+- **Scheduled task models:** updating a task through `schedule_task` with `scheduledTaskId` takes a `delegate_task`-style `target`, so agents can move a task to another provider, model or options; scheduled task summaries include the model.
 - **Fast Mode switch:** the server can disable Fast Mode, including saved selections and delegated tasks.
 - **Read aloud:** web and desktop synthesize assistant messages on their environment, with a player above the composer. Guest transcripts have no speech controls.
 - **Subagent effort labels:** a provider-native subagent shows an effort only when one was chosen or reported, not the model's catalog default.

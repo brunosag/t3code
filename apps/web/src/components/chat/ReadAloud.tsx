@@ -107,81 +107,77 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
   } as CSSProperties;
 
   return (
-    <ComposerBanner.Root
-      role="region"
-      aria-label="Read aloud"
-      placement="floating"
-      density="comfortable"
-      className="mb-2"
-    >
-      <ComposerBanner.Row>
-        <ComposerBanner.Icon>
-          <Volume2Icon />
-        </ComposerBanner.Icon>
-        <ComposerBanner.Content className="gap-2 text-muted-foreground tabular-nums">
-          {state.error ? (
-            <span role="status" className="truncate">
-              {state.error}
-            </span>
-          ) : preparing ? (
-            <span role="status" className="truncate">
-              {state.progress?.label ?? "Preparing speech…"}
-              {state.progress?.percent != null ? ` ${state.progress.percent}%` : ""}
-            </span>
-          ) : (
-            <>
-              <span>{formatTime(state.position)}</span>
-              <input
-                type="range"
-                aria-label="Seek within response"
-                aria-valuetext={`${formatTime(state.position)} of ${total}`}
-                className="settings-slider min-w-0 flex-1"
-                min={0}
-                max={state.duration || 1}
-                step={0.1}
-                value={state.position}
-                disabled={state.duration === 0}
-                style={seekStyle}
-                onChange={(event) => readAloud.seek(Number(event.currentTarget.value))}
-              />
-              <span>{total}</span>
-            </>
-          )}
-        </ComposerBanner.Content>
-        <ComposerBanner.Actions className="flex-nowrap">
-          <Select
-            value={state.speed}
-            onValueChange={(value) => {
-              if (value !== null) readAloud.setSpeed(value);
-            }}
-          >
-            <SelectTrigger size="xs" variant="ghost" aria-label="Reading speed">
-              <SelectValue>{state.speed}×</SelectValue>
-            </SelectTrigger>
-            <SelectPopup side="top">
-              {SPEEDS.map((speed) => (
-                <SelectItem key={speed} value={speed}>
-                  {speed}×
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost-muted"
-            aria-label={playing ? "Pause reading" : "Play reading"}
-            disabled={!playable}
-            onClick={() => {
-              if (playing) readAloud.pause();
-              else void readAloud.resume();
-            }}
-          >
-            {playing ? <PauseIcon /> : <PlayIcon />}
-          </Button>
-          <ComposerBanner.Dismiss aria-label="Stop reading" onClick={() => readAloud.stop()} />
-        </ComposerBanner.Actions>
-      </ComposerBanner.Row>
-    </ComposerBanner.Root>
+    <ComposerBanner.Attachment>
+      <ComposerBanner.Root role="region" aria-label="Read aloud" density="comfortable">
+        <ComposerBanner.Row>
+          <ComposerBanner.Icon>
+            <Volume2Icon />
+          </ComposerBanner.Icon>
+          <ComposerBanner.Content className="gap-2 text-muted-foreground tabular-nums">
+            {state.error ? (
+              <span role="status" className="truncate">
+                {state.error}
+              </span>
+            ) : preparing ? (
+              <span role="status" className="truncate">
+                {state.progress?.label ?? "Preparing speech…"}
+                {state.progress?.percent != null ? ` ${state.progress.percent}%` : ""}
+              </span>
+            ) : (
+              <>
+                <span>{formatTime(state.position)}</span>
+                <input
+                  type="range"
+                  aria-label="Seek within response"
+                  aria-valuetext={`${formatTime(state.position)} of ${total}`}
+                  className="settings-slider min-w-0 flex-1"
+                  min={0}
+                  max={state.duration || 1}
+                  step={0.1}
+                  value={state.position}
+                  disabled={state.duration === 0}
+                  style={seekStyle}
+                  onChange={(event) => readAloud.seek(Number(event.currentTarget.value))}
+                />
+                <span>{total}</span>
+              </>
+            )}
+          </ComposerBanner.Content>
+          <ComposerBanner.Actions className="flex-nowrap">
+            <Select
+              value={state.speed}
+              onValueChange={(value) => {
+                if (value !== null) readAloud.setSpeed(value);
+              }}
+            >
+              <SelectTrigger size="xs" variant="ghost" aria-label="Reading speed">
+                <SelectValue>{state.speed}×</SelectValue>
+              </SelectTrigger>
+              <SelectPopup side="top">
+                {SPEEDS.map((speed) => (
+                  <SelectItem key={speed} value={speed}>
+                    {speed}×
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost-muted"
+              aria-label={playing ? "Pause reading" : "Play reading"}
+              disabled={!playable}
+              onClick={() => {
+                if (playing) readAloud.pause();
+                else void readAloud.resume();
+              }}
+            >
+              {playing ? <PauseIcon /> : <PlayIcon />}
+            </Button>
+            <ComposerBanner.Dismiss aria-label="Stop reading" onClick={() => readAloud.stop()} />
+          </ComposerBanner.Actions>
+        </ComposerBanner.Row>
+      </ComposerBanner.Root>
+    </ComposerBanner.Attachment>
   );
 }

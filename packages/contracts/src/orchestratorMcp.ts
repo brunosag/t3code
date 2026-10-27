@@ -201,7 +201,7 @@ export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
   resultContextTransferId: Schema.NullOr(ContextTransferId),
   hasPendingQuestion: Schema.Boolean.annotate({
     description:
-      "A question blocks the child and ends a wait. Answer via `t3_pending_request_*` on `childThreadId`, or the user does.",
+      "A question blocks the child and ends a wait. Answer via `t3_pending_request` on `childThreadId`, or the user does.",
   }),
   pendingApproval: Schema.NullOr(
     Schema.Struct({ requestId: RuntimeRequestId, kind: ProviderRequestKind, runId: RunId }),
@@ -583,6 +583,22 @@ export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
 });
 export type OrchestratorMcpScheduleTaskInput = typeof OrchestratorMcpScheduleTaskInput.Type;
 
+const OrchestratorMcpScheduledTaskTarget = OrchestratorMcpTarget.annotate({
+  description:
+    "Provider instance, model and options for later runs, from orchestrator_capabilities. An omitted instance keeps the task's; with the task's current instance and model, options override individual stored values, and [] or {} clears them.",
+});
+
+/** `schedule_task` creates a task, or updates one when `scheduledTaskId` is given. */
+export const OrchestratorMcpSaveScheduledTaskInput = Schema.Struct({
+  ...OrchestratorMcpScheduleTaskInput.fields,
+  scheduledTaskId: Schema.optional(ScheduledTaskId),
+  prompt: Schema.optional(OrchestratorMcpPrompt),
+  schedule: Schema.optional(OrchestratorMcpSchedule),
+  target: Schema.optional(OrchestratorMcpScheduledTaskTarget),
+});
+export type OrchestratorMcpSaveScheduledTaskInput =
+  typeof OrchestratorMcpSaveScheduledTaskInput.Type;
+
 export const OrchestratorMcpScheduledTask = Schema.Struct({
   scheduledTaskId: ScheduledTaskId,
   title: Schema.String,
@@ -628,12 +644,7 @@ export const OrchestratorMcpUpdateScheduledTaskInput = Schema.Struct({
   schedule: Schema.optional(OrchestratorMcpSchedule),
   enabled: Schema.optional(Schema.Boolean),
   bindToCurrentThread: Schema.optional(Schema.Boolean),
-  target: Schema.optional(
-    OrchestratorMcpTarget.annotate({
-      description:
-        "Provider instance, model and options for later runs, from orchestrator_capabilities. An omitted instance keeps the task's; with the task's current instance and model, options override individual stored values, and [] or {} clears them.",
-    }),
-  ),
+  target: Schema.optional(OrchestratorMcpScheduledTaskTarget),
 });
 export type OrchestratorMcpUpdateScheduledTaskInput =
   typeof OrchestratorMcpUpdateScheduledTaskInput.Type;

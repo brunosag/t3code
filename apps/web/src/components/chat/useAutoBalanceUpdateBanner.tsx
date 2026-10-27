@@ -93,7 +93,7 @@ export function useAutoBalanceUpdateBanner(
   return {
     id: `auto-balance-server-updates-${dismissedNotices.size}`,
     variant: failed ? "error" : "default",
-    priority: running ? "urgent" : "notice",
+    group: "environment",
     icon: <ComposerServerUpdateIcon status={status} />,
     title: (
       <Popover>
