@@ -77,7 +77,7 @@ The most common defect in this repo is a change that works on the path you teste
 
 ## VPS deployment
 
-The fork deploys to `vps` over Tailscale as `bsag` (`ssh vps` from a configured tailnet device). `tutor-prod` remains a compatibility SSH alias and the Azure VM resource name. Repository variable `VPS_HOST` selects the private Tailscale address; see `FORK.md` and `.github/workflows/deploy-fork-vps.yml`. Preserve `~/local/t3-pi/userdata` and keep development state separate from that live install.
+The fork deploys to `vps` over Tailscale as `bsag` (`ssh vps` from a configured tailnet device). `tutor-prod` remains a compatibility SSH alias; the host has been an OVHcloud VPS since 2026-10-27. Repository variable `VPS_HOST` selects the private Tailscale address; see `FORK.md` and `.github/workflows/deploy-fork-vps.yml`. Preserve `~/local/t3-pi/userdata` and keep development state separate from that live install.
 
 ## Fork rules
 
