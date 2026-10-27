@@ -10,7 +10,8 @@
 //
 // Uncommitted and untracked files count. Affected packages come from
 // .github/scripts/ci-changes.cjs, the same mapping CI uses to gate its jobs.
-// The steps run side by side; each prints its output when it finishes. A
+// The steps run side by side, knip, typecheck and tests one at a time when
+// memory is short; each prints its output when it finishes. A
 // rerun on exactly the files of the last passing run prints that run's summary.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -18,6 +19,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { decide, readWorkspace } from "../.github/scripts/ci-changes.cjs";
+import { memoryHeadroom } from "./lib/memory-headroom.ts";
 
 const root = NodePath.resolve(import.meta.dirname, "..");
 const CODE = /\.[cm]?[jt]sx?$/;
@@ -155,7 +157,11 @@ const knipPasses = knipCheck.split(" && ").map((command, index, all) => {
   if (bin !== "knip" || /["'$\\|;&<>]/.test(command)) {
     throw new Error(`check:changed cannot split knip:check: ${command}`);
   }
-  return { name: `knip ${index + 1}/${all.length}`, args: ["exec", "knip", ...args] };
+  return {
+    name: `knip ${index + 1}/${all.length}`,
+    heavy: true,
+    args: ["exec", "knip", ...args],
+  };
 });
 
 // A version bump can leave a patch unused, causing pnpm to reject the install
@@ -222,6 +228,20 @@ const graphql = ["apps/server", "packages/source-control-github"].filter((dir) =
   files.some((file) => file.startsWith(`${dir}/`)),
 );
 
+// knip, typecheck and tests take 1–2 GB each. On a host without this much
+// headroom they run one at a time, one worker each, instead of together: on a
+// 12 GB VPS, running them together stalled the T3 server sharing the cgroup.
+const PARALLEL_HEADROOM = 6 * 1024 ** 3;
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone script has no Effect runtime.
+const headroom = memoryHeadroom({ platform: process.platform });
+const serial = headroom < PARALLEL_HEADROOM;
+if (serial) {
+  console.log(
+    `check:changed: ${(headroom / 1024 ** 3).toFixed(1)} GB of memory free; ` +
+      "running knip, typecheck and tests one at a time",
+  );
+}
+
 const filters = (names: ReadonlyArray<string>) => names.flatMap((name) => ["--filter", name]);
 const steps = [
   // Runs first; it takes about a second.
@@ -238,6 +258,7 @@ const steps = [
   })),
   affected.length > 0 && {
     name: `typecheck (${affected.length} packages)`,
+    heavy: true,
     // `tsc --noEmit` writes nothing another package reads, so dependency order
     // only made dependents wait: --parallel cut a contracts change from 13 s to 9 s.
     args: [
@@ -245,7 +266,7 @@ const steps = [
       "--cache",
       "--parallel",
       "--concurrency-limit",
-      "4",
+      serial ? "1" : "4",
       ...filters(affected),
       "typecheck",
     ],
@@ -253,36 +274,44 @@ const steps = [
   // From the repo root, the root vite.config.ts hands each file to its package's config.
   tests.size > 0 && {
     name: `test (${tests.size} files)`,
-    args: ["test", "run", "--passWithNoTests", ...tests],
+    heavy: true,
+    args: ["test", "run", "--passWithNoTests", ...(serial ? ["--maxWorkers=1"] : []), ...tests],
   },
 ].filter((step) => step !== false);
 
 // Output is piped, so keep the colors a terminal would get.
 const env = process.stdout.isTTY ? { ...process.env, FORCE_COLOR: "1" } : process.env;
-const results = await Promise.all(
-  steps.map(
-    (step) =>
-      new Promise<{ name: string; ok: boolean; seconds: string }>((resolve) => {
-        const started = performance.now();
-        const finish = (ok: boolean, output?: Buffer) => {
-          const seconds = ((performance.now() - started) / 1000).toFixed(1);
-          console.log(`\n> vp ${step.name}  ${ok ? "pass" : "FAIL"}  ${seconds}s`);
-          if (output) process.stdout.write(output);
-          resolve({ name: step.name, ok, seconds });
-        };
-        // In-process steps print their own output. The patch check is first and
-        // takes about a second, so the commands start right after it.
-        if ("run" in step) return finish(step.run());
-        const output: Array<Buffer> = [];
-        const child = NodeChildProcess.spawn("vp", step.args, { cwd: root, env });
-        child.stdout.on("data", (chunk: Buffer) => output.push(chunk));
-        child.stderr.on("data", (chunk: Buffer) => output.push(chunk));
-        // A failed spawn emits "error", then "close" with a nonzero code.
-        child.on("error", (error) => output.push(Buffer.from(`${error.message}\n`)));
-        child.on("close", (status) => finish(status === 0, Buffer.concat(output)));
-      }),
-  ),
-);
+const runStep = (step: (typeof steps)[number]) =>
+  new Promise<{ name: string; ok: boolean; seconds: string }>((resolve) => {
+    const started = performance.now();
+    const finish = (ok: boolean, output?: Buffer) => {
+      const seconds = ((performance.now() - started) / 1000).toFixed(1);
+      console.log(`\n> vp ${step.name}  ${ok ? "pass" : "FAIL"}  ${seconds}s`);
+      if (output) process.stdout.write(output);
+      resolve({ name: step.name, ok, seconds });
+    };
+    // In-process steps print their own output. The patch check is first and
+    // takes about a second, so the commands start right after it.
+    if ("run" in step) return finish(step.run());
+    const output: Array<Buffer> = [];
+    const child = NodeChildProcess.spawn("vp", step.args, { cwd: root, env });
+    child.stdout.on("data", (chunk: Buffer) => output.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => output.push(chunk));
+    // A failed spawn emits "error", then "close" with a nonzero code.
+    child.on("error", (error) => output.push(Buffer.from(`${error.message}\n`)));
+    child.on("close", (status) => finish(status === 0, Buffer.concat(output)));
+  });
+const queued = steps.filter((step) => serial && "heavy" in step && step.heavy);
+const results = (
+  await Promise.all([
+    Promise.all(steps.filter((step) => !queued.includes(step)).map(runStep)),
+    (async () => {
+      const done = [];
+      for (const step of queued) done.push(await runStep(step));
+      return done;
+    })(),
+  ])
+).flat();
 
 const summary = ["check:changed summary"];
 for (const result of results) {

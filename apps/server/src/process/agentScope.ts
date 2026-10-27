@@ -40,6 +40,25 @@ function agentSliceMemoryLimits(totalBytes: number) {
   };
 }
 
+/**
+ * A host whose own cgroup limits leave agents less than RAM suggests sets
+ * T3CODE_AGENT_MEMORY_HIGH, _MAX and _SWAP_MAX (systemd values such as 5G or
+ * infinity); otherwise agents throttle the slice holding this server too.
+ */
+export function agentSliceMemoryProperties(
+  totalBytes: number,
+  env: NodeJS.ProcessEnv,
+): Array<string> {
+  const defaults = agentSliceMemoryLimits(totalBytes);
+  const setting = (name: string) => env[`T3CODE_AGENT_MEMORY_${name}`]?.trim() || undefined;
+  const swapMax = setting("SWAP_MAX");
+  return [
+    `MemoryHigh=${setting("HIGH") ?? defaults.high}`,
+    `MemoryMax=${setting("MAX") ?? defaults.max}`,
+    ...(swapMax === undefined ? [] : [`MemorySwapMax=${swapMax}`]),
+  ];
+}
+
 export interface ScopeState {
   readonly loadState: string;
   readonly activeState: string;
@@ -172,14 +191,13 @@ export const make = Effect.gen(function* () {
         yield* Effect.logInfo("Agent scopes are off: no systemd user manager");
         return undefined;
       }
-      const limits = agentSliceMemoryLimits(NodeOS.totalmem());
+      const limits = agentSliceMemoryProperties(NodeOS.totalmem(), hostEnvironment);
       const limited = yield* run(systemctl, [
         "--user",
         "set-property",
         "--runtime",
         AGENT_SLICE,
-        `MemoryHigh=${limits.high}`,
-        `MemoryMax=${limits.max}`,
+        ...limits,
       ]);
       if (limited._tag === "None" || limited.value.code !== 0) {
         yield* Effect.logWarning("Could not set memory limits on the agents slice", {
@@ -188,7 +206,7 @@ export const make = Effect.gen(function* () {
       }
       yield* Effect.logInfo("Agent scopes are on", {
         slice: AGENT_SLICE,
-        ...limits,
+        limits,
         oomPolicy: supportsOomPolicy,
       });
       return {

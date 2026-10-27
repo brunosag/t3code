@@ -16,7 +16,13 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as ServerConfig from "../config.ts";
 import { makeCodexAppServerSpawnCommand } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import * as ProcessRunner from "../processRunner.ts";
-import { classifyScope, make, ownedAgentSlice, type ScopeState } from "./agentScope.ts";
+import {
+  agentSliceMemoryProperties,
+  classifyScope,
+  make,
+  ownedAgentSlice,
+  type ScopeState,
+} from "./agentScope.ts";
 
 const running: ScopeState = {
   loadState: "loaded",
@@ -165,6 +171,28 @@ const launchCodex = (scope: Effect.Success<typeof make>, threadId: string) =>
       return command;
     }),
   );
+
+describe("agentSliceMemoryProperties", () => {
+  const GiB = 1024 ** 3;
+
+  it("derives limits from RAM unless the host sets them", () => {
+    expect(agentSliceMemoryProperties(32 * GiB, {})).toEqual([
+      `MemoryHigh=${26 * GiB}`,
+      `MemoryMax=${28 * GiB}`,
+    ]);
+    expect(
+      agentSliceMemoryProperties(12 * GiB, {
+        T3CODE_AGENT_MEMORY_HIGH: "infinity",
+        T3CODE_AGENT_MEMORY_MAX: " 5G ",
+        T3CODE_AGENT_MEMORY_SWAP_MAX: "0",
+      }),
+    ).toEqual(["MemoryHigh=infinity", "MemoryMax=5G", "MemorySwapMax=0"]);
+    expect(agentSliceMemoryProperties(12 * GiB, { T3CODE_AGENT_MEMORY_MAX: "" })).toEqual([
+      `MemoryHigh=${6 * GiB}`,
+      `MemoryMax=${9 * GiB}`,
+    ]);
+  });
+});
 
 describe("AgentScope service", () => {
   it.effect("labels a thread from its newest scope until its next session clears it", () =>

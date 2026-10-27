@@ -26,6 +26,8 @@ vp test run \
   packages/contracts/src/settings.test.ts \
   apps/desktop/src/app/DesktopEnvironment.test.ts \
   apps/desktop/src/window/DesktopWindow.test.ts \
+  apps/server/src/process/agentScope.test.ts \
+  scripts/lib/memory-headroom.test.ts \
   scripts/dev-runner.test.ts
 
 vp run --filter t3 --filter @t3tools/web --filter @t3tools/mobile --filter @t3tools/desktop \
