@@ -15,7 +15,16 @@ import {
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
 import type { Popover as PopoverPrimitive } from "@base-ui/react/popover";
-import { AlertTriangleIcon, ExternalLinkIcon, TicketIcon } from "lucide-react";
+import type { UsageProviderKind } from "@t3tools/contracts";
+import {
+  AlertTriangleIcon,
+  ArrowDownIcon,
+  ArrowUpIcon,
+  EllipsisIcon,
+  EyeOffIcon,
+  ExternalLinkIcon,
+  TicketIcon,
+} from "lucide-react";
 import {
   createContext,
   Fragment,
@@ -37,6 +46,7 @@ import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { Button } from "../ui/button";
 import { OpenAI } from "../Icons";
 import { Alert, AlertTitle } from "../ui/alert";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import {
   PaceIcon,
@@ -46,6 +56,7 @@ import {
   resetCreditsSummary,
   useResetCredit,
 } from "./UsageLimits";
+import { moveProvider, PROVIDER_ORDER, usageProviderForDriver } from "./usageProviders";
 
 function accountInitials(email: string): string {
   const [local = "", domain = ""] = email.split("@");
@@ -567,22 +578,70 @@ function PoolWindowCard({
   );
 }
 
-function PoolSection({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
+function PoolActions({
+  label,
+  onMoveUp,
+  onMoveDown,
+  onHide,
+}: {
+  readonly label: string;
+  readonly onMoveUp: (() => void) | null;
+  readonly onMoveDown: (() => void) | null;
+  readonly onHide: () => void;
+}) {
+  return (
+    <Menu>
+      <MenuTrigger
+        render={<Button aria-label={`${label} limit actions`} size="icon-xs" variant="ghost" />}
+      >
+        <EllipsisIcon aria-hidden />
+      </MenuTrigger>
+      <MenuPopup align="end">
+        <MenuItem disabled={!onMoveUp} onClick={() => onMoveUp?.()}>
+          <ArrowUpIcon aria-hidden />
+          Move up
+        </MenuItem>
+        <MenuItem disabled={!onMoveDown} onClick={() => onMoveDown?.()}>
+          <ArrowDownIcon aria-hidden />
+          Move down
+        </MenuItem>
+        <MenuSeparator />
+        <MenuItem onClick={onHide}>
+          <EyeOffIcon aria-hidden />
+          Hide {label}
+        </MenuItem>
+      </MenuPopup>
+    </Menu>
+  );
+}
+
+function PoolSection({
+  pool,
+  now,
+  actions,
+}: {
+  readonly pool: LimitPool;
+  readonly now: number;
+  readonly actions: ReactNode;
+}) {
   const color = barColor(pool.driver);
   const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
   const windows = displayLimitWindows(pool);
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <ProviderInstanceIcon
-          driverKind={pool.driver}
-          displayName={label}
-          indicatorBackground="var(--background)"
-          className="size-5"
-          iconClassName="size-4 text-foreground/80"
-        />
-        {label}
-      </h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <ProviderInstanceIcon
+            driverKind={pool.driver}
+            displayName={label}
+            indicatorBackground="var(--background)"
+            className="size-5"
+            iconClassName="size-4 text-foreground/80"
+          />
+          {label}
+        </h2>
+        {actions}
+      </div>
       {windows.map((window) => {
         const details = pool.driver === "cursor" ? cursorUsageWindowDetails(window.id) : undefined;
         return (
@@ -604,14 +663,42 @@ export function UsageLimitsPooled({
   presentations,
   now,
   cursorPrompt,
+  providerOrder = PROVIDER_ORDER,
+  onProviderOrderChange,
+  onHideProvider,
 }: {
   readonly presentations: Parameters<typeof collectLimitAccounts>[0];
   readonly now: number;
   readonly cursorPrompt?: ReactNode;
+  readonly providerOrder?: readonly UsageProviderKind[];
+  readonly onProviderOrderChange?: (order: readonly UsageProviderKind[]) => void;
+  readonly onHideProvider?: (provider: UsageProviderKind) => void;
 }) {
   const [segmentPopover] = useState(() => PopoverCreateHandle<SegmentPayload>());
   const segmentPopoverActions = useRef<PopoverPrimitive.Root.Actions | null>(null);
-  const pools = collectLimitPools(collectLimitAccounts(presentations), now);
+  const rank = (pool: LimitPool) => {
+    const provider = usageProviderForDriver(pool.driver);
+    return provider ? providerOrder.indexOf(provider) : providerOrder.length;
+  };
+  const pools = collectLimitPools(collectLimitAccounts(presentations), now).toSorted(
+    (left, right) => rank(left) - rank(right),
+  );
+  const shownProviders = pools.flatMap((pool) => usageProviderForDriver(pool.driver) ?? []);
+  const poolActions = (pool: LimitPool) => {
+    const provider = usageProviderForDriver(pool.driver);
+    if (!provider || !onProviderOrderChange || !onHideProvider) return null;
+    const index = shownProviders.indexOf(provider);
+    const move = (offset: -1 | 1) => () =>
+      onProviderOrderChange(moveProvider(providerOrder, shownProviders, provider, offset));
+    return (
+      <PoolActions
+        label={providerClients.get(pool.driver)?.label ?? String(pool.driver)}
+        onMoveUp={index > 0 ? move(-1) : null}
+        onMoveDown={index < shownProviders.length - 1 ? move(1) : null}
+        onHide={() => onHideProvider(provider)}
+      />
+    );
+  };
   const notices = collectLimitNotices(presentations);
   const externalLinks = collectExternalUsageLinks(presentations);
   const cursorPromptAt =
@@ -630,7 +717,7 @@ export function UsageLimitsPooled({
         {pools.map((pool, index) => (
           <Fragment key={pool.driver}>
             {index === cursorPromptAt ? cursorPrompt : null}
-            <PoolSection pool={pool} now={now} />
+            <PoolSection pool={pool} now={now} actions={poolActions(pool)} />
           </Fragment>
         ))}
       </SegmentPopoverContext>

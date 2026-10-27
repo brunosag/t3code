@@ -99,7 +99,12 @@ import {
   resolveUsageShortcut,
   type UsageMetric,
 } from "./usageShortcuts";
-import { PROVIDER_ORDER, PROVIDER_PRESENTATION, providersWithUsage } from "./usageProviders";
+import {
+  orderedProviders,
+  PROVIDER_ORDER,
+  PROVIDER_PRESENTATION,
+  providersWithUsage,
+} from "./usageProviders";
 import {
   readUsagePagePreferences,
   saveUsagePagePreferences,
@@ -201,6 +206,7 @@ export function UsagePage() {
   const [selectedEnvironmentIds, setSelectedEnvironmentIds] =
     useState<ReadonlySet<EnvironmentId> | null>(null);
   const hiddenProviders = new Set(preferences.hiddenProviders);
+  const providerOrder = orderedProviders(preferences.providerOrder);
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
   const {
@@ -380,6 +386,7 @@ export function UsagePage() {
         <WorkspaceBreadcrumbSeparator />
         <WorkspaceBreadcrumbItem current className="min-w-10">
           <UsageProviderFilter
+            providerOrder={providerOrder}
             hiddenProviders={hiddenProviders}
             onChange={(next) => updatePreferences({ hiddenProviders: next })}
           />
@@ -521,6 +528,11 @@ export function UsagePage() {
                 selectedEnvironmentIds={selectedEnvironmentIds}
                 hiddenProviders={hiddenProviders}
                 now={limitsNow}
+                providerOrder={providerOrder}
+                onProviderOrderChange={(order) => updatePreferences({ providerOrder: order })}
+                onHideProvider={(provider) =>
+                  updatePreferences({ hiddenProviders: [...hiddenProviders, provider] })
+                }
                 cursorPrompt={
                   cursorAccessEnvironments.length > 0 ? (
                     <CursorEnableLimits
@@ -1428,9 +1440,11 @@ function UsageEnvironmentFilter({
 }
 
 function UsageProviderFilter({
+  providerOrder,
   hiddenProviders,
   onChange,
 }: {
+  readonly providerOrder: readonly UsageProviderKind[];
   readonly hiddenProviders: ReadonlySet<UsageProviderKind>;
   readonly onChange: (hiddenProviders: readonly UsageProviderKind[]) => void;
 }) {
@@ -1462,7 +1476,7 @@ function UsageProviderFilter({
           All providers
         </MenuCheckboxItem>
         <MenuSeparator />
-        {PROVIDER_ORDER.map((provider) => (
+        {providerOrder.map((provider) => (
           <MenuCheckboxItem
             key={provider}
             checked={!hiddenProviders.has(provider)}

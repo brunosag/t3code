@@ -49,6 +49,32 @@ export const PROVIDER_PRESENTATION = {
 
 export const PROVIDER_ORDER = Object.keys(PROVIDER_PRESENTATION) as UsageProviderKind[];
 
+/** Saved order first; providers added since it was saved keep their default place at the end. */
+export function orderedProviders(
+  saved: readonly UsageProviderKind[] | undefined,
+): readonly UsageProviderKind[] {
+  return saved ? [...new Set([...saved, ...PROVIDER_ORDER])] : PROVIDER_ORDER;
+}
+
+export function usageProviderForDriver(driver: ProviderDriverKind): UsageProviderKind | undefined {
+  return PROVIDER_ORDER.find((provider) => PROVIDER_PRESENTATION[provider].driverKind === driver);
+}
+
+/** Swap with the neighbour in `shown`, so a move skips providers that are not on screen. */
+export function moveProvider(
+  order: readonly UsageProviderKind[],
+  shown: readonly UsageProviderKind[],
+  provider: UsageProviderKind,
+  offset: -1 | 1,
+): readonly UsageProviderKind[] {
+  const index = shown.indexOf(provider);
+  const neighbour = index === -1 ? undefined : shown[index + offset];
+  if (neighbour === undefined) return order;
+  return order.map((entry) =>
+    entry === provider ? neighbour : entry === neighbour ? provider : entry,
+  );
+}
+
 export function providersWithUsage(
   totals: readonly {
     readonly provider: UsageProviderKind;

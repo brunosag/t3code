@@ -362,11 +362,15 @@ export function UsageLimitsSection({
   hiddenProviders,
   now,
   cursorPrompt,
+  ...ordering
 }: {
   readonly selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null;
   readonly hiddenProviders: ReadonlySet<UsageProviderKind>;
   readonly now: number;
   readonly cursorPrompt?: ReactNode;
+  readonly providerOrder: readonly UsageProviderKind[];
+  readonly onProviderOrderChange: (order: readonly UsageProviderKind[]) => void;
+  readonly onHideProvider: (provider: UsageProviderKind) => void;
 }) {
   const presentations = useAtomValue(environmentPresentations.presentationsWithProvidersAtom);
   const hiddenDrivers = new Set<ServerProvider["driver"]>(
@@ -398,5 +402,12 @@ export function UsageLimitsSection({
       ];
     }),
   );
-  return <UsageLimitsPooled presentations={selected} now={now} cursorPrompt={cursorPrompt} />;
+  return (
+    <UsageLimitsPooled
+      presentations={selected}
+      now={now}
+      cursorPrompt={cursorPrompt}
+      {...ordering}
+    />
+  );
 }
