@@ -85,6 +85,8 @@ Where upstream's lines elsewhere in this file differ, the user's global rules wi
 
 Run the pre-push check as `vp run check:changed origin/bsag`: its default base, `origin/main`, diffs the whole fork and runs past ten minutes.
 
+The desktop app stages only the server dependencies matched in `scripts/lib/cli-external-packages.ts`, never their peer dependencies. When an upstream merge bumps one of those packages (such as `@cursor/sdk`) and a dependency becomes a peer, declare it in `apps/server/package.json`, or the AppImage backend crash-loops on a missing module and the app never opens (zod, 2026-10-27).
+
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
