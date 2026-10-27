@@ -663,6 +663,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     expandedWorkGroupIds,
     isWorking,
     runlessWorkActive,
+    awaitingUser: awaitingUser !== null,
     activeTurnStartedAt,
     turnDiffSummaries,
     supportsConversationRollback,

@@ -863,6 +863,47 @@ describe("deriveMessagesTimelineRows", () => {
     expect(assistantRows[1]?.showAssistantCopyButton).toBe(true);
   });
 
+  it("offers read aloud on the running turn's latest message while a question waits", () => {
+    const assistantMessage = (id: string, second: number, streaming = false) => ({
+      id: `${id}-entry`,
+      kind: "message" as const,
+      createdAt: `2026-01-01T00:00:${second}Z`,
+      message: {
+        id: id as never,
+        role: "assistant" as const,
+        text: `${id} text`,
+        runId: "turn-1" as never,
+        createdAt: `2026-01-01T00:00:${second}Z`,
+        updatedAt: `2026-01-01T00:00:${second}Z`,
+        streaming,
+      },
+    });
+    const readAloudIds = (awaitingUser: boolean, streaming = false) =>
+      deriveMessagesTimelineRows({
+        timelineEntries: [
+          assistantMessage("assistant-first", 10),
+          assistantMessage("assistant-question", 20, streaming),
+        ],
+        latestRun: {
+          runId: "turn-1" as never,
+          status: "running",
+          startedAt: "2026-01-01T00:00:05Z",
+          completedAt: null,
+        },
+        isWorking: true,
+        awaitingUser,
+        activeTurnStartedAt: "2026-01-01T00:00:05Z",
+        turnDiffSummaries: [],
+        supportsConversationRollback: false,
+      }).flatMap((row) =>
+        row.kind === "message" && row.readAloudWhileAwaiting ? [row.message.id] : [],
+      );
+
+    expect(readAloudIds(true)).toEqual(["assistant-question"]);
+    expect(readAloudIds(false)).toEqual([]);
+    expect(readAloudIds(true, true)).toEqual([]);
+  });
+
   it("projects assistant diffs and rewinds the first visible run to thread start after a rewind", () => {
     const assistantTurnDiffSummary = {
       runId: "turn-1" as never,

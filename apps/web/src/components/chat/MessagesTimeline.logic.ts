@@ -604,6 +604,8 @@ type MessagesTimelineRowContent =
       showAssistantMeta: boolean;
       showAssistantCopyButton: boolean;
       assistantCopyStreaming: boolean;
+      /** The run's latest finished message while a question or approval pauses it. */
+      readAloudWhileAwaiting?: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
     }
@@ -1389,6 +1391,8 @@ export function deriveMessagesTimelineRows(input: {
   isWorking: boolean;
   /** Native subagent work has no app run; runless entries form the live response. */
   runlessWorkActive?: boolean;
+  /** A pending question or approval, which pauses the active run. */
+  awaitingUser?: boolean;
   activeTurnStartedAt?: string | null;
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   supportsConversationRollback: boolean;
@@ -1995,6 +1999,12 @@ export function deriveMessagesTimelineRows(input: {
       terminalAssistantMessageIds.has(timelineEntry.message.id) &&
       !assistantResponseStillInProgress;
 
+    const readAloudWhileAwaiting =
+      input.awaitingUser === true &&
+      assistantResponseStillInProgress &&
+      !timelineEntry.message.streaming &&
+      terminalAssistantMessageIds.has(timelineEntry.message.id);
+
     nextRows.push({
       kind: "message",
       id: timelineEntry.id,
@@ -2007,6 +2017,7 @@ export function deriveMessagesTimelineRows(input: {
       showAssistantMeta,
       showAssistantCopyButton: showAssistantMeta,
       assistantCopyStreaming: timelineEntry.message.streaming || assistantResponseStillInProgress,
+      ...(readAloudWhileAwaiting ? { readAloudWhileAwaiting } : {}),
       assistantTurnDiffSummary:
         timelineEntry.message.role === "assistant"
           ? turnDiffSummaryByAssistantMessageId.get(timelineEntry.message.id)
@@ -2452,6 +2463,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.showAssistantMeta === bm.showAssistantMeta &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&
+        a.readAloudWhileAwaiting === bm.readAloudWhileAwaiting &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
         a.revertTurnCount === bm.revertTurnCount
       );

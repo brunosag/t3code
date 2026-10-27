@@ -30,7 +30,7 @@ Test fixtures on this machine:
 - **One-time scheduled tasks:** a `once` schedule runs at a single `runAt` time, picked in the client's time zone, on web, mobile and `schedule_task`. A successful run deletes the task; a failed one stays with its error. Every schedule type runs a missed run late, once, instead of skipping it.
 - **Scheduled task models:** updating a task through `schedule_task` with `scheduledTaskId` takes a `delegate_task`-style `target`, so agents can move a task to another provider, model or options; scheduled task summaries include the model.
 - **Fast Mode switch:** the server can disable Fast Mode, including saved selections and delegated tasks.
-- **Read aloud:** web and desktop synthesize assistant messages on their environment, with a player above the composer. Guest transcripts have no speech controls.
+- **Read aloud:** web and desktop synthesize assistant messages on their environment, with a player above the composer. A running turn's latest message can be read while a question or approval waits on the user. Guest transcripts have no speech controls.
 - **Subagent effort labels:** a provider-native subagent shows an effort only when one was chosen or reported, not the model's catalog default.
 - **Theme editor:** the role spotlight pauses while a color picker is open, so a color is judged against the unobscured app.
 - **Project group names:** a title every grouped project shares names the group, even when it equals the repository name.
