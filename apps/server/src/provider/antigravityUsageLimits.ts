@@ -128,14 +128,14 @@ function summaryWindows(summary: typeof Summary.Type) {
 function modelWindows(models: typeof Models.Type) {
   const windows = new Map<string, ServerProviderUsageWindow>();
   for (const [modelId, model] of Object.entries(models.models)) {
-    // Google also lists autocomplete models (tab_*, chat_*) whose quotas are not Gemini's.
-    const family = modelId.startsWith("gemini-")
-      ? "Gemini"
-      : model.modelProvider === "MODEL_PROVIDER_ANTHROPIC" || modelId.startsWith("claude-")
-        ? "Claude"
-        : model.modelProvider === "MODEL_PROVIDER_OPENAI" || modelId.startsWith("gpt-")
-          ? "GPT"
-          : undefined;
+    const family =
+      model.modelProvider === "MODEL_PROVIDER_GOOGLE" || modelId.startsWith("gemini-")
+        ? "Gemini"
+        : model.modelProvider === "MODEL_PROVIDER_ANTHROPIC" || modelId.startsWith("claude-")
+          ? "Claude"
+          : model.modelProvider === "MODEL_PROVIDER_OPENAI" || modelId.startsWith("gpt-")
+            ? "GPT"
+            : undefined;
     if (!family) continue;
     for (const [suffix, quota] of [
       ["quota", model.quotaInfo],
@@ -279,14 +279,11 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
     const summary = yield* fetchWindows("retrieveUserQuotaSummary", (response) =>
       decodeSummary(response).pipe(Effect.map(summaryWindows)),
     );
-    // Some tiers' summaries list only the Claude/GPT group; Gemini then appears only per model.
-    const isGemini = (window: ServerProviderUsageWindow) => window.id.startsWith("gemini-");
-    const models = summary.some(isGemini)
-      ? []
+    const windows = summary.length
+      ? summary
       : yield* fetchWindows("fetchAvailableModels", (response) =>
           decodeModels(response).pipe(Effect.map(modelWindows)),
         );
-    const windows = summary.length ? [...summary, ...models.filter(isGemini)] : models;
     if (windows.length === 0) {
       return makeUnavailableUsageLimits({
         checkedAt,

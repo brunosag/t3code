@@ -184,43 +184,6 @@ describe("Antigravity subscription limits", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("adds Gemini model quotas when no summary reports a Gemini group", () =>
-    Effect.gen(function* () {
-      const { probe } = yield* fixture({
-        summary: { groups: [summary.groups[1]] },
-        models: {
-          models: {
-            "gemini-a": {
-              modelProvider: "MODEL_PROVIDER_GOOGLE",
-              quotaInfo: { remainingFraction: 0.7, resetTime: "2026-10-10T12:00:00Z" },
-            },
-            tab_flash_lite_preview: {
-              modelProvider: "MODEL_PROVIDER_GOOGLE",
-              quotaInfo: { remainingFraction: 0 },
-            },
-            "claude-a": {
-              modelProvider: "MODEL_PROVIDER_ANTHROPIC",
-              quotaInfo: { remainingFraction: 0.1 },
-            },
-          },
-        },
-      });
-      const limits = yield* probe;
-      expect(limits.windows.map((window) => window.id).toSorted()).toEqual([
-        "3p-5h",
-        "3p-weekly",
-        "gemini-quota",
-      ]);
-      expect(limits.windows.find((window) => window.id === "gemini-quota")).toMatchObject({
-        label: "Gemini · Reported quota",
-        resetsAt: "2026-10-10T12:00:00.000Z",
-      });
-      expect(
-        limits.windows.find((window) => window.id === "gemini-quota")?.usedPercent,
-      ).toBeCloseTo(30);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-
   it.effect("keeps one endpoint's quotas when the other fails", () =>
     Effect.gen(function* () {
       const { probe } = yield* fixture({
