@@ -3354,7 +3354,6 @@ export default function ChatView(props: ChatViewProps) {
                       </div>
                     </div>
                   ) : null}
-                  {isDraftHeroState ? null : <ReadAloudPlayer threadKey={routeThreadKey} />}
                   <div
                     ref={draftHeroComposerAnchorRef}
                     className="relative z-10"
@@ -3367,30 +3366,34 @@ export default function ChatView(props: ChatViewProps) {
                     <ComposerSurface.Shell
                       contextStrip={showComposerContextStrip || showComposerModelStrip}
                     >
+                      {isDraftHeroState ? null : <ReadAloudPlayer threadKey={routeThreadKey} />}
                       <ComposerSurface.Host
                         inert={queuedRunEdit.isSaving}
                         aria-busy={queuedRunEdit.isSaving}
                       >
                         <div className="relative z-10">
                           {showProviderSubagentBar ? (
-                            <ProviderSubagentBar
-                              provider={selectedProviderEntry ?? null}
-                              showInstanceBadge={
-                                selectedProviderEntry !== undefined &&
-                                shouldShowInstanceBadge(
-                                  selectedProviderEntry,
-                                  providerInstanceEntries,
-                                )
-                              }
-                              modelLabel={providerSubagentModelLabel}
-                              effortLabel={providerSubagentEffortLabel}
-                              status={providerSubagentStatus}
-                              onOpenParent={
-                                parentThreadLink
-                                  ? () => onOpenRelatedThread(parentThreadLink.threadId)
-                                  : null
-                              }
-                            />
+                            // The bar has no surface of its own; Main paints it when read aloud attaches.
+                            <ComposerSurface.Main>
+                              <ProviderSubagentBar
+                                provider={selectedProviderEntry ?? null}
+                                showInstanceBadge={
+                                  selectedProviderEntry !== undefined &&
+                                  shouldShowInstanceBadge(
+                                    selectedProviderEntry,
+                                    providerInstanceEntries,
+                                  )
+                                }
+                                modelLabel={providerSubagentModelLabel}
+                                effortLabel={providerSubagentEffortLabel}
+                                status={providerSubagentStatus}
+                                onOpenParent={
+                                  parentThreadLink
+                                    ? () => onOpenRelatedThread(parentThreadLink.threadId)
+                                    : null
+                                }
+                              />
+                            </ComposerSurface.Main>
                           ) : null}
                           {!composerMounted ? null : (
                             <ChatComposer
