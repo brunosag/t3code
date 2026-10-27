@@ -35,6 +35,7 @@ Test fixtures on this machine:
 - **Project defaults:** provider-selected repositories and owner/repository shorthand clone over SSH; explicit pasted URLs keep their transport. Settings can choose the base directory for new named projects.
 - **Background work:** Linux holds a sleep and lid-switch inhibitor while agent work remains unfinished, excluding pull-request watches. The desktop tray remains available.
 - **Installed web app names:** the server serves `manifest.webmanifest` named `T3 Code (<environment label>)`, so web apps installed from several machines stay apart on a phone.
+- **Server-served web branding:** the web client a server serves uses the black production icons and is titled plain “T3 Code”, without upstream’s “(Beta)” suffix.
 - **Installation and desktop fixes:** provider updates recognize npm ownership before native-looking layouts; Linux desktop entries match window identities. The main window can shrink to 480px wide. Development can omit Electron, reuse the last server build for lean desktop startup, open DevTools explicitly, and exit when its desktop window closes. Desktop dev origins stay out of the server’s embedded web client.
 
 ## Migration
