@@ -83,6 +83,7 @@ import {
   webhookDraftErrors,
   webhookDeliveryLabel,
   matchesScheduledTaskScope,
+  defaultOnceRunAt,
   scheduleFromDraft,
   scheduledTaskDefaultModel,
   taskToDraft,
@@ -139,6 +140,7 @@ const EMPTY_DRAFT: DraftState = {
   intervalMinutes: "15",
   timeOfDay: "09:00",
   weekdays: new Set([1, 2, 3, 4, 5]),
+  runAt: "",
   projectId: "",
   threadId: "",
   workspaceMode: "worktree",
@@ -288,6 +290,13 @@ function splitModelKey(value: string): ModelSelection | null {
 
 export function scheduleLabel(schedule: ScheduledTaskSchedule): string {
   if (schedule.type === "webhook") return "On webhook";
+  if (schedule.type === "once") {
+    const runAt = new Date(schedule.runAt).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+    return `Once, ${runAt}`;
+  }
   if (schedule.type === "interval") {
     const minutes = schedule.everyMs / 60_000;
     return Number.isInteger(minutes)
@@ -1139,7 +1148,9 @@ function ScheduledTaskEditorForm({
     label: "scheduled task upsert",
   });
   const [draft, setDraft] = useState<DraftState>(() =>
-    task ? taskToDraft(task) : { ...EMPTY_DRAFT, projectId: projects[0]?.id ?? "" },
+    task
+      ? taskToDraft(task)
+      : { ...EMPTY_DRAFT, runAt: defaultOnceRunAt(Date.now()), projectId: projects[0]?.id ?? "" },
   );
   const submissionPending = useRef(false);
   const editingTaskMissing =
@@ -1209,6 +1220,10 @@ function ScheduledTaskEditorForm({
     const parsedFilters = parseWebhookFilterDrafts(draft.filters);
     if (draft.scheduleMode === "webhook" && "error" in parsedFilters) {
       reportFailure("Invalid filter", parsedFilters.error);
+      return;
+    }
+    if (draft.scheduleMode === "once" && !(Date.parse(draft.runAt) > Date.now())) {
+      reportFailure("Pick a later time", "A one-time task needs a date and time in the future.");
       return;
     }
     const schedule = scheduleFromDraft(draft);
@@ -1287,7 +1302,8 @@ function ScheduledTaskEditorForm({
       <DialogHeader>
         <DialogTitle>{draft.editingId ? "Edit task" : "New task"}</DialogTitle>
         <DialogDescription>
-          Run a prompt automatically on an interval, at a fixed time, or when a webhook is called.
+          Run a prompt automatically once at a set time, on a recurring schedule, or when a webhook
+          is called.
         </DialogDescription>
       </DialogHeader>
 
@@ -1510,7 +1526,12 @@ function ScheduledTaskEditorForm({
                 value={[draft.scheduleMode]}
                 onValueChange={(values) => {
                   const mode = values[0] as ScheduleMode | undefined;
-                  if (mode === "fixed" || mode === "interval" || mode === "webhook")
+                  if (
+                    mode === "fixed" ||
+                    mode === "once" ||
+                    mode === "interval" ||
+                    mode === "webhook"
+                  )
                     setDraft((current) => ({
                       ...current,
                       scheduleMode: mode,
@@ -1522,6 +1543,7 @@ function ScheduledTaskEditorForm({
                 }}
               >
                 <Toggle value="fixed">At a time</Toggle>
+                <Toggle value="once">Once</Toggle>
                 <Toggle value="interval">Every interval</Toggle>
                 <Toggle value="webhook">On webhook</Toggle>
               </ToggleGroup>
@@ -1696,6 +1718,23 @@ function ScheduledTaskEditorForm({
                     </Field>
                   </div>
                 ) : null}
+              </div>
+            ) : draft.scheduleMode === "once" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Label htmlFor="scheduled-task-run-at">Run on</Label>
+                <Input
+                  type="datetime-local"
+                  id="scheduled-task-run-at"
+                  nativeInput
+                  className="w-56"
+                  value={draft.runAt}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, runAt: event.target.value }))
+                  }
+                />
+                <span className="text-xs text-muted-foreground">
+                  The task is deleted after it runs.
+                </span>
               </div>
             ) : draft.scheduleMode === "fixed" ? (
               <div className="flex flex-wrap items-center gap-3">

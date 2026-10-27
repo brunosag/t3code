@@ -51,9 +51,11 @@ export function scheduledTaskDefaultModel(
 }
 
 export type ScheduleDraft = {
-  readonly mode: "fixed_time" | "interval" | "webhook";
+  readonly mode: "fixed_time" | "once" | "interval" | "webhook";
   readonly timeOfDay: string;
   readonly weekdays: ReadonlyArray<number>;
+  /** ISO time of a one-time run. */
+  readonly runAt: string;
   readonly intervalMinutes: string;
   readonly signature: ScheduledTaskWebhookSignature | null;
   readonly maxDeliveryAgeMinutes: string;
@@ -69,6 +71,7 @@ export const DEFAULT_SCHEDULE: ScheduleDraft = {
   mode: "fixed_time",
   timeOfDay: "09:00",
   weekdays: [1, 2, 3, 4, 5],
+  runAt: "",
   intervalMinutes: "15",
   signature: null,
   maxDeliveryAgeMinutes: "",
@@ -79,11 +82,28 @@ export const DEFAULT_SCHEDULE: ScheduleDraft = {
   savedFilters: [],
 };
 
-export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): ScheduleDraft {
+export function defaultOnceRunAt(nowMs: number): string {
+  const tomorrow = new Date(nowMs);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(9, 0, 0, 0);
+  return tomorrow.toISOString();
+}
+
+export function defaultSchedule(nowMs: number): ScheduleDraft {
+  return { ...DEFAULT_SCHEDULE, runAt: defaultOnceRunAt(nowMs) };
+}
+
+export function scheduleDraftForTask(
+  task: Pick<ScheduledTask, "schedule">,
+  nowMs: number = Date.now(),
+): ScheduleDraft {
+  const defaults = defaultSchedule(nowMs);
   switch (task.schedule.type) {
+    case "once":
+      return { ...defaults, mode: "once", runAt: task.schedule.runAt };
     case "fixed_time":
       return {
-        ...DEFAULT_SCHEDULE,
+        ...defaults,
         timeOfDay: task.schedule.timeOfDay,
         weekdays: task.schedule.weekdays?.length
           ? [...new Set(task.schedule.weekdays)].sort((a, b) => a - b)
@@ -91,13 +111,13 @@ export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): Sch
       };
     case "interval":
       return {
-        ...DEFAULT_SCHEDULE,
+        ...defaults,
         mode: "interval",
         intervalMinutes: String(Math.max(1, task.schedule.everyMs / 60_000)),
       };
     case "webhook":
       return {
-        ...DEFAULT_SCHEDULE,
+        ...defaults,
         mode: "webhook",
         signature: task.schedule.signature,
         replayKey: task.schedule.dedupe?.replayKey ?? "",
@@ -114,6 +134,10 @@ export function scheduleDraftForTask(task: Pick<ScheduledTask, "schedule">): Sch
         savedFilters: webhookFilterDrafts(task.schedule.filters),
       };
   }
+}
+
+export function hasOnceRunPassed(draft: ScheduleDraft, nowMs: number = Date.now()): boolean {
+  return draft.mode === "once" && !(Date.parse(draft.runAt) > nowMs);
 }
 
 export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSchedule | null {
@@ -161,6 +185,10 @@ export function scheduleFromDraft(draft: ScheduleDraft): ScheduledTaskUpsertSche
         ? { filters: parsedFilters.filters }
         : {}),
     };
+  }
+  if (draft.mode === "once") {
+    const runAtMs = Date.parse(draft.runAt);
+    return Number.isNaN(runAtMs) ? null : { type: "once", runAt: new Date(runAtMs).toISOString() };
   }
   if (draft.mode === "interval") {
     const minutes = Number(draft.intervalMinutes);
@@ -212,6 +240,7 @@ function draftSignature(draft: ScheduledTaskDraft): string {
     draft.schedule.mode,
     draft.schedule.timeOfDay,
     [...draft.schedule.weekdays].sort((a, b) => a - b),
+    draft.schedule.runAt,
     draft.schedule.intervalMinutes,
     draft.schedule.maxDeliveryAgeMinutes,
     draft.schedule.replayKey,
@@ -245,7 +274,7 @@ export function createDraft(
     projectId,
     modelSelection,
     modelSelectionIsExplicit: false,
-    schedule: DEFAULT_SCHEDULE,
+    schedule: defaultSchedule(Date.now()),
     workspace: "worktree",
     baseRef: "main",
     checkoutPath: "",

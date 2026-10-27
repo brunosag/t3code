@@ -45,6 +45,22 @@ describe("scheduled task schedule calculation", () => {
     expect(at("2026-10-19T22:00:00.000Z", dueAt)).toBe("2026-10-20T07:00:00.000Z");
   });
 
+  it("runs a one-time schedule only while its time is ahead", () => {
+    const schedule = { type: "once", runAt: "2026-10-28T09:00:00-03:00" } as const;
+    const next = (iso: string) => {
+      const value = nextScheduledRunAt(schedule, DateTime.makeUnsafe(iso));
+      return value === null ? null : DateTime.formatIso(value);
+    };
+    expect(next("2026-10-27T12:00:00.000Z")).toBe("2026-10-28T12:00:00.000Z");
+    expect(next("2026-10-28T12:00:00.000Z")).toBeNull();
+    expect(isSameSchedule(schedule, { type: "once", runAt: "2026-10-28T12:00:00.000Z" })).toBe(
+      true,
+    );
+    expect(isSameSchedule(schedule, { type: "once", runAt: "2026-10-28T09:00:00.000Z" })).toBe(
+      false,
+    );
+  });
+
   it("compares schedules structurally", () => {
     expect(
       isSameSchedule({ type: "interval", everyMs: 60_000 }, { type: "interval", everyMs: 60_000 }),

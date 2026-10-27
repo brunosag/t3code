@@ -325,3 +325,17 @@ it("rejects dedupe templates without a request placeholder", () => {
   expect(scheduleFromDraft({ ...draft, replayKey: "literal" })).toBeNull();
   expect(scheduleFromDraft({ ...draft, coalesceKey: "{{body.bad" })).toBeNull();
 });
+
+it("edits a one-time run in the browser's time zone and saves the same instant", () => {
+  const runAt = new Date(2026, 9, 28, 9, 30).toISOString();
+  const draft = taskToDraft({ ...legacyTask, schedule: { type: "once", runAt } });
+  expect(draft.scheduleMode).toBe("once");
+  expect(draft.runAt).toBe("2026-10-28T09:30");
+  expect(scheduleFromDraft(draft)).toEqual({ type: "once", runAt });
+  expect(scheduleFromDraft({ ...draft, runAt: "" })).toBeNull();
+});
+
+it("defaults a new one-time run to tomorrow morning", () => {
+  const draft = taskToDraft(legacyTask, new Date(2026, 11, 31, 22, 15).getTime());
+  expect(draft.runAt).toBe("2027-01-01T09:00");
+});

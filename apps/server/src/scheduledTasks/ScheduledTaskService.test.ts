@@ -464,3 +464,124 @@ it.effect("an interval run that fires late or by hand keeps its original slot", 
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
+
+it.effect("a fixed-time run missed while the server was down runs late", () =>
+  Effect.gen(function* () {
+    const now = Date.parse("2026-10-20T12:00:00.000Z");
+    yield* TestClock.setTime(now);
+    const sql = yield* SqlClient.SqlClient;
+    yield* insertRow(
+      sql,
+      {
+        id: "task:standup",
+        next: "2026-10-20T09:00:00.000Z",
+        enabled: 1,
+        status: "never",
+        scheduleJson: '{"type":"fixed_time","timeOfDay":"09:00"}',
+      },
+      "2026-10-19T09:00:00.000Z",
+    );
+    const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+            launch: () => Effect.succeed({ threadId: ThreadId.make("thread:standup") } as never),
+          }),
+          Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+            resolveNamedProjectsRoot: () => "/projects",
+          }),
+          NodeCrypto.layer,
+          Scheduler.layer,
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const waiter = yield* Stream.runHead(
+        service.subscribeList().pipe(
+          Stream.map(({ tasks }) => tasks[0]),
+          Stream.filter((task) => task?.nextRunAt !== "2026-10-20T09:00:00.000Z"),
+        ),
+      ).pipe(Effect.forkChild);
+      yield* TestClock.adjust("6 seconds");
+      const ran = Option.getOrThrow(yield* Fiber.join(waiter));
+      assert.equal(ran?.lastRunStatus, "succeeded");
+      assert.equal(ran?.runCount, 1);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
+it.effect(
+  "a one-time task is deleted after it runs and kept with its error when the run fails",
+  () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-10-27T12:00:00.000Z"));
+      const layer = ScheduledTaskService.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+              launch: (input) =>
+                input.title === "Broken"
+                  ? Effect.die(new Error("No provider is available."))
+                  : Effect.succeed({ threadId: ThreadId.make("thread:remind") } as never),
+            }),
+            Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+            Layer.mock(SecretRequests.SecretRequests)({}),
+            Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+              resolveNamedProjectsRoot: () => "/projects",
+              isScratchProject: () => Effect.succeed(false),
+            }),
+            NodeCrypto.layer,
+            Scheduler.layer,
+          ),
+        ),
+      );
+      yield* Effect.gen(function* () {
+        const service = yield* ScheduledTaskService.ScheduledTaskService;
+        const create = (title: string, runAt: string) =>
+          service.upsert({
+            title,
+            prompt: "Check the release",
+            enabled: true,
+            schedule: { type: "once", runAt },
+            projectId: ProjectId.make("project:test"),
+            workspaceStrategy: { type: "root" },
+            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+          });
+
+        const passed = yield* create("Remind", "2026-10-27T11:59:00Z").pipe(Effect.flip);
+        assert.match(passed.message, /has passed/);
+
+        const remind = yield* create("Remind", "2026-10-27T09:30:00-03:00");
+        assert.equal(remind.task.nextRunAt, "2026-10-27T12:30:00.000Z");
+        const broken = yield* create("Broken", "2026-10-27T12:30:00Z");
+
+        // Both come due while the server is asleep and run late.
+        yield* TestClock.setTime(Date.parse("2026-10-27T14:00:00.000Z"));
+        const waiter = yield* Stream.runHead(
+          service
+            .subscribeList()
+            .pipe(
+              Stream.filter(
+                ({ tasks }) => tasks.length === 1 && tasks[0]?.lastRunStatus === "failed",
+              ),
+            ),
+        ).pipe(Effect.forkChild);
+        yield* TestClock.adjust("6 seconds");
+        const [failed] = Option.getOrThrow(yield* Fiber.join(waiter)).tasks;
+        assert.equal(failed?.id, broken.task.id);
+        assert.equal(failed?.nextRunAt, null);
+        assert.match(failed?.lastRunError ?? "", /No provider is available/);
+
+        yield* service.setEnabled({ id: broken.task.id, enabled: false });
+        const reenabled = yield* service
+          .setEnabled({ id: broken.task.id, enabled: true })
+          .pipe(Effect.flip);
+        assert.match(reenabled.message, /has passed/);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);

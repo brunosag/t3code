@@ -26,6 +26,7 @@ Test fixtures on this machine:
 - **Claude thinking quotes:** web and desktop do not offer quoting on Claude thinking items; the Claude adapter also removes saved thinking citations while preserving user comments, whichever client sent them. Other providers keep their quoting behavior.
 - **Question drafts:** written answers to agent questions survive web reloads. Choosing an option moves a written answer into the thread draft.
 - **Interval schedules keep their slot:** an interval task that fires late (the machine was asleep) or is run by hand stays on the grid its previous due time set, instead of restarting the interval from when it ran. A schedule edit or re-enable still starts a new grid from that moment.
+- **One-time scheduled tasks:** a `once` schedule runs at a single `runAt` time, picked in the client's time zone, on web, mobile and `schedule_task`. A successful run deletes the task; a failed one stays with its error. Every schedule type runs a missed run late, once, instead of skipping it.
 - **Scheduled task models:** updating a task through `schedule_task` with `scheduledTaskId` takes a `delegate_task`-style `target`, so agents can move a task to another provider, model or options; scheduled task summaries include the model.
 - **Fast Mode switch:** the server can disable Fast Mode, including saved selections and delegated tasks.
 - **Read aloud:** web and desktop synthesize assistant messages on their environment, with a player above the composer. Guest transcripts have no speech controls.

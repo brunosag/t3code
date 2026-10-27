@@ -1,7 +1,6 @@
 import { MIN_SCHEDULED_TASK_INTERVAL_MS, type ScheduledTaskSchedule } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-
-const MINUTE_MS = 60_000;
+import * as Option from "effect/Option";
 
 function parseTimeOfDay(value: string): { hour: number; minute: number } | null {
   const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(value.trim());
@@ -15,6 +14,11 @@ export function nextScheduledRunAt(
   previousDueAt: DateTime.DateTime | null = null,
 ): DateTime.DateTime | null {
   if (schedule.type === "webhook") return null;
+  if (schedule.type === "once") {
+    const runAt = DateTime.make(schedule.runAt);
+    if (Option.isNone(runAt)) return null;
+    return DateTime.toEpochMillis(runAt.value) > DateTime.toEpochMillis(from) ? runAt.value : null;
+  }
   if (schedule.type === "interval") {
     // Intervals advance elapsed time, including across daylight-saving changes.
     const everyMs = Math.max(schedule.everyMs, MIN_SCHEDULED_TASK_INTERVAL_MS);
@@ -56,6 +60,9 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
     return b.type === "interval" && a.everyMs === b.everyMs;
   }
   if (a.type === "webhook") return b.type === "webhook";
+  if (a.type === "once") {
+    return b.type === "once" && Date.parse(a.runAt) === Date.parse(b.runAt);
+  }
   if (b.type !== "fixed_time") return false;
   // Compare parsed times so padded-hour edits do not reschedule pending runs.
   const aTime = parseTimeOfDay(a.timeOfDay);
@@ -67,15 +74,4 @@ export function isSameSchedule(a: ScheduledTaskSchedule, b: ScheduledTaskSchedul
     aTime.minute === bTime.minute &&
     weekdayKey(a.weekdays) === weekdayKey(b.weekdays)
   );
-}
-
-const MISSED_FIXED_TIME_GRACE_MS = 10 * MINUTE_MS;
-
-export function isMissedFixedTimeRun(
-  schedule: ScheduledTaskSchedule,
-  dueAt: DateTime.DateTime,
-  now: DateTime.DateTime,
-): boolean {
-  if (schedule.type !== "fixed_time") return false;
-  return DateTime.toEpochMillis(now) - DateTime.toEpochMillis(dueAt) > MISSED_FIXED_TIME_GRACE_MS;
 }

@@ -49,7 +49,7 @@ import * as Metrics from "../observability/Metrics.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
-import { isMissedFixedTimeRun, isSameSchedule, nextScheduledRunAt } from "./Schedule.ts";
+import { isSameSchedule, nextScheduledRunAt } from "./Schedule.ts";
 import {
   redactHeaders,
   redactQuery,
@@ -292,6 +292,9 @@ function nextRunAt(
     return null;
   }
 }
+
+const passedRunAtError = (taskId: ScheduledTaskId) =>
+  taskError("This one-time task's run time has passed. Pick a later time.", { taskId });
 
 function errorMessage(error: unknown): string {
   if (Cause.isCause(error)) return Cause.pretty(error);
@@ -680,6 +683,19 @@ export const layer = Layer.effect(
         ),
       );
 
+    // A one-time task that ran is done; deleting it keeps them from piling up.
+    const deleteFinishedRun = (id: ScheduledTaskId, startedAtIso: string) =>
+      sql`
+        DELETE FROM scheduled_tasks
+        WHERE task_id = ${id}
+          AND last_run_status = 'running'
+          AND last_run_at = ${startedAtIso}
+      `.pipe(
+        Effect.mapError((cause) =>
+          taskError("Could not delete finished schedule task.", { taskId: id, cause }),
+        ),
+      );
+
     // A failure between markRunning and markCompleted must still write a terminal record:
     // runDueTasks skips 'running' rows forever, and the dispatch may already have gone out,
     // so next_run_at must advance. Pending webhook attempts count only with their completion.
@@ -874,14 +890,19 @@ export const layer = Layer.effect(
           // startedAtIso in the guard ensures this writes only to the row this
           // run marked as running — a task deleted mid-run and recreated with
           // the same id (idempotent commandId replay) must not be stamped.
-          const completion = markCompleted({
-            id: task.id,
-            completedAtIso: completed.updatedAt,
-            nextRunAtIso: completed.nextRunAt,
-            status: lastRunStatus,
-            error: lastRunError,
-            startedAtIso,
-          });
+          const completion =
+            runSucceeded &&
+            current.schedule.type === "once" &&
+            isSameSchedule(current.schedule, active.schedule)
+              ? deleteFinishedRun(task.id, startedAtIso)
+              : markCompleted({
+                  id: task.id,
+                  completedAtIso: completed.updatedAt,
+                  nextRunAtIso: completed.nextRunAt,
+                  status: lastRunStatus,
+                  error: lastRunError,
+                  startedAtIso,
+                });
           if (webhook === undefined) yield* completion;
           else
             yield* sql
@@ -918,45 +939,16 @@ export const layer = Layer.effect(
       );
     });
 
-    const rescheduleMissedRun = Effect.fn("ScheduledTaskService.rescheduleMissedRun")(function* (
-      task: ScheduledTask,
-      now: DateTime.DateTime,
-    ) {
-      const next = nextRunAt(task, now);
-      yield* Effect.logInfo("Skipping missed schedule task run", {
-        taskId: task.id,
-        missedRunAt: task.nextRunAt,
-        rescheduledTo: next,
-      });
-      yield* sql`
-        UPDATE scheduled_tasks
-        SET next_run_at = ${next},
-            updated_at = ${iso(now)}
-        WHERE task_id = ${task.id}
-      `.pipe(
-        Effect.mapError((cause) =>
-          taskError("Could not reschedule missed schedule task run.", { taskId: task.id, cause }),
-        ),
-      );
-      yield* notifyChanged;
-    });
-
     const runDueTasks = Effect.fn("ScheduledTaskService.runDueTasks")(function* () {
       const now = yield* localNow;
       const tasks = yield* listDueTasks(now).pipe(
         Effect.mapError((cause) => taskError("Could not list schedule tasks.", { cause })),
       );
-      const due = tasks.flatMap((task) =>
-        task.nextRunAt === null ? [] : [{ task, dueAt: DateTime.makeUnsafe(task.nextRunAt) }],
-      );
+      // A run missed while the server was down or asleep runs late, once.
       yield* Effect.forEach(
-        due,
-        ({ task, dueAt }) =>
-          Effect.suspend(() =>
-            isMissedFixedTimeRun(task.schedule, dueAt, now)
-              ? rescheduleMissedRun(task, now)
-              : runTask(task, "scheduled"),
-          ).pipe(
+        tasks,
+        (task) =>
+          runTask(task, "scheduled").pipe(
             Effect.catch((cause) =>
               Effect.logWarning("Scheduled task run failed", { taskId: task.id, cause }),
             ),
@@ -1138,6 +1130,12 @@ export const layer = Layer.effect(
         existingTask !== null &&
         existingTask.enabled === input.enabled &&
         isSameSchedule(existingTask.schedule, schedule);
+      const next = scheduleUnchanged
+        ? existingTask.nextRunAt
+        : nextRunAt({ enabled: input.enabled, schedule }, now);
+      if (!scheduleUnchanged && input.enabled && schedule.type === "once" && next === null) {
+        return yield* passedRunAtError(id);
+      }
       const task: ScheduledTask = {
         id,
         title: input.title,
@@ -1154,9 +1152,7 @@ export const layer = Layer.effect(
         creationSource: input.creationSource ?? "web",
         createdAt: existingTask?.createdAt ?? iso(now),
         updatedAt: iso(now),
-        nextRunAt: scheduleUnchanged
-          ? existingTask.nextRunAt
-          : nextRunAt({ enabled: input.enabled, schedule }, now),
+        nextRunAt: next,
         lastRunAt: existingTask?.lastRunAt ?? null,
         lastRunStatus: existingTask?.lastRunStatus ?? "never",
         lastRunError: existingTask?.lastRunError ?? null,
@@ -1174,6 +1170,9 @@ export const layer = Layer.effect(
       if (existing.enabled === input.enabled) return { task: existing };
       const now = yield* localNow;
       const next = nextRunAt({ enabled: input.enabled, schedule: existing.schedule }, now);
+      if (input.enabled && existing.schedule.type === "once" && next === null) {
+        return yield* passedRunAtError(input.id);
+      }
       // RETURNING so a task deleted between the load and this UPDATE is a
       // visible not-found error, not a false success.
       const updated = yield* sql<{ task_id: string }>`

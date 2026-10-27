@@ -83,6 +83,19 @@ describe("scheduleDraftForTask", () => {
 });
 
 describe("scheduleFromDraft", () => {
+  it("round-trips a one-time run and defaults new ones to tomorrow morning", () => {
+    const runAt = "2026-10-28T12:30:00.000Z";
+    const draft = scheduleDraftForTask({ schedule: { type: "once", runAt } });
+    expect(draft.mode).toBe("once");
+    expect(scheduleFromDraft(draft)).toEqual({ type: "once", runAt });
+
+    const fresh = scheduleDraftForTask(
+      { schedule: { type: "interval", everyMs: 60_000 } },
+      new Date(2026, 11, 31, 22, 15).getTime(),
+    );
+    expect(fresh.runAt).toBe(new Date(2027, 0, 1, 9, 0).toISOString());
+  });
+
   it("rejects an empty day selection rather than silently scheduling every day", () => {
     expect(scheduleFromDraft({ ...DEFAULT_SCHEDULE, weekdays: [] })).toBeNull();
   });
