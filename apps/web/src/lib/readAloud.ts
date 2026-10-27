@@ -24,15 +24,16 @@ function describeProgress(
   const percent = event.total ? Math.round((event.completed / event.total) * 100) : null;
   switch (event.stage) {
     case "downloading-model":
-      return { label: "Downloading speech model…", percent };
+      return { label: "Downloading speech model…", percent, estimatedDuration: null };
     case "starting":
-      return { label: "Starting speech…", percent: null };
+      return { label: "Starting speech…", percent: null, estimatedDuration: null };
     case "generating":
       return {
         label: event.total
           ? `Generating speech (${event.completed + 1} of ${event.total})…`
           : "Generating speech…",
         percent: null,
+        estimatedDuration: event.estimatedDurationSeconds ?? null,
       };
   }
 }

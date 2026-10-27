@@ -7,7 +7,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import * as KokoroEngine from "./KokoroEngine.ts";
-import { KOKORO_SAMPLE_RATE } from "./kokoroText.ts";
+import { estimateSpeechSeconds, KOKORO_SAMPLE_RATE } from "./kokoroText.ts";
 import * as SpeechSynthesis from "./SpeechSynthesis.ts";
 
 const vocab = new Map(
@@ -20,6 +20,7 @@ interface FakeEngineOptions {
     ids: ReadonlyArray<number>,
   ) => Effect.Effect<void, KokoroEngine.SpeechEngineError>;
   readonly downloadProgress?: ReadonlyArray<readonly [number, number]>;
+  readonly onPhonemize?: (text: string) => void;
 }
 
 /** Phonemizes to lowercase letters and returns 100 samples per token. */
@@ -35,7 +36,11 @@ function layerFakeEngine(options: FakeEngineOptions = {}) {
           yield* options.onAcquire ?? Effect.void;
           return {
             vocab,
-            phonemize: (text) => Effect.succeed([text.toLowerCase().replace(/[^a-z ]/g, "")]),
+            phonemize: (text) =>
+              Effect.sync(() => {
+                options.onPhonemize?.(text);
+                return [text.toLowerCase().replace(/[^a-z ]/g, "")];
+              }),
             infer: (ids) =>
               (options.onInfer?.(ids) ?? Effect.void).pipe(
                 Effect.as(new Float32Array((ids.length - 2) * 100).fill(0.5)),
@@ -77,6 +82,31 @@ describe("SpeechSynthesis", () => {
       );
     }).pipe(Effect.provide(SpeechSynthesis.layer.pipe(Layer.provide(layerFakeEngine())))),
   );
+
+  it.effect("estimates the whole response once the first sentence is out", () => {
+    const phonemized: string[] = [];
+    return Effect.gen(function* () {
+      const events = yield* synthesize("Hi you. Bye now. Ok.");
+      const estimates = events.flatMap((event) =>
+        event.type === "progress" && event.stage === "generating"
+          ? [event.estimatedDurationSeconds]
+          : [],
+      );
+      // Sentences already generated count at their real length, the rest by phonemes.
+      expect(estimates).toEqual([
+        undefined,
+        700 / KOKORO_SAMPLE_RATE + estimateSpeechSeconds("bye now.") + estimateSpeechSeconds("ok."),
+        1500 / KOKORO_SAMPLE_RATE + estimateSpeechSeconds("ok."),
+      ]);
+      expect(phonemized).toEqual(["Hi you", "Bye now", "Ok"]);
+    }).pipe(
+      Effect.provide(
+        SpeechSynthesis.layer.pipe(
+          Layer.provide(layerFakeEngine({ onPhonemize: (text) => phonemized.push(text) })),
+        ),
+      ),
+    );
+  });
 
   it.effect("reports model download progress before generating", () =>
     Effect.gen(function* () {

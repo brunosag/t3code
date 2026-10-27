@@ -10,6 +10,7 @@ import * as Stream from "effect/Stream";
 import * as KokoroEngine from "./KokoroEngine.ts";
 import {
   encodeWav,
+  estimateSpeechSeconds,
   finishPhonemes,
   fitPhonemes,
   KOKORO_SAMPLE_RATE,
@@ -64,29 +65,44 @@ const make = Effect.gen(function* () {
                     onDownloadProgress: (completed, total) =>
                       emit({ type: "progress", stage: "downloading-model", completed, total }),
                   });
+                  const phonemize = (chunk: string) =>
+                    Effect.forEach(phonemeSections(chunk), (section) =>
+                      section.punctuation
+                        ? Effect.succeed(section.text)
+                        : session
+                            .phonemize(section.text, phonemeLanguage(voice))
+                            .pipe(Effect.map((lines) => lines.join(" "))),
+                    ).pipe(Effect.map((sections) => finishPhonemes(sections, voice)));
                   const chunks = splitSpeechText(text);
+                  const upcoming: string[] = [];
+                  let generatedSeconds = 0;
                   for (const [index, chunk] of chunks.entries()) {
+                    // The rest is phonemized after the first sentence ships, so it costs
+                    // no startup time; the estimate then arrives with the next progress.
+                    if (index === 1) {
+                      upcoming.push(...(yield* Effect.forEach(chunks.slice(1), phonemize)));
+                    }
                     yield* emit({
                       type: "progress",
                       stage: "generating",
                       completed: index,
                       total: chunks.length,
+                      ...(index > 0
+                        ? {
+                            estimatedDurationSeconds: upcoming.reduce(
+                              (seconds, phonemes) => seconds + estimateSpeechSeconds(phonemes),
+                              generatedSeconds,
+                            ),
+                          }
+                        : {}),
                     });
-                    const phonemes = finishPhonemes(
-                      yield* Effect.forEach(phonemeSections(chunk), (section) =>
-                        section.punctuation
-                          ? Effect.succeed(section.text)
-                          : session
-                              .phonemize(section.text, phonemeLanguage(voice))
-                              .pipe(Effect.map((lines) => lines.join(" "))),
-                      ),
-                      voice,
-                    );
+                    const phonemes = upcoming.shift() ?? (yield* phonemize(chunk));
                     const samples = concatSamples(
                       yield* Effect.forEach(fitPhonemes(phonemes, session.vocab), (piece) =>
                         session.infer(modelInputIds(piece, session.vocab)),
                       ),
                     );
+                    generatedSeconds += samples.length / KOKORO_SAMPLE_RATE;
                     // Text with nothing to pronounce, such as a lone symbol, yields no audio.
                     if (samples.length === 0) continue;
                     yield* emit({

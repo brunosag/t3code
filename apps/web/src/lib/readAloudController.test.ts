@@ -246,7 +246,7 @@ describe("ReadAloudController", () => {
     const generation = streamed();
     const { player, audios } = setup((request, nextSignal, progress, onChunk) => {
       signal = nextSignal;
-      progress({ label: "Generating speech…", percent: 50 });
+      progress({ label: "Generating speech…", percent: 50, estimatedDuration: null });
       return generation.generate(request, nextSignal, progress, onChunk);
     });
     const pending = player.start("response", { environmentId, text: "Hello.", voice: "af_heart" });
@@ -276,7 +276,7 @@ describe("ReadAloudController", () => {
     const pending = player.start("first", { environmentId, text: "First.", voice: "af_heart" });
     await player.start("second", { environmentId, text: "Second.", voice: "af_heart" });
     const secondSnapshot = player.getSnapshot("second");
-    reportFirst({ label: "Stale progress", percent: 99 });
+    reportFirst({ label: "Stale progress", percent: 99, estimatedDuration: null });
     first.emit(4);
     first.finish();
     await pending;

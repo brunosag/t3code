@@ -10,6 +10,8 @@ export interface SpeechRequest {
 export interface SpeechGenerationProgress {
   readonly label: string;
   readonly percent: number | null;
+  /** Seconds of audio the whole response is expected to take, once the host can tell. */
+  readonly estimatedDuration: number | null;
 }
 
 /** One generated piece of a response, playable while later pieces are still generating. */
@@ -227,7 +229,7 @@ export class ReadAloudController {
       position: 0,
       duration: 0,
       speed: this.speed,
-      progress: { label: "Preparing local speech…", percent: null },
+      progress: { label: "Preparing local speech…", percent: null, estimatedDuration: null },
       error: null,
     });
     const plays: Promise<void>[] = [];

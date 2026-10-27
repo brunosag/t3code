@@ -180,6 +180,14 @@ export function fitPhonemes(phonemes: string, vocab: ReadonlyMap<string, number>
   ];
 }
 
+// Measured on English voices: about 2% typical error per response, 5% at worst.
+// Calibrating from the first sentences was less accurate than this fixed rate.
+const KOKORO_SECONDS_PER_PHONEME = 0.068;
+
+export function estimateSpeechSeconds(phonemes: string): number {
+  return [...phonemes].length * KOKORO_SECONDS_PER_PHONEME;
+}
+
 /** Splits text into sentence-sized chunks so playback can start before the whole text is ready. */
 export function splitSpeechText(text: string): string[] {
   const chunks: string[] = [];

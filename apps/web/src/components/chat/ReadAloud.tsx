@@ -98,12 +98,20 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
   // Buffering still means the user asked to listen, so it offers Pause.
   const playing = state.status === "playing" || state.status === "buffering";
   const playable = !preparing && state.status !== "error";
-  // The total keeps growing until every sentence has been generated.
-  const total = state.progress ? "–:––" : formatTime(state.duration);
-  const ratio = state.duration > 0 ? Math.min(1, state.position / state.duration) : 0;
+  // While generating, the bar spans the estimated response, so new sentences don't rescale it.
+  const estimate = state.progress?.estimatedDuration ?? null;
+  const length = Math.max(state.duration, estimate ?? 0);
+  const total = !state.progress
+    ? formatTime(length)
+    : estimate === null
+      ? "–:––"
+      : `~${formatTime(length)}`;
+  const ratio = length > 0 ? Math.min(1, state.position / length) : 0;
+  const generated = length > 0 ? Math.min(1, state.duration / length) : 0;
   const seekStyle = {
     "--settings-slider-progress": `${ratio * 100}%`,
     "--settings-slider-fill-offset": `${0.5 - ratio}rem`,
+    "--settings-slider-buffered-position": `calc(${generated * 100}% + ${0.5 - generated}rem)`,
   } as CSSProperties;
 
   return (
@@ -132,7 +140,7 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
                   aria-valuetext={`${formatTime(state.position)} of ${total}`}
                   className="settings-slider min-w-0 flex-1"
                   min={0}
-                  max={state.duration || 1}
+                  max={length || 1}
                   step={0.1}
                   value={state.position}
                   disabled={state.duration === 0}

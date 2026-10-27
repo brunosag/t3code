@@ -23,6 +23,8 @@ export const SpeechSynthesisEvent = Schema.Union([
     completed: NonNegativeInt,
     /** Null when the size of the stage is unknown. */
     total: Schema.NullOr(NonNegativeInt),
+    /** Length of the whole response's audio, refined as each sentence is generated. */
+    estimatedDurationSeconds: Schema.optionalKey(Schema.Number),
   }),
   Schema.Struct({
     type: Schema.Literal("chunk"),
