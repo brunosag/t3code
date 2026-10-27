@@ -282,7 +282,6 @@ overrides:
   '@exodus/bytes>@noble/hashes': 1.8.0
   '@react-navigation/core': 7.24.0
   dbus-next>usocket: '-'
-  '@anthropic-ai/claude-agent-sdk': 0.3.276
   '@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-darwin-arm64': '-'
   '@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-darwin-x64': '-'
   '@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-arm64': '-'
@@ -347,7 +346,6 @@ packageExtensionsChecksum: sha256-EowbsmlBFaoO0Ypufw901RnvdyjKG5dcdk2FRbc7Dr0=
 pnpmfileChecksum: sha256-STsbxG7+RxOFI611PrDEj1TonJgqKKllY9hYCFMLYiU=
 
 patchedDependencies:
-  '@anthropic-ai/claude-agent-sdk@0.3.276': 9837f7b30370bab863010af420223f665a3711ddebcaf1602762a542c7a21b89
   '@clerk/expo-native-components@0.4.0': 7a808b92da8460750b85818552e13be3fb73d111691c7db76965970351e124e4
   '@effect/vitest@4.0.5': 2731c9c3761c595f25ddc625a7d61ca376b389d5b3049ecb837c8940f21cfa02
   '@expo/fingerprint@0.21.5': 8fba80d6bbce46c72de427fe8c7907462d262a0bfe50c6b2b7ee9c4e0c61e5e1
@@ -829,8 +827,8 @@ importers:
   apps/server:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
-        specifier: 0.3.276
-        version: 0.3.276(patch_hash=9837f7b30370bab863010af420223f665a3711ddebcaf1602762a542c7a21b89)(@anthropic-ai/sdk@0.93.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.29.0(supports-color@8.1.1)(zod@4.6.5))(zod@4.6.5)
+        specifier: ^0.3.276
+        version: 0.3.276(@anthropic-ai/sdk@0.93.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.29.0(supports-color@8.1.1)(zod@4.6.5))(zod@4.6.5)
       '@cursor/sdk':
         specifier: 1.0.35
         version: 1.0.35
@@ -12375,7 +12373,7 @@ snapshots:
       '@types/react': 19.3.0
       react-devtools-core: 6.1.5(bufferutil@4.1.0)(utf-8-validate@6.0.6)
 
-  '@anthropic-ai/claude-agent-sdk@0.3.276(patch_hash=9837f7b30370bab863010af420223f665a3711ddebcaf1602762a542c7a21b89)(@anthropic-ai/sdk@0.93.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.29.0(supports-color@8.1.1)(zod@4.6.5))(zod@4.6.5)':
+  '@anthropic-ai/claude-agent-sdk@0.3.276(@anthropic-ai/sdk@0.93.0(zod@4.6.5))(@modelcontextprotocol/sdk@1.29.0(supports-color@8.1.1)(zod@4.6.5))(zod@4.6.5)':
     dependencies:
       '@anthropic-ai/sdk': 0.93.0(zod@4.6.5)
       '@modelcontextprotocol/sdk': 1.29.0(supports-color@8.1.1)(zod@4.6.5)

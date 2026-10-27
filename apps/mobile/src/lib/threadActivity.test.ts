@@ -23,10 +23,6 @@ import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  workEntryRowLabel,
-  restorePendingUserInputAnswer,
-  carryDisplacedCustomAnswerIntoPrompt,
-  isContextHandoffActivityGroup,
   buildThreadFeed,
   threadFeedCompactionLabels,
   createThreadFeedCache,
@@ -1576,47 +1572,6 @@ it.each(["provider_error", "usage_limit"] as const)(
     });
   },
 );
-
-describe("displaced question text", () => {
-  it.each([
-    ["", "  Answer  ", "Answer"],
-    ["Existing draft  ", " Answer ", "Existing draft\n\nAnswer"],
-    ["  ", "Answer", "Answer"],
-    ["Existing draft  ", " \n", "Existing draft  "],
-    ["Existing draft", undefined, "Existing draft"],
-  ])("keeps the main draft when moving %j / %j", (prompt, answer, expected) => {
-    expect(carryDisplacedCustomAnswerIntoPrompt(prompt, answer)).toBe(expected);
-  });
-});
-
-describe("persisted question text", () => {
-  it("restores written answers and respects an explicitly cleared answer", () => {
-    expect(restorePendingUserInputAnswer(undefined, "My answer")).toEqual({
-      customAnswer: "My answer",
-    });
-    expect(restorePendingUserInputAnswer({ customAnswer: "" }, "Old answer")).toEqual({
-      customAnswer: "",
-    });
-    const question = {
-      id: "q",
-      header: "Scope",
-      question: "Choose",
-      multiSelect: false,
-      options: [{ label: "Web", description: "Web" }],
-    };
-    expect(
-      togglePendingUserInputOptionSelection(
-        question,
-        restorePendingUserInputAnswer(undefined, "My answer"),
-        "Web",
-      ),
-    ).toEqual({ customAnswer: "", selectedOptionValues: ["Web"] });
-    expect(togglePendingUserInputOptionSelection(question, { customAnswer: "" }, "Web")).toEqual({
-      customAnswer: "",
-      selectedOptionValues: ["Web"],
-    });
-  });
-});
 
 describe("streamed feed updates", () => {
   const runs = [RunId.make("run-1"), RunId.make("run-2"), RunId.make("run-3")] as const;

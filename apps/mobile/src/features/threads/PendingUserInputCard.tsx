@@ -240,13 +240,13 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                         "min-h-12 w-full rounded-2xl border px-3.5 py-3",
                         selected ? "border-primary bg-primary/10" : "border-border bg-input",
                       )}
-                      onPress={() => {
+                      onPress={() =>
                         props.onSelectOption(
                           props.pendingUserInput.requestId,
                           question,
                           optionValue,
-                        );
-                      }}
+                        )
+                      }
                     >
                       <View className="min-w-0 flex-1 gap-0.5">
                         <Text

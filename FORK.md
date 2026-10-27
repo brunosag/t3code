@@ -4,18 +4,19 @@ This fork follows upstream's V2 orchestrator. Its Pi provider is upstream's, wit
 
 ## Retained changes
 
-- **Claude thinking quotes:** web and desktop do not offer quoting on Claude thinking items; the Claude adapter also removes saved thinking citations while preserving user comments, including sends from mobile. Other providers keep their quoting behavior.
-- **Question drafts:** written answers to agent questions survive web reloads and mobile app restarts. Choosing an option moves a written answer into the thread draft on web and mobile.
-- **Git preferences:** automatic, manual, or disabled pull-request actions, plus confirmation before pushing to the default branch, are shared across clients and project overrides.
-- **Claude history:** the SDK 0.3.276 patch rewrites internal deferred tool references when forking a session. The real SDK fork regression test covers repeated forks and external references. Healthy Claude skill changes invalidate cached workspace inventories so clients rescan them.
+- **Claude thinking quotes:** web and desktop do not offer quoting on Claude thinking items; the Claude adapter also removes saved thinking citations while preserving user comments, whichever client sent them. Other providers keep their quoting behavior.
+- **Question drafts:** written answers to agent questions survive web reloads. Choosing an option moves a written answer into the thread draft.
 - **Interval schedules keep their slot:** an interval task that fires late (the machine was asleep) or is run by hand stays on the grid its previous due time set, instead of restarting the interval from when it ran. A schedule edit or re-enable still starts a new grid from that moment.
 - **Scheduled task models:** `update_scheduled_task` takes a `delegate_task`-style `target`, so agents can move a task to another provider, model or options; scheduled task summaries include the model.
 - **Fast Mode switch:** the server can disable Fast Mode, including saved selections and delegated tasks.
 - **Read aloud:** web and desktop synthesize assistant messages on their environment, with a player above the composer. Guest transcripts have no speech controls.
+- **Subagent effort labels:** a provider-native subagent shows an effort only when one was chosen or reported, not the model's catalog default.
+- **Theme editor:** the role spotlight pauses while a color picker is open, so a color is judged against the unobscured app.
+- **Project group names:** a title every grouped project shares names the group, even when it equals the repository name.
 - **Project defaults:** provider-selected repositories and owner/repository shorthand clone over SSH; explicit pasted URLs keep their transport. Settings can choose the base directory for new named projects.
 - **Background work:** Linux holds a sleep and lid-switch inhibitor while agent work remains unfinished, excluding pull-request watches. The desktop tray remains available.
 - **Installed web app names:** the server serves `manifest.webmanifest` named `T3 Code (<environment label>)`, so web apps installed from several machines stay apart on a phone.
-- **Installation and desktop fixes:** provider updates recognize npm ownership before native-looking layouts; Linux desktop entries match window identities. Development can omit Electron, reuse the last server build for lean desktop startup, open DevTools explicitly, and exit when its desktop window closes. Desktop dev origins stay out of the server’s embedded web client.
+- **Installation and desktop fixes:** provider updates recognize npm ownership before native-looking layouts; Linux desktop entries match window identities. The main window can shrink to 480px wide. Development can omit Electron, reuse the last server build for lean desktop startup, open DevTools explicitly, and exit when its desktop window closes. Desktop dev origins stay out of the server’s embedded web client.
 
 ## Migration
 

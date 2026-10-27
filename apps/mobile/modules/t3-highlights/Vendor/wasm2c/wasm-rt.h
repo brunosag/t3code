@@ -590,9 +590,9 @@ typedef struct {
 #define WASM_RT_SETJMP_TRAP_SETBUF(buf) sigsetjmp(buf, 1)
 
 /**
- * On macOS XNU, there is a bug where nested `sigsetjmp` and `siglongjmp`
- * across threads that have an allocated alternate signal stack (`SS_ONSTACK`)
- * will erroneously cause the kernel to preserve the `SS_ONSTACK` flag in the
+ * On macOS XNU, there is a bug where nested `sigsetjmp` and `siglongjmp` 
+ * across threads that have an allocated alternate signal stack (`SS_ONSTACK`) 
+ * will erroneously cause the kernel to preserve the `SS_ONSTACK` flag in the 
  * thread state
  *
  * See: https://github.com/WebAssembly/wabt/issues/2654

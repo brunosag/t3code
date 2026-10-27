@@ -96,7 +96,6 @@ import { resolveAddProjectEnvironment } from "./AddProjectScreen.logic";
 import {
   createNewTaskDraft,
   setComposerDraftText,
-  updateComposerDraftSettings,
   waitForComposerDraftsLoaded,
 } from "../../state/use-composer-drafts";
 
@@ -685,17 +684,6 @@ async function draftWithPrompt(
   return draftId;
 }
 
-// A fresh scaffold has only its first commit, so its first thread starts in
-// the checkout rather than the environment's worktree default.
-async function draftInCheckout(environmentId: EnvironmentId, projectId: ProjectId) {
-  await waitForComposerDraftsLoaded();
-  const draftId = createNewTaskDraft({ environmentId, projectId });
-  updateComposerDraftSettings(draftId, {
-    workspaceSelection: { mode: "local", branch: null, worktreePath: null },
-  });
-  return draftId;
-}
-
 function useCreateProject(environment: EnvironmentOption | null) {
   const navigation = useNavigation();
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
@@ -1083,10 +1071,6 @@ export function AddProjectNewScreen(props: { readonly environmentId?: string | s
       environmentId: environment.environmentId,
       projectId,
       title: trimmedName,
-      ...(await draftInCheckout(environment.environmentId, projectId).then(
-        (draftId) => ({ draftId }),
-        () => ({}),
-      )),
     });
   };
 

@@ -4,7 +4,6 @@ import { defineConfig, normalizePath } from "vite-plus";
 import "vite-plus/test/config";
 
 const reactTests = [
-  "src/state/use-selected-thread-requests.test.tsx",
   "src/lib/useMediaVideoPlayback.test.tsx",
   "src/features/pull-requests/usePullRequestEnvironmentFallback.test.tsx",
   "src/lib/filePreview.test.ts",

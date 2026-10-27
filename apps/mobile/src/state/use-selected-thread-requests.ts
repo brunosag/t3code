@@ -6,11 +6,8 @@ import {
   questionAttachmentPreparationAtom,
 } from "./question-attachments";
 import {
-  composerDraftsAtom,
-  getComposerDraftSnapshot,
   clearComposerDraft,
-  setComposerDraftText,
-  setQuestionDraftText,
+  composerDraftsAtom,
   questionAttachmentDraftsAtom,
 } from "./use-composer-drafts";
 import {
@@ -31,11 +28,9 @@ import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { Atom } from "effect/reactivity";
 
 import { threadEnvironment } from "../state/threads";
-import { scopedThreadKey, scopedRequestKey } from "../lib/scopedEntities";
+import { scopedRequestKey } from "../lib/scopedEntities";
 import {
   buildPendingUserInputAnswers,
-  carryDisplacedCustomAnswerIntoPrompt,
-  restorePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
@@ -178,13 +173,6 @@ export function useSelectedThreadRequests() {
               question.id,
             );
             const attachments = attachmentDrafts[key]?.attachments ?? [];
-            const storedAnswer =
-              userInputDraftsByRequestKey[
-                scopedRequestKey(
-                  selectedThreadShell.environmentId,
-                  activePendingUserInput.requestId,
-                )
-              ]?.[question.id];
             const uploadInput = {
               environmentId: selectedThreadShell.environmentId,
               attachments,
@@ -194,10 +182,12 @@ export function useSelectedThreadRequests() {
             return [
               question.id,
               {
-                // The question's own composer draft is the durable copy of a
-                // typed answer, so an app restart restores it. The in-memory
-                // draft outranks it, which keeps a cleared answer cleared.
-                ...restorePendingUserInputAnswer(storedAnswer, attachmentDrafts[key]?.text),
+                ...userInputDraftsByRequestKey[
+                  scopedRequestKey(
+                    selectedThreadShell.environmentId,
+                    activePendingUserInput.requestId,
+                  )
+                ]?.[question.id],
                 attachmentCount: attachments.length,
                 attachmentsBlocked:
                   (attachments.length > 0 &&
@@ -225,23 +215,6 @@ export function useSelectedThreadRequests() {
       }
 
       const requestKey = scopedRequestKey(selectedThreadShell.environmentId, requestId);
-      const questionKey = questionAttachmentDraftKey(
-        selectedThreadShell.environmentId,
-        selectedThreadShell.id,
-        requestId,
-        question.id,
-      );
-      // Read at tap time so a second tap cannot move an answer twice before rerendering.
-      const displacedAnswer = restorePendingUserInputAnswer(
-        appAtomRegistry.get(userInputDraftsByRequestKeyAtom)[requestKey]?.[question.id],
-        getComposerDraftSnapshot(questionKey).text,
-      ).customAnswer;
-      const threadKey = scopedThreadKey(selectedThreadShell.environmentId, selectedThreadShell.id);
-      const currentPrompt = getComposerDraftSnapshot(threadKey).text;
-      const nextPrompt = carryDisplacedCustomAnswerIntoPrompt(currentPrompt, displacedAnswer);
-      if (nextPrompt !== currentPrompt) setComposerDraftText(threadKey, nextPrompt);
-      // Keep the question's attachments while clearing the durable text copy.
-      setQuestionDraftText(questionKey, "");
       setUserInputDraftOption(requestKey, question, value);
     },
     [selectedThreadShell],
@@ -258,17 +231,6 @@ export function useSelectedThreadRequests() {
 
       const requestKey = scopedRequestKey(selectedThreadShell.environmentId, requestId);
       setUserInputDraftCustomAnswer(requestKey, question, customAnswer);
-      // Mirror the text into the question's own composer draft. The drafts atom
-      // above is memory-only, so this is what survives an app restart.
-      setQuestionDraftText(
-        questionAttachmentDraftKey(
-          selectedThreadShell.environmentId,
-          selectedThreadShell.id,
-          requestId,
-          questionId,
-        ),
-        customAnswer,
-      );
     },
     [activePendingUserInputs, selectedThreadShell],
   );

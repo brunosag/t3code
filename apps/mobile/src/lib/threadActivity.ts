@@ -1939,14 +1939,6 @@ function liveToolActivitySummary(activity: ThreadFeedActivity, presentTense: boo
   return activity.detail ?? activity.summary;
 }
 
-export function restorePendingUserInputAnswer(
-  answer: PendingUserInputDraftAnswer | undefined,
-  persistedCustomAnswer: string | undefined,
-): PendingUserInputDraftAnswer {
-  if (answer?.customAnswer !== undefined || !persistedCustomAnswer) return answer ?? {};
-  return { ...answer, customAnswer: persistedCustomAnswer };
-}
-
 export function setPendingUserInputCustomAnswer(
   question: ThreadUserInputQuestion,
   draft: PendingUserInputDraftAnswer | undefined,
@@ -1982,17 +1974,6 @@ export function isPendingUserInputOptionSelected(
       resolvedOptionValue,
     )
   );
-}
-
-/** Preserve a displaced written answer after the main thread draft's existing text. */
-export function carryDisplacedCustomAnswerIntoPrompt(
-  prompt: string,
-  customAnswer: string | undefined,
-): string {
-  const displaced = customAnswer?.trim() ?? "";
-  if (displaced.length === 0) return prompt;
-  if (prompt.trim().length === 0) return displaced;
-  return `${prompt.trimEnd()}\n\n${displaced}`;
 }
 
 export function togglePendingUserInputOptionSelection(

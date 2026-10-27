@@ -428,16 +428,6 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       onValueChange={(value) => write({ enableAgentBrowserAccess: value })}
                     />
                   </SettingsSection>
-                  <SettingsSection title="Fast Mode">
-                    <SettingsSwitchRow
-                      icon="bolt.circle"
-                      label="Disable Fast Mode"
-                      subtitle="Hide Fast Mode from every thread, subagent, and delegated task."
-                      value={uniform("disableFastMode")}
-                      disabled={disabledFor("disableFastMode")}
-                      onValueChange={(value) => write({ disableFastMode: value })}
-                    />
-                  </SettingsSection>
                 </>
               ) : null}
 
