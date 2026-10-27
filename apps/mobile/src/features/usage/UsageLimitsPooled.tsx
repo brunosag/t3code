@@ -14,7 +14,6 @@ import {
   type LimitAccount,
   type LimitPoolWindow,
 } from "@t3tools/shared/usageLimits";
-import { Image } from "expo-image";
 import { Fragment, type ReactNode, useId, useState } from "react";
 import { Linking, Pressable, View } from "react-native";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
@@ -41,17 +40,6 @@ function accountName(account: LimitAccount) {
   if (!account.email) return DRIVER_LABEL[account.driver] ?? String(account.driver);
   const [local = "", domain = ""] = account.email.split("@");
   return `${local[0] ?? ""}${domain[0] ?? ""}`.toUpperCase() || "Account";
-}
-
-function AccountImage({ uri, size }: { readonly uri: string; readonly size: number }) {
-  return (
-    <Image
-      source={{ uri }}
-      accessibilityIgnoresInvertColors
-      contentFit="cover"
-      style={{ width: size, height: size, borderRadius: size / 2 }}
-    />
-  );
 }
 
 // Same gap-and-tick as the Limits rows: two clipped copies of the segment leave a see-through gap.
@@ -255,12 +243,11 @@ function PoolWindowCard({
                   {index + 1}
                 </Text>
               </View>
-              {account.image ? <AccountImage uri={account.image} size={20} /> : null}
               <Text
                 numberOfLines={1}
                 className="min-w-0 flex-1 text-sm font-t3-medium text-foreground"
               >
-                {account.image && !account.displayName ? "" : accountName(account)}
+                {accountName(account)}
               </Text>
               <Text className="text-sm font-t3-medium tabular-nums text-foreground">
                 {remainingPercent(window)}%
@@ -440,6 +427,7 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
   const window = pool?.members.find((member) => member.account.key === accountKey)?.window;
   const evenPace = window ? paceRemainingPercent(window, now) : null;
   const reset = pool?.resets.find((candidate) => candidate.member.account.key === accountKey);
+  const [revealed, setRevealed] = useState(false);
   return (
     <SettingsScreen title="Account">
       <ScrollView
@@ -455,19 +443,22 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
           <>
             <View className="gap-2">
               <View className="flex-row items-center gap-2">
-                {account.image ? (
-                  <AccountImage uri={account.image} size={24} />
-                ) : (
-                  <ProviderIcon provider={account.driver} size={24} />
-                )}
+                <ProviderIcon provider={account.driver} size={24} />
                 <Text className="flex-1 text-xl font-t3-bold text-foreground">
                   {account.displayName ?? DRIVER_LABEL[account.driver] ?? account.driver}
                 </Text>
               </View>
               {account.email ? (
-                <Text selectable className="text-sm text-foreground-muted">
-                  {account.email}
-                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={revealed ? "Hide account email" : "Reveal account email"}
+                  onPress={() => setRevealed((value) => !value)}
+                  className="min-h-[44px] justify-center"
+                >
+                  <Text className="text-sm text-foreground-muted">
+                    {revealed ? account.email : "••••••@••••••"}
+                  </Text>
+                </Pressable>
               ) : null}
               {account.plan ? (
                 <Text selectable className="text-sm text-foreground-muted">

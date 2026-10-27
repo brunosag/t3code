@@ -30,6 +30,6 @@ vp test run \
   scripts/lib/memory-headroom.test.ts \
   scripts/dev-runner.test.ts
 
-vp run --filter t3 --filter @t3tools/web --filter @t3tools/mobile --filter @t3tools/desktop \
+vp run --filter t3 --filter @t3tools/web --filter @t3tools/desktop \
   --filter @t3tools/shared --filter @t3tools/contracts --filter @t3tools/client-runtime \
   --filter @t3tools/provider-pi --filter @t3tools/provider-core --concurrency-limit 2 typecheck

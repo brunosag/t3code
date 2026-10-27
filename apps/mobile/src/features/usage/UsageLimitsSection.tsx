@@ -133,10 +133,25 @@ function WindowRow(props: {
 }
 
 function AccountInstanceLabel({ value }: { readonly value: string }) {
+  const [revealed, setRevealed] = useState(false);
+  if (!value.includes("@")) {
+    return (
+      <Text className="shrink text-xs text-foreground-tertiary" numberOfLines={1}>
+        · {value}
+      </Text>
+    );
+  }
   return (
-    <Text className="shrink text-xs text-foreground-tertiary" numberOfLines={1}>
-      · {value}
-    </Text>
+    <Pressable
+      className="shrink active:opacity-60"
+      accessibilityRole="button"
+      accessibilityLabel={revealed ? "Hide account label" : "Reveal account label"}
+      onPress={() => setRevealed((current) => !current)}
+    >
+      <Text className="text-xs text-foreground-tertiary" numberOfLines={1}>
+        · {revealed ? value : "••••••@••••••"}
+      </Text>
+    </Pressable>
   );
 }
 

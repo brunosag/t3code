@@ -11,7 +11,7 @@ import {
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useRef, useState } from "react";
-import { Linking, ScrollView, TextInput, View } from "react-native";
+import { Linking, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
@@ -371,9 +371,15 @@ function ProviderAccount({
 }
 
 function ProviderAccountEmail({ email }: { readonly email: string }) {
+  const [revealed, setRevealed] = useState(false);
   return (
-    <Text selectable className="text-sm text-foreground-muted">
-      {email}
-    </Text>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={revealed ? "Hide account email" : "Reveal account email"}
+      onPress={() => setRevealed((value) => !value)}
+      className="min-h-[44px] justify-center"
+    >
+      <Text className="text-sm text-foreground-muted">{revealed ? email : "••••••@••••••"}</Text>
+    </Pressable>
   );
 }

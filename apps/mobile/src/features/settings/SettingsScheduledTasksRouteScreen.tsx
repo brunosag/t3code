@@ -72,7 +72,6 @@ import { SettingsSection } from "./components/SettingsSection";
 import { useSettingsEnvironmentFilter, type SettingsTarget } from "./settings-environment-filter";
 import {
   editDraft,
-  hasOnceRunPassed,
   scheduledTaskDefaultModel,
   scheduleFromDraft,
   type ScheduledTaskDraft as Draft,
@@ -110,15 +109,6 @@ const DAYS = [
 function describeSchedule(task: ScheduledTask): string {
   if (task.schedule.type === "webhook") return "On webhook";
   if (task.schedule.type === "interval") return formatScheduledTaskInterval(task.schedule.everyMs);
-  if (task.schedule.type === "once") {
-    const runAt = new Date(task.schedule.runAt).toLocaleString([], {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-    return `Once, ${runAt}`;
-  }
   const days = task.schedule.weekdays?.length ? repeatLabel(task.schedule.weekdays) : "Every day";
   return `${days} at ${formatTime(task.schedule.timeOfDay)}`;
 }
@@ -687,7 +677,6 @@ function TaskForm({
   });
   const submissionPending = useRef(false);
   const [timePickerOpen, setTimePickerOpen] = useState(false);
-  const [runAtPicker, setRunAtPicker] = useState<"date" | "time" | null>(null);
   const taskMissing =
     draft.task !== null &&
     tasks.data !== null &&
@@ -719,10 +708,6 @@ function TaskForm({
         ? { ...draft.schedule, signature: liveTask.schedule.signature }
         : draft.schedule,
     );
-    if (hasOnceRunPassed(draft.schedule)) {
-      Dialog.alert("Pick a later time", "A one-time task needs a date and time in the future.");
-      return;
-    }
     if (
       draft.schedule.mode === "webhook" &&
       parseMaxDeliveryAge(draft.schedule.maxDeliveryAgeMinutes) === undefined
@@ -969,14 +954,12 @@ function TaskForm({
               variant="card"
               options={[
                 { value: "fixed_time", label: "At a time" },
-                { value: "once", label: "Once" },
                 { value: "interval", label: "Interval" },
                 { value: "webhook", label: "On webhook" },
               ]}
               selected={draft.schedule.mode}
               onSelect={(mode) => {
                 setTimePickerOpen(false);
-                setRunAtPicker(null);
                 setDraft({
                   ...draft,
                   prompt:
@@ -990,12 +973,28 @@ function TaskForm({
           </View>
           {draft.schedule.mode === "fixed_time" ? (
             <>
-              <PickerRow
-                label="Time"
-                value={formatTime(draft.schedule.timeOfDay)}
-                borderTop
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Time, ${formatTime(draft.schedule.timeOfDay)}`}
                 onPress={() => setTimePickerOpen((open) => !open)}
-              />
+                className="min-h-14 flex-row items-center gap-3 border-t border-border-subtle px-4 py-3 active:opacity-70"
+              >
+                <Text textRole="body" className="text-foreground">
+                  Time
+                </Text>
+                <Text
+                  textRole="footnote"
+                  className="min-w-0 flex-1 text-right text-foreground-muted"
+                >
+                  {formatTime(draft.schedule.timeOfDay)}
+                </Text>
+                <SymbolView
+                  name="chevron.right"
+                  size={14}
+                  tintColorClassName="accent-chevron"
+                  type="monochrome"
+                />
+              </Pressable>
               {timePickerOpen ? (
                 <DateTimePicker
                   value={timePickerValue(draft.schedule.timeOfDay)}
@@ -1048,54 +1047,6 @@ function TaskForm({
                   setDraft({ ...draft, schedule: { ...draft.schedule, weekdays } });
                 }}
               />
-            </>
-          ) : draft.schedule.mode === "once" ? (
-            <>
-              <PickerRow
-                label="Date"
-                borderTop
-                value={new Date(draft.schedule.runAt).toLocaleDateString([], {
-                  weekday: "short",
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-                onPress={() => setRunAtPicker((open) => (open === "date" ? null : "date"))}
-              />
-              <PickerRow
-                label="Time"
-                borderTop
-                value={new Date(draft.schedule.runAt).toLocaleTimeString([], {
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-                onPress={() => setRunAtPicker((open) => (open === "time" ? null : "time"))}
-              />
-              {runAtPicker ? (
-                <DateTimePicker
-                  key={runAtPicker}
-                  value={new Date(draft.schedule.runAt)}
-                  mode={runAtPicker}
-                  display={Platform.OS === "ios" ? "spinner" : "default"}
-                  onDismiss={() => setRunAtPicker(null)}
-                  onValueChange={(_, selected) => {
-                    const runAt = new Date(draft.schedule.runAt);
-                    if (runAtPicker === "date") {
-                      runAt.setFullYear(
-                        selected.getFullYear(),
-                        selected.getMonth(),
-                        selected.getDate(),
-                      );
-                    } else {
-                      runAt.setHours(selected.getHours(), selected.getMinutes(), 0, 0);
-                    }
-                    setDraft({
-                      ...draft,
-                      schedule: { ...draft.schedule, runAt: runAt.toISOString() },
-                    });
-                  }}
-                />
-              ) : null}
             </>
           ) : draft.schedule.mode === "webhook" ? (
             <>
@@ -1203,10 +1154,6 @@ function TaskForm({
         {draft.schedule.mode === "fixed_time" ? (
           <Text className="px-2 text-sm text-foreground-muted">
             Time uses the environment's time zone, which may differ from your phone's.
-          </Text>
-        ) : draft.schedule.mode === "once" ? (
-          <Text className="px-2 text-sm text-foreground-muted">
-            The task is deleted after it runs.
           </Text>
         ) : null}
       </View>
