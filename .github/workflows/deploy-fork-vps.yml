@@ -113,6 +113,11 @@ jobs:
       - name: Build server package with web client
         run: vp run --filter t3 build
 
+      # The server build ships the blue development icons; releases swap in the
+      # black production set afterwards, as the desktop build does.
+      - name: Use the production web icons
+        run: node scripts/apply-web-brand-assets.ts production apps/server/dist/client
+
       - name: Pack deploy tarball
         id: pack
         run: |

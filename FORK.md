@@ -26,7 +26,7 @@ Upstream imports legacy conversation messages into V2. Continued imported thread
 
 `bsag` is the fork's base and default branch: start work from `origin/bsag`, never the stale local `main`. A push to `bsag` deploys. A deploy is done when its run succeeds and `activeVersion` in `~/local/t3-pi/runtime/service-state.json` on `vps` ends in the pushed commit's 9-character SHA; watch the run (`gh run watch`) and check that before calling it live. Put `[skip ci]` in a docs-only commit message to skip the deploy.
 
-Pushing `bsag` runs `.github/workflows/deploy-fork-vps.yml`, which tests the retained changes, builds the server with its web client, and installs the npm tarball on `vps` over Tailscale. `tutor-prod` remains a compatibility SSH alias and the Azure resource name. Secrets are `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, and `VPS_DEPLOY_KEY`; repository variables are `VPS_HOST` and `VPS_USER`.
+Pushing `bsag` runs `.github/workflows/deploy-fork-vps.yml`, which tests the retained changes, builds the server with its web client and the black production icons, and installs the npm tarball on `vps` over Tailscale. `tutor-prod` remains a compatibility SSH alias and the Azure resource name. Secrets are `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, and `VPS_DEPLOY_KEY`; repository variables are `VPS_HOST` and `VPS_USER`.
 
 The live installation is `~/local/t3-pi`; preserve its `userdata` and keep development state separate. Runtime versions use `-fork.<short-sha>`, with the core derived from the upstream release package. Installation retains previous complete runtimes and uses the stock service launcher through a Node shim at `runtime/versions/<version>/t3`. Host procedures live in `~/local/t3-pi/DEPLOYMENT.md`.
 
