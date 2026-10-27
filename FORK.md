@@ -2,6 +2,25 @@
 
 This fork follows upstream's V2 orchestrator. Its Pi provider is upstream's, without fork changes.
 
+## Working here
+
+Where this file and `AGENTS.md` differ, this file wins. Fork rules go here, not in `AGENTS.md`: upstream edits that file almost daily, so fork lines there conflict on merge.
+
+- **Surfaces.** The fork ships the server with its web client to `vps`, and a Linux desktop build. "Hit every surface" means those; mobile, macOS, Windows and the relay only when asked.
+- **Upstream process.** Pull requests, Evals, Documentation, and the bug-proof rule under Verifying (failing test first, before/after captures) do not apply. A retained change gets a line under [Retained changes](#retained-changes) and a test listed in `scripts/fork-check.sh`: that test is what tells an upstream merge broke it.
+- **Checks.** Before pushing, run `scripts/fork-check.sh`, the deploy's own gate; the pre-commit hook formats. `vp run check:changed origin/bsag` is optional (its default base, `origin/main`, diffs the whole fork and runs past ten minutes).
+- **Browser checks.** Upstream's ask-first browser rules do not apply. See a user-visible change on the deployed instance after its deploy (`~/local/t3-pi/DEPLOYMENT.md` on `vps` says how to reach it). A worktree dev server costs a ~4 GB install and a seeded database (the live one is past the 500 MiB auto-seed limit, so run `vp run migrate-dev-db`); start one only when the change cannot be seen deployed, or shipping it unseen could break the live instance.
+- **Landing.** Finished work lands on `bsag` (see [Deployment](#deployment)), not a feature branch, unless the user asked to review it first.
+
+Test fixtures on this machine:
+
+- If tests fail at collection with `Cannot read properties of undefined (reading 'config')`, use the checkout's `node_modules/.bin/vp` instead of a global `vp`; mismatched Vitest versions cause this error.
+- Bare-repository fetch fixtures that map into `refs/heads` use `--no-prune`; an inherited `fetch.prune=true` can delete the mapped branch during that fetch.
+- Subprocess identity fixtures use a real executable (`process.execPath` for Node, Bash for WSL shell fixtures) and a readiness signal. NixOS multicall coreutils may exit when copied under another name or discard a custom `argv[0]`.
+- NixOS fixtures cannot assume `/usr/bin/node` or `/bin/ps` exists; use `process.execPath` and PATH-resolved procps when emulating macOS.
+- Private IPC tests reject a `/tmp` owned by another non-root user. Set `TMPDIR` to a short, owned mode-700 directory for those tests; keep the listener’s ownership checks.
+- `vp run` prepends checkout binaries to PATH, shadowing command shims. Browser-free test runs need explicit Vitest `--exclude` arguments, including `**/*.browser.test.*` and `**/ServerBrowserPage.test.ts`.
+
 ## Retained changes
 
 - **Claude thinking quotes:** web and desktop do not offer quoting on Claude thinking items; the Claude adapter also removes saved thinking citations while preserving user comments, whichever client sent them. Other providers keep their quoting behavior.
@@ -26,7 +45,7 @@ Upstream imports legacy conversation messages into V2. Continued imported thread
 
 `bsag` is the fork's base and default branch: start work from `origin/bsag`, never the stale local `main`. A push to `bsag` deploys. A deploy is done when its run succeeds and `activeVersion` in `~/local/t3-pi/runtime/service-state.json` on `vps` ends in the pushed commit's 9-character SHA; watch the run (`gh run watch`) and check that before calling it live. Put `[skip ci]` in a docs-only commit message to skip the deploy.
 
-Pushing `bsag` runs `.github/workflows/deploy-fork-vps.yml`, which tests the retained changes, builds the server with its web client and the black production icons, and installs the npm tarball on `vps` over Tailscale. `tutor-prod` remains a compatibility SSH alias and the Azure resource name. Secrets are `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, and `VPS_DEPLOY_KEY`; repository variables are `VPS_HOST` and `VPS_USER`.
+Pushing `bsag` runs `.github/workflows/deploy-fork-vps.yml`, which tests the retained changes, builds the server with its web client and the black production icons, and installs the npm tarball on `vps` over Tailscale. `vps` is an OVHcloud VPS (since 2026-10-27), reached over Tailscale as `bsag`; `tutor-prod` remains a compatibility SSH alias. Secrets are `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, and `VPS_DEPLOY_KEY`; repository variables are `VPS_HOST` and `VPS_USER`.
 
 The live installation is `~/local/t3-pi`; preserve its `userdata` and keep development state separate. Runtime versions use `-fork.<short-sha>`, with the core derived from the upstream release package. Installation retains previous complete runtimes and uses the stock service launcher through a Node shim at `runtime/versions/<version>/t3`. Host procedures live in `~/local/t3-pi/DEPLOYMENT.md`.
 
@@ -36,6 +55,8 @@ The npm-installed server loads `@ff-labs/fff-node` through an ESM import. Upstre
 
 ## Maintenance
 
-Merge upstream into a review worktree and run focused tests plus typechecks for affected packages before updating `bsag`. In a conflict, take upstream's side unless it touches a retained change above.
+Merge upstream into a review worktree and run `scripts/fork-check.sh` before updating `bsag`. In a conflict, take upstream's side unless it touches a retained change above.
 
-Keep upstream's scheduled workflows disabled on the fork (`gh workflow disable -R brunosag/t3code <file>`; currently `release.yml`, `mobile-android-apk.yml`, `relay-preview-cleanup.yml`, and `stale-needs-more-info.yml`). Their stuck runs got the fork's Actions paused, which stopped deploys. After each upstream merge, disable any newly arrived workflow with a `schedule:` trigger. Keep `packages/provider-pi` identical to upstream. Do not restore the removed V1 adapter or permission layer.
+Only `deploy-fork-vps.yml` and `desktop-fork-linux.yml` run on the fork; every upstream workflow is disabled (`gh workflow disable -R brunosag/t3code <file>`), since their stuck runs once got the fork's Actions paused, which stopped deploys. After each upstream merge, disable any newly arrived workflow. Keep `packages/provider-pi` identical to upstream. Do not restore the removed V1 adapter or permission layer.
+
+The desktop app stages only the server dependencies matched in `scripts/lib/cli-external-packages.ts`, never their peer dependencies. When an upstream merge bumps one of those packages (such as `@cursor/sdk`) and a dependency becomes a peer, declare it in `apps/server/package.json`, or the AppImage backend crash-loops on a missing module and the app never opens (zod, 2026-10-27).

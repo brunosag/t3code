@@ -75,18 +75,6 @@ The most common defect in this repo is a change that works on the path you teste
 - **Connection modes.** Local, remote/relay, and tunnel behave differently. Multi-device and multi-environment cases are real.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the [documentation rules](#documentation) before adding anything.
 
-## VPS deployment
-
-The fork deploys to `vps` over Tailscale as `bsag` (`ssh vps` from a configured tailnet device). `tutor-prod` remains a compatibility SSH alias; the host has been an OVHcloud VPS since 2026-10-27. Repository variable `VPS_HOST` selects the private Tailscale address; see `FORK.md` and `.github/workflows/deploy-fork-vps.yml`. Preserve `~/local/t3-pi/userdata` and keep development state separate from that live install.
-
-## Fork rules
-
-Where upstream's lines elsewhere in this file differ, the user's global rules win in this fork and are their standing sign-off: verify user-visible changes in the T3 preview browser without asking, and land finished work on `bsag` (`FORK.md`, Deployment) rather than a feature branch, unless the user asked to review it first.
-
-Run the pre-push check as `vp run check:changed origin/bsag`: its default base, `origin/main`, diffs the whole fork and runs past ten minutes.
-
-The desktop app stages only the server dependencies matched in `scripts/lib/cli-external-packages.ts`, never their peer dependencies. When an upstream merge bumps one of those packages (such as `@cursor/sdk`) and a dependency becomes a peer, declare it in `apps/server/package.json`, or the AppImage backend crash-loops on a missing module and the app never opens (zod, 2026-10-27).
-
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
@@ -114,15 +102,9 @@ An empty database is a bad test. Seed your worktree's `.t3` with a copy of real 
 - While you iterate, run `vp test run <files>`. For big files, add `-t "<name>"`.
 - Use `vp run typecheck`, not `npx tsc`; it caches per package. Both run tsc-rs (`typescript` is the `@tsc-rs/typescript` drop-in).
 - Run `node -e` snippets from `apps/server` or the owning package. `effect` does not resolve from the repo root.
-- If tests fail at collection with `Cannot read properties of undefined (reading 'config')`, use the checkout's `node_modules/.bin/vp` instead of a global `vp`; mismatched Vitest versions cause this error.
 - Test meaningful logic or observable behavior. Do not render components to static markup to assert props or attributes, or add tests that merely assert callback wiring or mirror the implementation.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless I ask. CI owns the full suite.
 - Backend behavior changes ship with focused tests for that behavior.
-- Bare-repository fetch fixtures that map into `refs/heads` use `--no-prune`; an inherited `fetch.prune=true` can delete the mapped branch during that fetch.
-- Subprocess identity fixtures use a real executable (`process.execPath` for Node, Bash for WSL shell fixtures) and a readiness signal. NixOS multicall coreutils may exit when copied under another name or discard a custom `argv[0]`.
-- NixOS fixtures cannot assume `/usr/bin/node` or `/bin/ps` exists; use `process.execPath` and PATH-resolved procps when emulating macOS.
-- Private IPC tests reject a `/tmp` owned by another non-root user. Set `TMPDIR` to a short, owned mode-700 directory for those tests; keep the listener’s ownership checks.
-- `vp run` prepends checkout binaries to PATH, shadowing command shims. Browser-free test runs need explicit Vitest `--exclude` arguments, including `**/*.browser.test.*` and `**/ServerBrowserPage.test.ts`.
 - Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test first (the fewest that fail on `main` for that reason, in the module's existing test file), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get before/after captures as their proof and no test: do not add UI tests for nitpicks, and do not ask for one in review when a capture already shows it. A server-only fix with no visible surface ships the test plus a short runtime transcript.
 - The server is event-sourced, and side effects run after the command commits. In tests, drain the effect worker (`OrchestrationEffectWorkerV2.drain`) or await the specific persisted event or `Deferred` that marks the milestone. Never wait on sleeps or polling. A test that needs a timeout to pass is wrong. Concretely:
   - `it.effect` runs on a `TestClock`; `Effect.sleep` only advances through `TestClock.adjust`. `it.live` is wall-clock and only for subprocess or network fixtures.
@@ -224,3 +206,7 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 
 - Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.
+
+## Fork
+
+This is a personal fork. [FORK.md](FORK.md) overrides this file where they differ; put fork rules there, not here.
