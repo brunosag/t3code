@@ -94,7 +94,8 @@ export class DesktopEnvironment extends Context.Service<
 
 const APP_BASE_NAME = "T3 Code";
 
-function resolveDesktopAppStageLabel(input: {
+/** Names the Electron runtime, so it keeps the update channel; renaming it can move keyring state. */
+export function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;
   readonly appVersion: string;
 }): DesktopAppStageLabel {
@@ -109,12 +110,11 @@ export function resolveDesktopAppBranding(input: {
   readonly isDevelopment: boolean;
   readonly appVersion: string;
 }): DesktopAppBranding {
-  const stageLabel = resolveDesktopAppStageLabel(input);
-  return {
-    baseName: APP_BASE_NAME,
-    stageLabel,
-    displayName: `${APP_BASE_NAME} (${stageLabel})`,
-  };
+  // Fork: nightly is only this fork's update channel, so packaged builds show the stable name.
+  if (input.isDevelopment) {
+    return { baseName: APP_BASE_NAME, stageLabel: "Dev", displayName: `${APP_BASE_NAME} (Dev)` };
+  }
+  return { baseName: APP_BASE_NAME, stageLabel: "Beta", displayName: APP_BASE_NAME };
 }
 
 function normalizeDesktopArch(arch: string): DesktopRuntimeArch {

@@ -159,7 +159,7 @@ describe("DesktopPreReadyPlatform", () => {
         const identity = yield* Effect.promise(() => portalIdentity);
         assert.equal(identity.desktopName, "t3code.desktop");
         assert.include(identity.desktopEntry ?? "", "Exec=/Applications/current.AppImage %U");
-        assert.include(identity.desktopEntry ?? "", "Name=T3 Code (Beta)");
+        assert.include(identity.desktopEntry ?? "", "Name=T3 Code\n");
         // The visible class-named launcher must own the window ahead of integration copies.
         assert.include(identity.desktopEntry ?? "", "StartupWMClass=t3code");
         assert.notInclude(identity.desktopEntry ?? "", "NoDisplay=true");

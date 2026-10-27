@@ -30,11 +30,7 @@ import {
   updateReleasePackageVersions,
 } from "./update-release-package-versions.ts";
 import { applyWebBrandAssets } from "./apply-web-brand-assets.ts";
-import {
-  BRAND_ASSET_PATHS,
-  resolveWebAssetBrandForChannel,
-  type WebAssetBrand,
-} from "./lib/brand-assets.ts";
+import { BRAND_ASSET_PATHS, type WebAssetBrand } from "./lib/brand-assets.ts";
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
 import {
   findInlinedExternalPackages,
@@ -2749,19 +2745,12 @@ export function isDesktopPreviewVersion(version: string): boolean {
   return /-pr\./.test(version) || /-preview\.\d{8}\.\d+$/.test(version);
 }
 
-export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
-  return resolveWebAssetBrandForChannel(resolveDesktopUpdateChannel(version));
+// Fork: builds stay on the nightly update channel but look like the stable app.
+export function resolveDesktopWebAssetBrand(): WebAssetBrand {
+  return "production";
 }
 
-export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
-  if (resolveDesktopUpdateChannel(version) === "nightly") {
-    return {
-      macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
-      linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
-      windowsIconIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
-    };
-  }
-
+export function resolveDesktopBuildIconAssets(): DesktopBuildIconAssets {
   return {
     macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
     linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
@@ -2940,7 +2929,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       ],
       desktop: {
         // Let the class-named entry the app writes own the window, rather than integration copies.
-        entry: {},
+        // Fork: the nightly product name keeps the runtime identity; the launcher shows the stable name.
+        entry: { Name: "T3 Code" },
       },
     };
     buildConfig.deb = {
@@ -3633,7 +3623,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
   });
 
   const appVersion = options.version ?? serverPackageJson.version;
-  const iconAssets = resolveDesktopBuildIconAssets(appVersion);
+  const iconAssets = resolveDesktopBuildIconAssets();
   const commitHash = yield* resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
@@ -3720,7 +3710,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     });
   }
 
-  const webAssetBrand = resolveDesktopWebAssetBrand(appVersion);
+  const webAssetBrand = resolveDesktopWebAssetBrand();
   yield* applyWebBrandAssets(webAssetBrand, "apps/server/dist/client");
   yield* Effect.log(`[desktop-artifact] Applied ${webAssetBrand} web client branding.`);
   yield* validateBundledClientAssets(path.dirname(bundledClientEntry));

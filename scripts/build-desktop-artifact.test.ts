@@ -9,7 +9,6 @@ import { LINUX_CAPTURE_EXTRA_RESOURCES } from "./build-desktop-artifact.ts";
 import { LINUX_BROWSER_SECRET_EXTRA_RESOURCES } from "./build-desktop-artifact.ts";
 import { LINUX_FILE_EXCLUSIONS } from "./build-desktop-artifact.ts";
 import { MAC_FILE_EXCLUSIONS } from "./build-desktop-artifact.ts";
-import { bundlesWslRuntime } from "./build-desktop-artifact.ts";
 import { WINDOWS_NATIVE_ASAR_UNPACK_GLOB } from "./build-desktop-artifact.ts";
 import { WINDOWS_SERVER_EXTRA_RESOURCES } from "./build-desktop-artifact.ts";
 import { WINDOWS_SERVER_RESOURCE_SOURCE_DIR } from "./build-desktop-artifact.ts";
@@ -57,22 +56,8 @@ import {
   resolveMacPasskeySigningConfiguration,
   resolveMergedStageDependencies,
   resolveBuildOptions,
-  resolveDesktopBuildIconAssets,
-  resolveDesktopProductName,
-  resolveDesktopUpdateChannel,
-  resolveDesktopWebAssetBrand,
-  resolveResourceMonitorRustTargets,
   resolveLinuxFileExclusions,
   resolveWindowsServerAsarIgnoreGlobs,
-  resourceMonitorExecutableName,
-  resolveGitHubPublishConfig,
-  resolveMockUpdateServerPort,
-  resolveMockUpdateServerUrl,
-  resolvePackageManagerUserAgent,
-  stageLinuxIconSize,
-  stageDesktopDmgBackground,
-  stageResourceMonitor,
-  stageLinuxCaptureHelper,
   stageWslRuntimeArchive,
   ancestorNodeModulesPaths,
   copyDirectoryPreservingSymlinks,
@@ -711,6 +696,21 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
         false,
       );
+
+      // Fork: nightly builds keep their product name but show the stable launcher name.
+      const nightlyLinux = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "1.2.4-nightly.20261027.7",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      assert.equal(nightlyLinux.productName, "T3 Code (Nightly)");
+      assert.deepStrictEqual((nightlyLinux.linux as Record<string, unknown>).desktop, {
+        entry: { Name: "T3 Code" },
+      });
 
       assert.notProperty(mac, "asar");
       assert.notProperty(linux, "asar");
