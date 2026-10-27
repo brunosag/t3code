@@ -20,6 +20,7 @@ import {
   TrimmedString,
 } from "./baseSchemas.ts";
 import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
+import { UsageLimitSourceAccountProfile } from "./providerUsageLimits.ts";
 import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
 import { KeybindingShortcut } from "./keybindings.ts";
 import {
@@ -846,6 +847,7 @@ export const UsageLimitSourceConfig = Schema.Struct({
   url: TrimmedNonEmptyString,
   managementKey: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("")), secretSetting),
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  accounts: Schema.optional(Schema.Record(TrimmedNonEmptyString, UsageLimitSourceAccountProfile)),
 });
 export type UsageLimitSourceConfig = typeof UsageLimitSourceConfig.Type;
 

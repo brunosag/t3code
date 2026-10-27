@@ -5,13 +5,12 @@ import { GaugeIcon } from "lucide-react";
 import { ensureLocalApi } from "../../localApi";
 import { Button } from "../ui/button";
 import { providerClients } from "../settings/providerDriverMeta";
-import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { LimitWindows, ResetCredits } from "../usage/UsageLimits";
 import { ComposerBanner } from "./ComposerBanner";
 import type { ComposerBannerStackItem } from "./ComposerBannerStack";
 
 function accountLabel(account: UsageLimitsReport["accounts"][number]): string {
-  if (!account.instanceId) return account.label;
+  if (!account.instanceId) return account.displayName ?? account.label;
   const driver = providerClients.get(account.driver)?.label ?? String(account.driver);
   const instance =
     account.displayName?.trim() ||
@@ -22,21 +21,9 @@ function accountLabel(account: UsageLimitsReport["accounts"][number]): string {
 }
 
 function AccountSummary({ account }: { readonly account: UsageLimitsReport["accounts"][number] }) {
-  const label = accountLabel(account);
   return (
     <>
-      {label.includes("@") ? (
-        <RedactedSensitiveText
-          key={label}
-          value={label}
-          ariaLabel="Toggle account label visibility"
-          revealTooltip="Click to reveal account"
-          hideTooltip="Click to hide account"
-          className="max-w-full truncate align-bottom font-sans text-xs leading-normal"
-        />
-      ) : (
-        label
-      )}
+      {accountLabel(account)}
       {account.plan ? ` · ${account.plan}` : null}
     </>
   );

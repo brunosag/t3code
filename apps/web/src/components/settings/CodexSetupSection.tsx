@@ -41,7 +41,6 @@ import { ChatGptUsageButton } from "./ChatGptUsageButton";
 import { ChatGptAccountPicker } from "./ChatGptAccountPicker";
 import { Input } from "../ui/input";
 import { OpenAI } from "../Icons";
-import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingsRow } from "./settingsLayout";
 import { AddCodexAccountDialog } from "./AddCodexAccountDialog";
 import { getOnboardingProviderState } from "../../onboarding/providerReadiness.logic";
@@ -116,15 +115,7 @@ export function CodexSetupSection(props: CodexSetupSectionProps) {
           existingReady ? (
             props.provider?.auth.email?.trim() ? (
               <>
-                Signed in as{" "}
-                <RedactedSensitiveText
-                  value={props.provider.auth.email.trim()}
-                  ariaLabel="Toggle account email visibility"
-                  revealTooltip="Click to reveal email"
-                  hideTooltip="Click to hide email"
-                  className="break-all"
-                />
-                .
+                Signed in as <span className="break-all">{props.provider.auth.email.trim()}</span>.
               </>
             ) : (
               "Connected with your Codex CLI."
@@ -606,16 +597,7 @@ function ManagedCodexSetup({
     )
   ) : authenticated ? (
     provider?.auth.email?.trim() ? (
-      <>
-        Signed in as{" "}
-        <RedactedSensitiveText
-          value={provider.auth.email.trim()}
-          ariaLabel="Toggle account email visibility"
-          revealTooltip="Click to reveal email"
-          hideTooltip="Click to hide email"
-        />
-        .
-      </>
+      <>Signed in as {provider.auth.email.trim()}.</>
     ) : (
       "Signed in with ChatGPT."
     )
@@ -791,15 +773,7 @@ function ManagedCodexSetup({
             ) : authenticated ? (
               provider?.auth.email?.trim() ? (
                 <>
-                  Signed in as{" "}
-                  <RedactedSensitiveText
-                    value={provider.auth.email.trim()}
-                    ariaLabel="Toggle account email visibility"
-                    revealTooltip="Click to reveal email"
-                    hideTooltip="Click to hide email"
-                    className="break-all"
-                  />
-                  .
+                  Signed in as <span className="break-all">{provider.auth.email.trim()}</span>.
                 </>
               ) : (
                 "Connected to ChatGPT."

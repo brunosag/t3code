@@ -61,7 +61,6 @@ import {
 import { ProviderModelsSection } from "./ProviderModelsSection";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
-import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import { AcpSessionManagementSection } from "./AcpSessionManagementSection";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
@@ -187,15 +186,7 @@ function ProviderAuthEmail(props: { readonly email: string | undefined }) {
   const email = props.email?.trim();
   if (!email) return null;
 
-  return (
-    <RedactedSensitiveText
-      value={email}
-      ariaLabel="Toggle account email visibility"
-      revealTooltip="Click to reveal email"
-      hideTooltip="Click to hide email"
-      className="max-w-full truncate"
-    />
-  );
+  return <span className="max-w-full truncate">{email}</span>;
 }
 
 function readProviderEnvironmentVariable(

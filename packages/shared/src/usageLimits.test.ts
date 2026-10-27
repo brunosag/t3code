@@ -133,6 +133,50 @@ describe("pools", () => {
     expect(accounts[0]?.limits.windows[0]?.usedPercent).toBe(55);
   });
 
+  it("names a hub account with its saved name and image, also when an unnamed login matches it", () => {
+    const image = "data:image/webp;base64,AAAA";
+    const native = provider({
+      driver: claude,
+      instanceId: ProviderInstanceId.make("claude"),
+      auth: { status: "authenticated", email: "same@example.com" },
+      usageLimits: { checkedAt, windows: [window] },
+    });
+    const hubAccount = (id: string, email: string) => ({
+      id,
+      driver: claude,
+      email,
+      usageLimits: { checkedAt, windows: [window] },
+    });
+    const accounts = collectLimitAccounts(
+      new Map([
+        [
+          EnvironmentId.make("env-a"),
+          {
+            ...laptop,
+            serverConfig: {
+              providers: [native],
+              usageLimitSources: [
+                {
+                  ...source,
+                  accounts: [
+                    { ...hubAccount("same.json", "same@example.com"), name: "Work", image },
+                    hubAccount("other.json", "other@example.com"),
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      ]),
+    );
+    expect(
+      accounts.map(({ email, displayName, image }) => ({ email, displayName, image })),
+    ).toEqual([
+      { email: "same@example.com", displayName: "Work", image },
+      { email: "other@example.com", displayName: null, image: undefined },
+    ]);
+  });
+
   it("merges OpenCode Go limits from machines with the same API key", () => {
     const go = provider({
       driver: ProviderDriverKind.make("opencode"),
@@ -665,6 +709,7 @@ describe("pools", () => {
           email: undefined,
           plan: undefined,
           accentColor: undefined,
+          image: undefined,
           environments: [],
           sourceLabel: null,
           redeem: null,
@@ -710,6 +755,7 @@ describe("pooled account columns", () => {
     email: undefined,
     plan: undefined,
     accentColor: undefined,
+    image: undefined,
     environments: [],
     sourceLabel: "Hub",
     redeem: null,

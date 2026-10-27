@@ -156,6 +156,7 @@ export interface LimitAccount {
   readonly email: string | undefined;
   readonly plan: string | undefined;
   readonly accentColor: string | undefined;
+  readonly image: string | undefined;
   readonly environments: ReadonlyArray<{
     readonly environmentId: EnvironmentId;
     readonly label: string;
@@ -210,6 +211,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
       displayName: previous.displayName ?? next.displayName,
       plan: previous.plan ?? next.plan,
       accentColor: previous.accentColor ?? next.accentColor,
+      image: previous.image ?? next.image,
       environments,
       sourceLabel: environments.length > 0 ? null : (previous.sourceLabel ?? next.sourceLabel),
       redeem:
@@ -242,6 +244,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         email: provider.auth.email,
         plan: provider.auth.label,
         accentColor: provider.accentColor,
+        image: undefined,
         environments: [{ environmentId, label }],
         sourceLabel: null,
         redeem: { environmentId, input: { instanceId: provider.instanceId } },
@@ -261,10 +264,11 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         merge(resolveKey(account) ?? key, {
           key,
           driver: account.driver,
-          displayName: account.email ? null : account.id.replace(/\.json$/i, ""),
+          displayName: account.name ?? (account.email ? null : account.id.replace(/\.json$/i, "")),
           email: account.email,
           plan: account.plan,
           accentColor: undefined,
+          image: account.image,
           environments: [],
           sourceLabel,
           redeem: account.usageLimits.resetCredits?.nextCreditId
@@ -753,6 +757,7 @@ export function collectProviderUsageLimits(
         driver: account.driver,
         label: `${source.label} · ${account.id}`,
         sourceLabel: "CLI Proxy",
+        ...(account.name ? { displayName: account.name } : {}),
         ...(account.usageLimits.resetCredits?.nextCreditId
           ? {
               resetCreditInput: {

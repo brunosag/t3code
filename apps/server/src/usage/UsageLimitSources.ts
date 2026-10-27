@@ -71,7 +71,13 @@ export const make = Effect.gen(function* () {
       yield* Effect.logDebug("usage limit source read failed", { id, cause: accounts.failure });
       return { ...base, accounts: [], error: accounts.failure.detail };
     }
-    return { ...base, accounts: accounts.success };
+    return {
+      ...base,
+      accounts: accounts.success.map((account) => ({
+        ...account,
+        ...config.accounts?.[account.id],
+      })),
+    };
   });
 
   const publish = Effect.fn("UsageLimitSources.publish")(function* (

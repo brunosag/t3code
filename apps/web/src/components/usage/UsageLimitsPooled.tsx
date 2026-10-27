@@ -42,12 +42,12 @@ import { cn } from "../../lib/utils";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { providerClients } from "../settings/providerDriverMeta";
-import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { Button } from "../ui/button";
 import { OpenAI } from "../Icons";
 import { Alert, AlertTitle } from "../ui/alert";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { AccountChip } from "./AccountChip";
 import {
   PaceIcon,
   ResetCreditDialog,
@@ -58,33 +58,6 @@ import {
 } from "./UsageLimits";
 import { moveProvider, PROVIDER_ORDER, usageProviderForDriver } from "./usageProviders";
 
-function accountInitials(email: string): string {
-  const [local = "", domain = ""] = email.split("@");
-  return `${local[0] ?? ""}${domain[0] ?? ""}`.toUpperCase() || "?";
-}
-
-function accountHue(email: string): number {
-  let hash = 0;
-  for (let index = 0; index < email.length; index += 1) {
-    hash = (hash * 31 + email.charCodeAt(index)) | 0;
-  }
-  return Math.abs(hash) % 360;
-}
-
-function AccountChip({ email }: { readonly email: string }) {
-  const hue = accountHue(email);
-  return (
-    <span
-      role="img"
-      aria-label={`Account ${accountInitials(email)}`}
-      className="inline-flex size-4 shrink-0 items-center justify-center rounded-full text-3xs leading-none font-semibold"
-      style={{ backgroundColor: `oklch(0.85 0.08 ${hue})`, color: `oklch(0.35 0.1 ${hue})` }}
-    >
-      {accountInitials(email)}
-    </span>
-  );
-}
-
 function AccountAvatar({
   account,
   className,
@@ -92,7 +65,7 @@ function AccountAvatar({
   readonly account: LimitAccount;
   readonly className?: string;
 }) {
-  if (account.redeem) {
+  if (account.redeem && !account.image) {
     return (
       <ProviderInstanceIcon
         driverKind={account.driver}
@@ -109,7 +82,13 @@ function AccountAvatar({
       />
     );
   }
-  return account.email ? <AccountChip email={account.email} /> : null;
+  return (
+    <AccountChip
+      email={account.email}
+      image={account.image}
+      className={cn(account.image && "size-5", className)}
+    />
+  );
 }
 
 function AccountName({
@@ -119,17 +98,14 @@ function AccountName({
   readonly account: LimitAccount;
   readonly className?: string;
 }) {
-  if (account.displayName) return <span className={className}>{account.displayName}</span>;
-  if (account.email) {
-    return (
-      <span className={cn("inline-flex min-w-0 items-center", className)}>
-        <AccountChip email={account.email} />
-      </span>
-    );
-  }
+  const name =
+    account.displayName ??
+    (account.email ? null : (providerClients.get(account.driver)?.label ?? String(account.driver)));
+  if (!account.image && name) return <span className={className}>{name}</span>;
   return (
-    <span className={className}>
-      {providerClients.get(account.driver)?.label ?? String(account.driver)}
+    <span className={cn("inline-flex min-w-0 items-center gap-1.5", className)}>
+      <AccountChip email={account.email} image={account.image} />
+      {name ? <span className="min-w-0 truncate">{name}</span> : null}
     </span>
   );
 }
@@ -178,13 +154,7 @@ function SegmentPopover({
           </span>
         </span>
         {account.email ? (
-          <RedactedSensitiveText
-            value={account.email}
-            ariaLabel="Toggle account email visibility"
-            revealTooltip="Click to reveal email"
-            hideTooltip="Click to hide email"
-            className="w-fit"
-          />
+          <span className="text-2xs break-all text-muted-foreground">{account.email}</span>
         ) : null}
       </div>
       <div className="flex flex-col gap-1 border-t border-border/60 pt-2.5">
@@ -368,7 +338,7 @@ function SegmentTriggers({
             ref={segmentRef}
             type="button"
             style={{ gridColumn: index, gridRow: 1, ...paceMark?.gappedTrack }}
-            aria-label={`${account.displayName ?? (account.email ? accountInitials(account.email) : account.driver)}: ${remaining}% left${resetsIn ? `, ${resetsIn}` : ""}${timeLeft === null ? "" : `, ${timeLeft}% of the window left`}${credits ? `, ${credits} reset ${credits === 1 ? "credit" : "credits"} banked` : ""}`}
+            aria-label={`${account.displayName ?? account.email ?? account.driver}: ${remaining}% left${resetsIn ? `, ${resetsIn}` : ""}${timeLeft === null ? "" : `, ${timeLeft}% of the window left`}${credits ? `, ${credits} reset ${credits === 1 ? "credit" : "credits"} banked` : ""}`}
             className="relative h-5 min-w-0 cursor-pointer rounded-md bg-muted text-start outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background data-[popup-open]:ring-1 data-[popup-open]:ring-inset data-[popup-open]:ring-border @2xl/pool:h-8"
           />
         }

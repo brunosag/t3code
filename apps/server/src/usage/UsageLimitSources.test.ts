@@ -4,7 +4,7 @@ import { ServerConfigStreamEvent, UsageLimitSourceId } from "@t3tools/contracts"
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { HttpClient } from "effect/http";
+import { HttpClient, HttpClientResponse } from "effect/http";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -77,6 +77,68 @@ it.effect("keeps malformed source URLs encodable for config subscribers", () =>
       Layer.succeed(
         HttpClient.HttpClient,
         HttpClient.make(() => Effect.die("Unexpected network request")),
+      ),
+      NodeCrypto.layer,
+    ]),
+    Effect.scoped,
+  ),
+);
+
+it.effect("labels hub accounts with their saved name and image", () =>
+  Effect.gen(function* () {
+    const sources = yield* UsageLimitSources.make;
+    yield* sources.refresh;
+    const [snapshot] = yield* sources.current;
+    expect(
+      snapshot?.accounts.map(({ id, email, name, image }) => ({ id, email, name, image })),
+    ).toEqual([
+      {
+        id: "named.json",
+        email: "named@example.com",
+        name: "Work",
+        image: "data:image/webp;base64,AAAA",
+      },
+      { id: "plain.json", email: "plain@example.com", name: undefined, image: undefined },
+    ]);
+  }).pipe(
+    Effect.provide([
+      ServerSettings.layerTest({
+        usageLimitSources: {
+          [UsageLimitSourceId.make("hub")]: {
+            kind: "cliproxy",
+            url: "http://hub.test:8317",
+            managementKey: "management-secret",
+            enabled: true,
+            accounts: {
+              "named.json": { name: "Work", image: "data:image/webp;base64,AAAA" },
+              "missing.json": { name: "Gone" },
+            },
+          },
+        },
+      }),
+      Layer.mock(BackgroundPolicy.BackgroundPolicy)({
+        shouldRunScopeWork: () => Effect.succeed(false),
+      }),
+      Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              request.url.endsWith("/auth-files")
+                ? Response.json({
+                    files: ["named", "plain"].map((name) => ({
+                      id: `${name}.json`,
+                      auth_index: name,
+                      provider: "codex",
+                      email: `${name}@example.com`,
+                      id_token: { chatgpt_account_id: name },
+                    })),
+                  })
+                : Response.json({ status_code: 200, body: "{}" }),
+            ),
+          ),
+        ),
       ),
       NodeCrypto.layer,
     ]),

@@ -55,10 +55,25 @@ export const ProviderUsageLimitsUpdate = Schema.Struct({
 });
 export type ProviderUsageLimitsUpdate = typeof ProviderUsageLimitsUpdate.Type;
 
+// A small square avatar the client downscales before upload; the cap keeps usage updates light.
+export const USAGE_ACCOUNT_IMAGE_MAX_LENGTH = 32_000;
+const UsageAccountImage = Schema.String.check(
+  Schema.isPattern(/^data:image\/(?:png|jpeg|webp);base64,/),
+  Schema.isMaxLength(USAGE_ACCOUNT_IMAGE_MAX_LENGTH),
+);
+
+export const UsageLimitSourceAccountProfile = Schema.Struct({
+  name: Schema.optional(TrimmedNonEmptyString),
+  image: Schema.optional(UsageAccountImage),
+});
+export type UsageLimitSourceAccountProfile = typeof UsageLimitSourceAccountProfile.Type;
+
 export const UsageLimitSourceAccount = Schema.Struct({
   id: TrimmedNonEmptyString,
   driver: ProviderDriverKind,
   email: Schema.optional(TrimmedNonEmptyString),
+  name: Schema.optional(TrimmedNonEmptyString),
+  image: Schema.optional(UsageAccountImage),
   plan: Schema.optional(TrimmedNonEmptyString),
   workspaceId: Schema.optional(TrimmedNonEmptyString),
   usageLimits: ServerProviderUsageLimits,
