@@ -29,6 +29,7 @@ import * as DesktopShutdown from "./DesktopShutdown.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
+import * as DesktopStartupRecovery from "./DesktopStartupRecovery.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopTray from "./DesktopTray.ts";
 import * as DesktopRemoteUpdates from "../updates/DesktopRemoteUpdates.ts";
@@ -327,6 +328,7 @@ const startup = Effect.gen(function* () {
   yield* (yield* DesktopTray.DesktopTray).configure;
   yield* updates.configure;
   yield* DesktopRemoteUpdates.listen;
+  yield* DesktopStartupRecovery.listen;
   // The pre-ready pass already wrote the entry, so registering the scheme default
   // only spawns `xdg-mime`. Let it overlap the backend boot rather than delay it.
   yield* Effect.forkScoped(linuxUrlHandler.register);
