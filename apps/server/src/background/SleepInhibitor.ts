@@ -113,33 +113,43 @@ const holdSystemdInhibitLock = Effect.gen(function* () {
   Effect.catch((error) => Effect.logWarning("failed to hold sleep inhibitor lock", { error })),
 );
 
+/** Runs `holdLock` in the background while any thread has unfinished agent work. */
+export const watchAgentWork = Effect.fn("SleepInhibitor.watchAgentWork")(function* (
+  name: string,
+  holdLock: Effect.Effect<void, never, Scope.Scope>,
+) {
+  const threads = yield* ThreadManagement.ThreadManagementService;
+  yield* forkParked(
+    Effect.gen(function* () {
+      const snapshot = yield* threads.getShellSnapshot();
+      // Resume right after the snapshot so no run transition is missed.
+      yield* run({
+        initialThreads: snapshot.threads,
+        events: threads
+          .streamStoredEventsFrom({ afterSequence: snapshot.snapshotSequence })
+          .pipe(Stream.map((stored) => stored.event)),
+        getThreadShell: (threadId) =>
+          threads.getThreadShell(threadId).pipe(Effect.orElseSucceed(() => null)),
+        holdLock,
+      });
+    }).pipe(
+      // The lock lives in this scope, so it drops if the event stream fails.
+      Effect.scoped,
+      Effect.catch((error) => Effect.logWarning(`${name} stopped`, { error })),
+    ),
+  );
+});
+
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     if ((yield* HostProcess.Platform) !== "linux") {
       return;
     }
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const threads = yield* ThreadManagement.ThreadManagementService;
-
-    yield* forkParked(
-      Effect.gen(function* () {
-        const snapshot = yield* threads.getShellSnapshot();
-        // Resume right after the snapshot so no run transition is missed.
-        yield* run({
-          initialThreads: snapshot.threads,
-          events: threads
-            .streamStoredEventsFrom({ afterSequence: snapshot.snapshotSequence })
-            .pipe(Stream.map((stored) => stored.event)),
-          getThreadShell: (threadId) =>
-            threads.getThreadShell(threadId).pipe(Effect.orElseSucceed(() => null)),
-          holdLock: holdSystemdInhibitLock.pipe(
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          ),
-        });
-      }).pipe(
-        // The lock lives in this scope, so it drops if the event stream fails.
-        Effect.scoped,
-        Effect.catch((error) => Effect.logWarning("sleep inhibitor stopped", { error })),
+    yield* watchAgentWork(
+      "sleep inhibitor",
+      holdSystemdInhibitLock.pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       ),
     );
   }),

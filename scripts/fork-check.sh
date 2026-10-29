@@ -10,6 +10,8 @@ vp test run \
   apps/server/src/scheduledTasks/ScheduledTaskService.test.ts \
   apps/server/src/background/SleepInhibitor.test.ts \
   apps/server/src/background/SleepInhibitor.integration.test.ts \
+  apps/server/src/background/IdleRestart.test.ts \
+  apps/server/src/cli/service.test.ts \
   packages/shared/src/orchestrationV2PendingBackgroundWork.test.ts \
   apps/server/src/webManifest.test.ts \
   packages/provider-core/src/server/maintenanceResolver.test.ts \

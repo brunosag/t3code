@@ -243,17 +243,22 @@ jobs:
           "$RUNTIME/t3" --version
           printf '%s\n' "$VERSION" > "$RUNTIME/.install-complete"
 
-          # Captured before the switch: this is the version the launcher is
-          # running now, and therefore the rollback target retention keeps.
+          # Captured before the switch: the version the service was selected to
+          # run, and therefore the rollback target retention keeps.
           previous_active="$(sed -n 's/.*"activeVersion": *"\([^"]*\)".*/\1/p' "$BASE/runtime/service-state.json" | head -1)"
 
-          node "$RUNTIME/node_modules/t3/dist/bin.mjs" service update --base-dir "$BASE" --allow-downgrade < /dev/null
+          # Selects this version without restarting: the running server switches
+          # to it once agent work has been idle for two minutes (or after 12
+          # hours), so a deploy does not interrupt running agents. `t3 service
+          # restart` on the host switches now.
+          node "$RUNTIME/node_modules/t3/dist/bin.mjs" service install --base-dir "$BASE" --allow-downgrade --defer-restart < /dev/null
 
           port="$(sed -n 's/^Environment=T3CODE_PORT=//p' "$HOME/.config/systemd/user/t3code.service.d/deployment.conf" 2>/dev/null | tail -1)"
           port="${port:-8899}"
           for attempt in $(seq 1 30); do
-            if curl -fsS -o /dev/null --max-time 5 "http://127.0.0.1:$port/.well-known/t3/environment"; then
-              echo "healthy on port $port after $attempt checks"
+            if environment="$(curl -fsS --max-time 5 "http://127.0.0.1:$port/.well-known/t3/environment")"; then
+              running="$(printf '%s' "$environment" | sed -n 's/.*"serverVersion": *"\([^"]*\)".*/\1/p')"
+              echo "healthy on port $port after $attempt checks, running ${running:-an unknown version}"
               break
             fi
             if [ "$attempt" = 30 ]; then
@@ -265,20 +270,24 @@ jobs:
 
           node "$RUNTIME/node_modules/t3/dist/bin.mjs" service status --base-dir "$BASE"
 
-          # Retention: this version, the version that was active before the
-          # switch (the `service update --allow-downgrade` rollback target), and
-          # the two most recently installed complete runtimes. "Complete" is the
-          # test the launcher itself applies — the sentinel plus the t3 entry —
-          # so a husk left by an interrupted install is pruned instead of being
-          # kept as a rollback target it could never be. Everything here runs
-          # only after the health check, and never touches userdata.
+          # Retention: this version, the version the server is still running
+          # until it switches, the version selected before this deploy (the
+          # rollback target), and the two most recently installed complete
+          # runtimes. "Complete" is the test the launcher itself applies — the
+          # sentinel plus the t3 entry — so a husk left by an interrupted install
+          # is pruned instead of being kept as a rollback target it could never
+          # be. Everything here runs only after the health check, and never
+          # touches userdata.
           runtime_complete() {
             [ -x "$1/t3" ] && [ "$(cat "$1/.install-complete" 2>/dev/null)" = "$(basename "$1")" ]
           }
           kept=("$VERSION")
-          if [ -n "${previous_active:-}" ] && [ "$previous_active" != "$VERSION" ]; then
-            kept+=("$previous_active")
-          fi
+          for keep in "${running:-}" "${previous_active:-}"; do
+            case " ${kept[*]} " in
+              *" $keep "*) ;;
+              *) [ -z "$keep" ] || kept+=("$keep") ;;
+            esac
+          done
 
           others=0
           mapfile -t installed < <(ls -1t "$BASE/runtime/versions")

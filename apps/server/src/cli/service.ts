@@ -29,12 +29,14 @@ export type ServiceReconcileResult =
   | {
       readonly changed: true;
       readonly previouslyInstalled: boolean;
+      readonly deferred: boolean;
       readonly plan: BootService.BootServicePlan;
     };
 
 const reconcileService = Effect.fn("cli.service.reconcile")(function* (options?: {
   readonly allowDowngrade?: boolean;
   readonly start?: boolean;
+  readonly deferRestart?: boolean;
 }) {
   const service = yield* BootService.BootService;
   const status = yield* service.status;
@@ -51,10 +53,13 @@ const reconcileService = Effect.fn("cli.service.reconcile")(function* (options?:
       targetVersion: packageJson.version,
     });
   }
-  const plan = yield* service.install(options);
+  // A service that is not installed yet has nothing running to defer to.
+  const deferred = options?.deferRestart === true && status.installed;
+  const plan = yield* service.install(deferred ? { ...options, start: false } : options);
   return {
     changed: true,
     previouslyInstalled: status.installed,
+    deferred,
     plan,
   } satisfies ServiceReconcileResult;
 });
@@ -62,6 +67,9 @@ const reconcileService = Effect.fn("cli.service.reconcile")(function* (options?:
 function formatServiceChange(
   result: Extract<ServiceReconcileResult, { readonly changed: true }>,
 ): string {
+  if (result.deferred) {
+    return `Pointed the T3 Code service at t3@${packageJson.version}. It switches once agent work is idle; run \`t3 service restart\` to switch now.\nLogs: ${result.plan.logPath}`;
+  }
   if (result.plan.handedOff === true) {
     return `Handed the T3 Code service switch to t3@${packageJson.version} to a separate systemd unit, since this session runs inside the service and disconnects when it restarts.\nResult: ${result.plan.logPath}`;
   }
@@ -120,13 +128,24 @@ const serviceReconcileFlags = {
   ),
 };
 
-const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pipe(
+const serviceInstallCommand = Command.make("install", {
+  ...serviceReconcileFlags,
+  deferRestart: Flag.Boolean("defer-restart").pipe(
+    Flag.withDescription(
+      "Point an installed service at this version without restarting it. The server switches once agent work has been idle for two minutes, or after 12 hours.",
+    ),
+    Flag.withDefault(false),
+  ),
+}).pipe(
   Command.withDescription("Install T3 Code as a background service for this user."),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
       Effect.gen(function* () {
-        const result = yield* reconcileService({ allowDowngrade: flags.allowDowngrade });
+        const result = yield* reconcileService({
+          allowDowngrade: flags.allowDowngrade,
+          deferRestart: flags.deferRestart,
+        });
         if (!result.changed) {
           yield* Console.log(
             `T3 Code service is already installed with t3@${packageJson.version} (${yield* resolveEntryPath}).`,

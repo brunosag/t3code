@@ -127,6 +127,44 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("service commands
         expect(installOptions).toEqual([]);
       }),
   );
+
+  it.effect.each([
+    { installed: true, start: false },
+    { installed: false, start: undefined },
+  ])(
+    "install --defer-restart starts the service only when none runs (installed: $installed)",
+    ({ installed, start }) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-cli-test-" });
+        const { service, installOptions } = makeTestService({
+          ...status,
+          installed,
+          current: false,
+        });
+        vi.spyOn(BootService, "layer").mockReturnValue(
+          Layer.succeed(BootService.BootService, service),
+        );
+
+        yield* Command.runWith(serviceCommand, { version: packageJson.version })([
+          "install",
+          "--defer-restart",
+          "--base-dir",
+          baseDir,
+        ]).pipe(
+          Effect.provideService(HostProcess.Environment, {}),
+          Effect.provide(
+            Layer.mergeAll(
+              ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+              Layer.fresh(TestConsole.layer),
+            ),
+          ),
+        );
+
+        expect(installOptions).toHaveLength(1);
+        expect(installOptions[0]?.start).toBe(start);
+      }),
+  );
 });
 
 it.effect("leaves a newer service unchanged during onboarding without prompting", () =>
