@@ -33,6 +33,8 @@ export class UsageLimitSources extends Context.Service<
     readonly consumeResetCredit: (
       input: UsageLimitSourceConsumeResetCreditInput,
     ) => Effect.Effect<ProviderConsumeResetCreditResult, UsageLimitSourceError>;
+    /** When a hub that refused a Claude model on every credential can route it again. */
+    readonly claudeCooldownResetAt: (model: string) => Effect.Effect<string | undefined>;
   }
 >()("t3/usage/UsageLimitSources") {}
 
@@ -126,6 +128,28 @@ export const make = Effect.gen(function* () {
     return result;
   }, refreshLock.withPermits(1));
 
+  const claudeCooldownResetAt = Effect.fn("UsageLimitSources.claudeCooldownResetAt")(function* (
+    model: string,
+  ) {
+    const settings = yield* settingsService.getSettings.pipe(Effect.orElseSucceed(() => null));
+    const ends = yield* Effect.forEach(
+      Object.values(settings?.usageLimitSources ?? {}).filter(
+        (config) => config.enabled && config.managementKey.length > 0,
+      ),
+      (config) =>
+        api.claudeCooldownEnd(config, model).pipe(
+          Effect.timeout("5 seconds"),
+          Effect.tapCause((cause) =>
+            Effect.logDebug("usage limit source cooldown read failed", { cause }),
+          ),
+          Effect.orElseSucceed(() => undefined),
+        ),
+      { concurrency: 4 },
+    );
+    const soonest = Math.min(...ends.filter((end) => end !== undefined));
+    return Number.isFinite(soonest) ? DateTime.formatIso(DateTime.makeUnsafe(soonest)) : undefined;
+  });
+
   yield* settingsService.streamChanges.pipe(
     Stream.map((settings) => settings.usageLimitSources),
     Stream.changes,
@@ -158,6 +182,7 @@ export const make = Effect.gen(function* () {
   return {
     current: Ref.get(stateRef),
     consumeResetCredit,
+    claudeCooldownResetAt,
     refresh,
     get streamChanges() {
       return Stream.unwrap(

@@ -5,6 +5,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -26,6 +27,7 @@ import { claudeUsageReader } from "./claudeUsage.ts";
 import { makeClaudeScopedLimitNames } from "../claudeUsageLimits.ts";
 import * as ClaudeResetCredits from "../claudeResetCredits.ts";
 import * as ResetCreditCoordinator from "../resetCreditCoordinator.ts";
+import * as UsageLimitSources from "../../usage/UsageLimitSources.ts";
 import {
   checkClaudeProviderStatus,
   makePendingClaudeProvider,
@@ -170,6 +172,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
     });
 
     const scopedLimitNames = yield* makeClaudeScopedLimitNames;
+    const usageLimitSources = yield* Effect.serviceOption(UsageLimitSources.UsageLimitSources);
     const orchestrationAdapter = yield* createClaudeAdapterV2(
       {
         instanceId,
@@ -179,7 +182,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         enabled,
         config,
       },
-      { scopedLimitNames, onUsageLimits: (update) => snapshot.applyUsageLimits(update) },
+      {
+        scopedLimitNames,
+        onUsageLimits: (update) => snapshot.applyUsageLimits(update),
+        ...(Option.isSome(usageLimitSources)
+          ? { claudeCooldownResetAt: usageLimitSources.value.claudeCooldownResetAt }
+          : {}),
+      },
     ).pipe(
       Effect.mapError(
         (cause) =>

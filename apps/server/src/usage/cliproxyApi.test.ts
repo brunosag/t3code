@@ -51,6 +51,7 @@ function fixture(
     accounts?: Array<
       (typeof accounts)[number] & {
         disabled?: boolean;
+        cooldowns?: ReadonlyArray<{ scope: string; model_key?: string; retry_at: string }>;
         id_token: { chatgpt_account_id: string; plan_type?: string; chatgpt_plan_type?: string };
       }
     >;
@@ -388,6 +389,41 @@ describe("CLIProxyAPI built-in management API", () => {
         "Failure",
       );
       expect(test.requests.every((request) => request.path.endsWith("/auth-files"))).toBe(true);
+    }),
+  );
+
+  it.effect("finds when the first Claude credential can serve a cooling model again", () =>
+    Effect.gen(function* () {
+      const claude = (
+        id: string,
+        cooldowns: ReadonlyArray<{ scope: string; model_key?: string; retry_at: string }>,
+      ) => ({ ...accounts[0]!, id, provider: "claude", cooldowns });
+      const test = fixture({
+        accounts: [
+          claude("quota.json", [
+            { scope: "credential", retry_at: "2026-10-29T19:20:09Z" },
+            { scope: "model", model_key: "claude-opus-5-5", retry_at: "2026-10-29T16:09:00Z" },
+          ]),
+          claude("backoff.json", [
+            { scope: "model", model_key: "claude-opus-5-5", retry_at: "2026-10-29T16:10:00Z" },
+          ]),
+          claude("other-model.json", [
+            { scope: "model", model_key: "claude-haiku-5-5", retry_at: "2026-10-29T16:08:00Z" },
+          ]),
+          {
+            ...claude("disabled.json", [{ scope: "credential", retry_at: "2026-10-29T16:08:00Z" }]),
+            disabled: true,
+          },
+          { ...claude("codex.json", []), provider: "codex" },
+        ],
+      });
+      const api = yield* test.api;
+      expect(yield* api.claudeCooldownEnd(config, "claude-opus-5-5")).toBe(
+        Date.parse("2026-10-29T16:10:00Z"),
+      );
+      expect(yield* api.claudeCooldownEnd(config, "claude-sonnet-5-5")).toBe(
+        Date.parse("2026-10-29T19:20:09Z"),
+      );
     }),
   );
 

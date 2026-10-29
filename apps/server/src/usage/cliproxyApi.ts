@@ -33,6 +33,26 @@ const AuthFile = Schema.Struct({
   ),
 });
 const AuthFiles = Schema.Struct({ files: Schema.Array(AuthFile) });
+// Decoded apart from AuthFiles so a cooldown shape change cannot break the Limits view.
+const AuthFileCooldowns = Schema.Struct({
+  files: Schema.Array(
+    Schema.Struct({
+      provider: Schema.String,
+      disabled: Schema.optional(Schema.Boolean),
+      cooldowns: Schema.optional(
+        Schema.NullOr(
+          Schema.Array(
+            Schema.Struct({
+              scope: Schema.String,
+              model_key: Schema.optional(Schema.String),
+              retry_at: Schema.String,
+            }),
+          ),
+        ),
+      ),
+    }),
+  ),
+});
 const ApiResponse = Schema.Struct({ status_code: Schema.Number, body: Schema.String });
 const CodexWindow = Schema.Struct({
   used_percent: Schema.Number,
@@ -84,6 +104,7 @@ const CreditList = Schema.Struct({
 });
 
 const decodeAuthFiles = Schema.decodeUnknownEffect(AuthFiles);
+const decodeAuthFileCooldowns = Schema.decodeUnknownEffect(AuthFileCooldowns);
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 const decodeApiResponse = Schema.decodeUnknownEffect(ApiResponse);
 const decodeCreditList = Schema.decodeUnknownEffect(Schema.fromJsonString(CreditList));
@@ -193,6 +214,24 @@ export const makeCliproxyApi = Effect.gen(function* () {
   const authFiles = Effect.fn("CliproxyApi.authFiles")(function* (config: UsageLimitSourceConfig) {
     const response = yield* management(config, "auth-files");
     return (yield* decodeAuthFiles(response)).files;
+  });
+
+  // A credential serves the model again once its credential-wide and model cooldowns both end.
+  const claudeCooldownEnd = Effect.fn("CliproxyApi.claudeCooldownEnd")(function* (
+    config: UsageLimitSourceConfig,
+    model: string,
+  ) {
+    const { files } = yield* decodeAuthFileCooldowns(yield* management(config, "auth-files"));
+    const ends = files.flatMap((account) => {
+      if (account.disabled || account.provider !== "claude") return [];
+      const retries = (account.cooldowns ?? []).flatMap((cooldown) =>
+        cooldown.scope === "credential" || cooldown.model_key === model
+          ? [Date.parse(cooldown.retry_at)]
+          : [],
+      );
+      return retries.length > 0 && retries.every(Number.isFinite) ? [Math.max(...retries)] : [];
+    });
+    return ends.length > 0 ? Math.min(...ends) : undefined;
   });
 
   const apiCall = Effect.fn("CliproxyApi.apiCall")(function* (
@@ -423,5 +462,5 @@ export const makeCliproxyApi = Effect.gen(function* () {
       ),
     );
   });
-  return { readAccounts, consume };
+  return { readAccounts, consume, claudeCooldownEnd };
 });

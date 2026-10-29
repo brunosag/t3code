@@ -2926,6 +2926,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     readonly freshQueueOnReopen?: boolean;
     readonly forkSession?: ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerShape["forkSession"];
     readonly allocateSessionId?: Effect.Effect<string>;
+    readonly claudeCooldownResetAt?: ClaudeAdapterV2.ClaudeAdapterV2Options["claudeCooldownResetAt"];
   }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -2988,6 +2989,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         path: yield* Path.Path,
         crypto: yield* Crypto.Crypto,
         idAllocator,
+        ...(options?.claudeCooldownResetAt
+          ? { claudeCooldownResetAt: options.claudeCooldownResetAt }
+          : {}),
         continuationRequests: {
           offer: (request) =>
             Effect.sync(() => {
@@ -6029,6 +6033,55 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       } else {
         assert.isUndefined(terminal.failure.resetAt);
       }
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+      ),
+    ),
+  );
+
+  it.effect("asks the hub when a CLIProxyAPI cooldown ends", () =>
+    Effect.gen(function* () {
+      const asked: Array<string> = [];
+      const harness = yield* makeWakeHarnessWithOptions({
+        claudeCooldownResetAt: (model) =>
+          Effect.sync(() => {
+            asked.push(model);
+            return "2026-10-29T16:10:00.000Z";
+          }),
+      });
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("attempt-hub-cooldown"),
+          text: "Continue.",
+          attachments: [],
+        }),
+      );
+      const result =
+        "API Error: Request rejected (429) · All credentials for model claude-opus-5-5 are cooling down (last error: rate_limit_error: This request would exceed your account's rate limit. Please try again later.)";
+      yield* Queue.offerAll(harness.sdkMessages, [
+        makeAssistantErrorFrame({
+          uuid: "00000000-0000-4000-8000-000000000656",
+          error: "rate_limit",
+          text: result,
+        }),
+        makeResultFrame({
+          uuid: "00000000-0000-4000-8000-000000000657",
+          result,
+          terminalReason: "api_error",
+          isError: true,
+          apiErrorStatus: 429,
+        }),
+      ]);
+      const terminal = yield* Queue.take(harness.terminalReceipts);
+      assert.equal(terminal.status, "failed");
+      if (terminal.status !== "failed") return;
+      assert.equal(terminal.failure.class, "usage_limit");
+      assert.equal(terminal.failure.resetAt, "2026-10-29T16:10:00.000Z");
+      assert.deepEqual(asked, ["claude-opus-5-5"]);
     }).pipe(
       Effect.provide(
         Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),

@@ -4358,6 +4358,7 @@ export interface ClaudeAdapterV2Options {
   readonly queryRunner: ClaudeAgentSdkQueryRunnerShape;
   readonly scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>;
   readonly onUsageLimits?: ManagedServerProvider["applyUsageLimits"];
+  readonly claudeCooldownResetAt?: (model: string) => Effect.Effect<string | undefined>;
   readonly continuationRequests?: {
     readonly offer: (
       request: ProviderContinuationRequests.ProviderContinuationRequest,
@@ -9221,9 +9222,24 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                     code: "compaction_failed",
                   })
                 : providerFailureFromResult(message, completedAt, failureHint, usageLimited);
+            // CLIProxyAPI's cooldown body has the reset time, but the CLI keeps only its message.
+            const cooledModel =
+              resultFailure?.class === "usage_limit" &&
+              resetAt === null &&
+              !resultFailure.resetAt &&
+              message.subtype === "success"
+                ? /All credentials for model (\S+) are cooling down/.exec(message.result)?.[1]
+                : undefined;
+            const cooldownResetAt =
+              cooledModel === undefined || adapterOptions.claudeCooldownResetAt === undefined
+                ? undefined
+                : yield* adapterOptions.claudeCooldownResetAt(cooledModel);
             const terminalFailure =
               resultFailure?.class === "usage_limit"
-                ? { ...resultFailure, resetAt: resetAt ?? resultFailure.resetAt ?? null }
+                ? {
+                    ...resultFailure,
+                    resetAt: resetAt ?? resultFailure.resetAt ?? cooldownResetAt ?? null,
+                  }
                 : resultFailure;
             yield* finalizeActiveTurn({
               context,
@@ -11245,7 +11261,10 @@ export type ClaudeAdapterV2DriverEnv =
 export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
   function* (
     input: ProviderAdapterDriverCreateInput<ClaudeSettings>,
-    hooks: Pick<ClaudeAdapterV2Options, "scopedLimitNames" | "onUsageLimits"> = {},
+    hooks: Pick<
+      ClaudeAdapterV2Options,
+      "scopedLimitNames" | "onUsageLimits" | "claudeCooldownResetAt"
+    > = {},
   ) {
     const { instanceId, environment, enabled, config } = input;
     const fileSystem = yield* FileSystem.FileSystem;

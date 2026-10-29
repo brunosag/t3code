@@ -39,6 +39,7 @@ Test fixtures on this machine:
 - **Project group names:** a title every grouped project shares names the group, even when it equals the repository name.
 - **Project defaults:** provider-selected repositories and owner/repository shorthand clone over SSH; explicit pasted URLs keep their transport. Settings can choose the base directory for new named projects.
 - **Background work:** Linux holds a sleep and lid-switch inhibitor while agent work remains unfinished, excluding pull-request watches. The desktop tray remains available.
+- **Hub cooldown resets:** when every CLIProxyAPI credential for a Claude model is cooling down, the failed turn takes its reset time from the Limits hub, so auto-resume and the limit banner work. The Claude CLI drops the reset time CLIProxyAPI sends.
 - **Usage limits layout:** the Limits view can hide and reorder providers, and hide single limits (such as a model-scoped weekly limit) from a provider's ⋯ menu; the choices are saved per browser. Multi-account bars show each account's avatar, not its name.
 - **Installed web app names:** the server serves `manifest.webmanifest` named `T3 Code (<environment label>)`, so web apps installed from several machines stay apart on a phone.
 - **Stable branding:** the web client a server serves and the Linux desktop build use the black production icons and are titled plain “T3 Code”, without upstream’s “(Beta)” or “(Nightly)”. The desktop’s nightly version only picks its update channel; its Electron runtime name stays “T3 Code Nightly” so its keyring state does not move.
