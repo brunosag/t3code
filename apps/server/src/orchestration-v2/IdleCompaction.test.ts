@@ -153,4 +153,27 @@ describe("idleCompactionWindow", () => {
     archived.thread = { ...archived.thread, archivedAt: at() };
     expect(idleCompactionWindow(archived, NOW_MS)).toBeNull();
   });
+
+  it("compacts a thread its own agent settled from 100K, and no other settled thread", () => {
+    const cache = { cacheExpiresInMs: 60 * MINUTE_MS };
+    const settled = (usedTokens: number, settledByOwnAgent?: boolean) => {
+      const value = records({ ...cache, usedTokens });
+      value.thread = {
+        ...value.thread,
+        settledOverride: "settled",
+        settledAt: at(),
+        ...(settledByOwnAgent === undefined ? {} : { settledByOwnAgent }),
+      };
+      return value;
+    };
+    expect(idleCompactionWindow(settled(100_000, true), NOW_MS)).toEqual({
+      runId,
+      startMs: NOW_MS + 58 * MINUTE_MS,
+      endMs: NOW_MS + 60 * MINUTE_MS,
+    });
+    expect(idleCompactionWindow(settled(99_999, true), NOW_MS)).toBeNull();
+    expect(idleCompactionWindow(settled(250_000, false), NOW_MS)).toBeNull();
+    expect(idleCompactionWindow(settled(250_000), NOW_MS)).toBeNull();
+    expect(idleCompactionWindow(records({ ...cache, usedTokens: 150_000 }), NOW_MS)).toBeNull();
+  });
 });

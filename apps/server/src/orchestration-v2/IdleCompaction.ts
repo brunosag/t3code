@@ -7,6 +7,10 @@ import * as DateTime from "effect/DateTime";
 // that a cold re-read is cheap, so compacting mostly loses context for little
 // saving.
 const MIN_CONTEXT_TOKENS = COMPACTION_SUGGESTION_MIN_TOKENS;
+// A thread its own agent settled waits for its next event (a message, a
+// reminder) and is read again then, usually long after the cache expired, so
+// it compacts from Claude Code's own floor.
+const OWN_AGENT_SETTLED_MIN_CONTEXT_TOKENS = 100_000;
 // Start this long before the cache expires: enough for the session to resume
 // and send the compaction while the cache is still warm.
 const LEAD_MS = 2 * 60_000;
@@ -47,7 +51,8 @@ export function idleCompactionWindow(
   readonly endMs: number;
 } | null {
   if (thread.deletedAt !== null || thread.archivedAt !== null) return null;
-  if (thread.settledAt !== null || thread.settledOverride === "settled") return null;
+  const settled = thread.settledAt !== null || thread.settledOverride === "settled";
+  if (settled && thread.settledByOwnAgent !== true) return null;
   if (thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > nowMs)
     return null;
   if (thread.lineage.relationshipToParent === "subagent") return null;
@@ -93,7 +98,8 @@ export function idleCompactionWindow(
     .filter((turn) => turn.providerThreadId === providerThread.id && turn.tokenUsage !== undefined)
     .map((turn) => turn.tokenUsage!)
     .toSorted((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
-  if ((usages[0]?.usedTokens ?? 0) < MIN_CONTEXT_TOKENS) return null;
+  const minTokens = settled ? OWN_AGENT_SETTLED_MIN_CONTEXT_TOKENS : MIN_CONTEXT_TOKENS;
+  if ((usages[0]?.usedTokens ?? 0) < minTokens) return null;
   // A request served fully from cache creates no cache entry and reports no
   // TTL, but it still refreshes the cache. Treat it as unknown and skip.
   const expiresAt = usages[0]?.promptCacheExpiresAt;

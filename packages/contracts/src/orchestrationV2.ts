@@ -472,6 +472,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   settledAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /** The thread's own agent settled it, so it is waiting for its next event. */
+  settledByOwnAgent: Schema.optional(Schema.Boolean),
   unsettledAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   snoozedUntil: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   snoozedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
@@ -2908,6 +2910,7 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     settledAt: Schema.optional(Schema.DateTimeUtc),
+    byOwnAgent: Schema.optional(Schema.Boolean),
   }),
   /** Rejects changes since snapshotAt or any explicit settled override to preserve user actions. */
   Schema.Struct({

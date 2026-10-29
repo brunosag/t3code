@@ -996,6 +996,7 @@ const make = Effect.gen(function* () {
       type: "thread.settle",
       commandId: CommandId.make(`server:settle-after-run:${input.runId}`),
       threadId: input.threadId,
+      byOwnAgent: true,
     });
   });
 
@@ -1015,6 +1016,7 @@ const make = Effect.gen(function* () {
       type: "thread.settle",
       commandId: input.commandId,
       threadId: input.threadId,
+      ...(input.byOwnAgent ? { byOwnAgent: true } : {}),
     });
     return { sequence: result.sequence };
   });

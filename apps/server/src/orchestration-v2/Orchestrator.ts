@@ -3261,6 +3261,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...thread,
             settledOverride: "settled",
             settledAt: alreadySettled ? thread.settledAt : (command.settledAt ?? now),
+            // A deferred self-settle never claims a thread someone else settled in the meantime.
+            settledByOwnAgent:
+              command.byOwnAgent === true &&
+              (thread.settledOverride !== "settled" || thread.settledByOwnAgent === true),
             pullRequests: thread.pullRequests?.map((link) => withPullRequestWatch(link, undefined)),
             unsettledAt: null,
             pinnedAt: null,
@@ -3280,6 +3284,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...thread,
             settledOverride: "active",
             settledAt: null,
+            settledByOwnAgent: false,
             unsettledAt: alreadyPinnedActive ? (thread.unsettledAt ?? null) : now,
             updatedAt: alreadyPinnedActive ? thread.updatedAt : now,
           };
@@ -5158,12 +5163,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       (run) => run.id === command.restartContinuationOfRunId,
     )?.delegatedTaskId;
 
-    if (projection.thread.settledOverride !== null) {
+    // An idle compaction is upkeep, not new work: a settled thread stays settled through it.
+    const keepsSettled =
+      command.idleCompaction !== undefined && projection.thread.settledOverride === "settled";
+    if (projection.thread.settledOverride !== null && !keepsSettled) {
       const now = yield* DateTime.now;
       const thread: OrchestrationV2AppThread = {
         ...projection.thread,
         settledOverride: null,
         settledAt: null,
+        settledByOwnAgent: false,
         unsettledAt:
           projection.thread.settledOverride === "active"
             ? (projection.thread.unsettledAt ?? null)

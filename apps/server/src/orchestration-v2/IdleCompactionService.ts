@@ -87,6 +87,23 @@ export const make = Effect.gen(function* () {
       ),
   );
 
+  // An agent settles its own thread after its run completes, which can lower
+  // the threshold that run's timer already checked, so the settle re-arms it.
+  const compactLatestRunWhenDue = Effect.fn("IdleCompactionService.compactLatestRunWhenDue")(
+    function* (threadId: ThreadId) {
+      const { runs } = yield* projections.getThreadRecords(threadId, ["runs"]);
+      const latestRun = runs.reduce<(typeof runs)[number] | null>(
+        (latest, run) => (latest === null || run.ordinal > latest.ordinal ? run : latest),
+        null,
+      );
+      if (latestRun?.status === "completed") yield* compactWhenDue(threadId, latestRun.id);
+    },
+    (effect, threadId) =>
+      effect.pipe(
+        Effect.catch((cause) => Effect.logWarning("idle compaction skipped", { threadId, cause })),
+      ),
+  );
+
   const start = Effect.fn("IdleCompactionService.start")(function* () {
     // Keyed by thread: a newer completed run replaces the waiting timer.
     const timers = yield* FiberMap.make<ThreadId>();
@@ -94,7 +111,9 @@ export const make = Effect.gen(function* () {
       Stream.runForEach(orchestrator.streamDomainEvents, (event) =>
         event.type === "run.updated" && event.payload.status === "completed"
           ? FiberMap.run(timers, event.threadId, compactWhenDue(event.threadId, event.payload.id))
-          : Effect.void,
+          : event.type === "thread.settled" && event.payload.settledByOwnAgent === true
+            ? FiberMap.run(timers, event.threadId, compactLatestRunWhenDue(event.threadId))
+            : Effect.void,
       ),
     );
   });

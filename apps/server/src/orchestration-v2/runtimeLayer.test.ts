@@ -4073,6 +4073,70 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
 
       const projection = yield* orchestrator.getThreadProjection(threadId);
       assert.equal(projection.thread.settledOverride, "settled");
+      assert.isTrue(projection.thread.settledByOwnAgent);
+
+      // An idle compaction is upkeep: the thread stays settled through it.
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        createdBy: "agent",
+        creationSource: "server",
+        commandId: CommandId.make("runtime-layer-settle-after-run-compact"),
+        threadId,
+        messageId: MessageId.make("runtime-layer-settle-after-run-compact"),
+        text: "/compact",
+        attachments: [],
+        idleCompaction: "beforeCacheExpires",
+        dispatchMode: { type: "start_immediately" },
+      });
+      const compacting = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(compacting.thread.settledOverride, "settled");
+      assert.isTrue(compacting.thread.settledByOwnAgent);
+    }),
+  );
+
+  it.effect("a settle by anyone but the thread's own agent is not marked as its own", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("runtime-layer-user-settle-thread");
+
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-user-settle-create"),
+        threadId,
+        projectId: ProjectId.make("runtime-layer-user-settle-project"),
+        title: "User settle",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: "/tmp/runtime-layer-user-settle",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.settle",
+        commandId: CommandId.make("runtime-layer-user-settle-own"),
+        threadId,
+        byOwnAgent: true,
+      });
+      assert.isTrue((yield* orchestrator.getThreadProjection(threadId)).thread.settledByOwnAgent);
+      yield* orchestrator.dispatch({
+        type: "thread.settle",
+        commandId: CommandId.make("runtime-layer-user-settle-user"),
+        threadId,
+      });
+      const projection = yield* orchestrator.getThreadProjection(threadId);
+      assert.equal(projection.thread.settledOverride, "settled");
+      assert.isFalse(projection.thread.settledByOwnAgent);
+
+      // The agent's deferred settle arriving after the user's leaves it the user's.
+      yield* orchestrator.dispatch({
+        type: "thread.settle",
+        commandId: CommandId.make("runtime-layer-user-settle-own-late"),
+        threadId,
+        byOwnAgent: true,
+      });
+      assert.isFalse((yield* orchestrator.getThreadProjection(threadId)).thread.settledByOwnAgent);
     }),
   );
 
