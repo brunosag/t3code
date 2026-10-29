@@ -25,6 +25,7 @@ Test fixtures on this machine:
 ## Retained changes
 
 - **Claude thinking quotes:** web and desktop do not offer quoting on Claude thinking items; the Claude adapter also removes saved thinking citations while preserving user comments, whichever client sent them. Other providers keep their quoting behavior.
+- **Question lead-ins:** Claude 5.1+ thinking right before an `AskUserQuestion` shows as assistant text, even when it is the turn's only thought before the question, so the user sees what the agent wrote before answering. Other tool calls keep upstream's rule.
 - **Question drafts:** written answers to agent questions survive web reloads. Choosing an option moves a written answer into the thread draft.
 - **Interval schedules keep their slot:** an interval task that fires late (the machine was asleep) or is run by hand stays on the grid its previous due time set, instead of restarting the interval from when it ran. A schedule edit or re-enable still starts a new grid from that moment.
 - **One-time scheduled tasks:** a `once` schedule runs at a single `runAt` time, picked in the client's time zone, on web, mobile and `schedule_task`. A successful run deletes the task; a failed one stays with its error. Every schedule type runs a missed run late, once, instead of skipping it.

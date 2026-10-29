@@ -8151,7 +8151,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   block.type === "tool_use" &&
                   update !== null &&
                   update.messageId === message.message.id &&
-                  update.followsThinking &&
+                  // A question's lead-in is often its only thought; the user needs it to answer.
+                  (update.followsThinking || block.name === "AskUserQuestion") &&
                   claudeWritesUpdatesAsThinking(message.message.model)
                 ) {
                   yield* emitAssistantTextArtifacts({

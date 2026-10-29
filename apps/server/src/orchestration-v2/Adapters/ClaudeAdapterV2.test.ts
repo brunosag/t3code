@@ -3086,6 +3086,62 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     });
   const makeWakeHarness = makeWakeHarnessWithOptions();
 
+  it.effect.each([
+    { model: "claude-opus-5-5", tool: "AskUserQuestion", expected: "assistant_message" },
+    { model: "claude-opus-5-5", tool: "Bash", expected: "reasoning" },
+    { model: "claude-opus-5", tool: "AskUserQuestion", expected: "reasoning" },
+  ] as const)(
+    "shows $model's lone thought before $tool as $expected",
+    ({ model, tool, expected }) =>
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("thought-before-tool-attempt"),
+            text: "Pick a color with me",
+            attachments: [],
+          }),
+        );
+        const snapshot = (uuid: string, content: ReadonlyArray<unknown>) =>
+          claudeSdkFrame({
+            type: "assistant",
+            uuid,
+            session_id: WAKE_NATIVE_SESSION,
+            parent_tool_use_id: null,
+            message: { id: "reply-message", model, content },
+          });
+        const thought = "The palette is ready; one choice is yours.";
+        for (const frame of [
+          snapshot("thought-snapshot", [{ type: "thinking", thinking: thought, signature: "sig" }]),
+          snapshot("tool-snapshot", [{ type: "tool_use", id: "tool-1", name: tool, input: {} }]),
+          makeResultFrame({ uuid: "thought-before-tool-result", result: "" }),
+        ]) {
+          yield* Queue.offer(harness.sdkMessages, frame);
+        }
+        yield* Queue.take(harness.terminalReceipts);
+        const latest = new Map(
+          harness.events.flatMap((event) =>
+            event.type === "turn_item.updated" &&
+            (event.turnItem.type === "reasoning" || event.turnItem.type === "assistant_message")
+              ? [[event.turnItem.id, event.turnItem] as const]
+              : [],
+          ),
+        );
+        assert.deepEqual(
+          [...latest.values()].map((item) => [item.type, item.text]),
+          [[expected, thought]],
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+  );
+
   it.effect.each(["release-after", "cancel-after", "release-before", "resume-pending"] as const)(
     "keeps attachment reservations across compaction: %s boundary",
     (outcome) =>
