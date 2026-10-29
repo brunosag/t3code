@@ -23,6 +23,7 @@ vp test run \
   apps/web/src/components/GitActionsControl.logic.test.ts \
   apps/web/src/pendingUserInput.test.ts \
   apps/web/src/components/chat/MessagesTimeline.logic.test.ts \
+  apps/web/src/components/chat/modelPickerSearch.test.ts \
   apps/web/src/versionSkew.test.ts \
   apps/web/src/components/usage/usagePagePreferences.test.ts \
   apps/web/src/components/usage/usageProviders.test.ts \

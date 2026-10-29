@@ -1,6 +1,6 @@
 import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@t3tools/contracts";
-import { memo, useLayoutEffect, useRef, useState } from "react";
+import { memo, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { StarIcon } from "lucide-react";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -30,7 +30,10 @@ const PICKER_TOOLTIP_SIDE_OFFSET = 8;
 
 export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   selectedInstanceId: ProviderInstanceId | "favorites";
-  onSelectInstance: (instanceId: ProviderInstanceId | "favorites") => void;
+  onSelectInstance: (
+    instanceId: ProviderInstanceId | "favorites",
+    pointerType: string | undefined,
+  ) => void;
   onFocusSearch: () => void;
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   showFavorites?: boolean;
@@ -38,8 +41,8 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   selectableUnavailableInstanceIds?: ReadonlySet<ProviderInstanceId>;
   getDisabledInstanceTooltip?: (entry: ProviderInstanceEntry) => string;
 }) {
-  const handleSelect = (instanceId: ProviderInstanceId | "favorites") => {
-    props.onSelectInstance(instanceId);
+  const handleSelect = (instanceId: ProviderInstanceId | "favorites", event: MouseEvent) => {
+    props.onSelectInstance(instanceId, (event.nativeEvent as Partial<PointerEvent>).pointerType);
   };
   const showFavorites = props.showFavorites ?? true;
   const [hoveredInstanceId, setHoveredInstanceId] = useState<ProviderInstanceId | null>(null);
@@ -100,7 +103,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                         className={cn(
                           "relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none",
                         )}
-                        onClick={() => handleSelect("favorites")}
+                        onClick={(event) => handleSelect("favorites", event)}
                         type="button"
                         aria-label="Favorites"
                         aria-pressed={props.selectedInstanceId === "favorites"}
@@ -146,7 +149,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   isDisabled && "opacity-50 cursor-not-allowed hover:bg-transparent",
                 )}
                 data-provider-accent-color={entry.accentColor}
-                onClick={() => !isDisabled && handleSelect(entry.instanceId)}
+                onClick={(event) => !isDisabled && handleSelect(entry.instanceId, event)}
                 onMouseEnter={() => setHoveredInstanceId(entry.instanceId)}
                 onMouseLeave={() =>
                   setHoveredInstanceId((current) => (current === entry.instanceId ? null : current))

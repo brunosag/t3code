@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { rankModelPickerSearch, scoreModelPickerSearch } from "./modelPickerSearch";
+import {
+  focusesModelPickerSearch,
+  rankModelPickerSearch,
+  scoreModelPickerSearch,
+} from "./modelPickerSearch";
 
 describe("scoreModelPickerSearch", () => {
   it("ranks exact token matches ahead of fuzzier matches", () => {
@@ -164,5 +168,17 @@ describe("rankModelPickerSearch", () => {
       "Claude Opus 5.5",
       "Claude Opus 5",
     ]);
+  });
+});
+
+describe("focusesModelPickerSearch", () => {
+  it("leaves the search unfocused for touch and pen so no on-screen keyboard opens", () => {
+    expect(["mouse", "keyboard", "", undefined].map(focusesModelPickerSearch)).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect(["touch", "pen"].map(focusesModelPickerSearch)).toEqual([false, false]);
   });
 });

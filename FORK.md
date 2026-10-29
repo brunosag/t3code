@@ -33,6 +33,7 @@ Test fixtures on this machine:
 - **Fast Mode switch:** the server can disable Fast Mode, including saved selections and delegated tasks.
 - **Read aloud:** web and desktop synthesize assistant messages on their environment, with a player above the composer. A running turn's latest message can be read while a question or approval waits on the user. Guest transcripts have no speech controls.
 - **Subagent effort labels:** a provider-native subagent shows an effort only when one was chosen or reported, not the model's catalog default.
+- **Model picker on touch:** opening the model picker or switching its provider tab by touch or pen does not focus the search, so the on-screen keyboard stays down. Mouse and keyboard still focus it.
 - **Theme editor:** the role spotlight pauses while a color picker is open, so a color is judged against the unobscured app.
 - **Project group names:** a title every grouped project shares names the group, even when it equals the repository name.
 - **Project defaults:** provider-selected repositories and owner/repository shorthand clone over SSH; explicit pasted URLs keep their transport. Settings can choose the base directory for new named projects.

@@ -31,7 +31,7 @@ import {
   parseModelPickerLegacySectionKey,
   parseModelPickerModelKey,
 } from "./modelPickerKeys";
-import { rankModelPickerSearch } from "./modelPickerSearch";
+import { focusesModelPickerSearch, rankModelPickerSearch } from "./modelPickerSearch";
 import {
   Combobox,
   ComboboxEmpty,
@@ -361,7 +361,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   onOpenProviderSetup?: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
-  /** The owning popup moves focus here when it opens (its `initialFocus`). */
+  /** The owning popup moves focus here when opened by mouse or keyboard (its `initialFocus`). */
   searchInputRef: RefObject<HTMLInputElement | null>;
 }) {
   const {
@@ -456,8 +456,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     searchInputRef.current?.focus({ preventScroll: true });
   };
 
-  const handleSelectInstance = (instanceId: ProviderInstanceId | "favorites") => {
+  const handleSelectInstance = (
+    instanceId: ProviderInstanceId | "favorites",
+    pointerType?: string,
+  ) => {
     setSelectedInstanceId(instanceId);
+    if (!focusesModelPickerSearch(pointerType)) return;
     window.requestAnimationFrame(() => {
       focusSearchInput();
     });

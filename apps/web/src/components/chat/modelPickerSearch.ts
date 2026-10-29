@@ -9,6 +9,11 @@ type ModelPickerSearchableModel = {
   isFavorite?: boolean;
 };
 
+/** Focusing the search on touch or pen input raises the on-screen keyboard. */
+export function focusesModelPickerSearch(pointerType: string | undefined): boolean {
+  return pointerType !== "touch" && pointerType !== "pen";
+}
+
 const MODEL_PICKER_FAVORITE_SCORE_BOOST = 24;
 const MODEL_PICKER_EXACT_NAME_SCORE = -1000;
 

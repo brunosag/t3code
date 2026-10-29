@@ -11,6 +11,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
+import { focusesModelPickerSearch } from "./modelPickerSearch";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { ModelEsque, getDisplayModelName, getTriggerDisplayModelName } from "./providerIconUtils";
@@ -275,7 +276,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <PopoverPopup
         {...(props.isComposerOwned ? composerFloatingLayerProps : {})}
         ref={lockBackgroundScroll}
-        initialFocus={searchInputRef}
+        initialFocus={(openType) =>
+          focusesModelPickerSearch(openType)
+            ? searchInputRef.current
+            : // Like Base UI's touch default: blurs the composer so iOS drops its keyboard.
+              searchInputRef.current?.closest<HTMLElement>("[data-slot='popover-popup']")
+        }
         align="start"
         className="before:hidden"
         padding="none"
