@@ -74,11 +74,14 @@ export function idleCompactionWindow(
         transfer.status === "pending",
     ) ||
     // Background work reports into the next turn; compaction would swallow it.
+    // T3's delegates are exempt: their results queue behind the compaction turn.
     derivePendingBackgroundWork({
       latestRun,
       runs,
       providerThreads,
-      turnItems,
+      turnItems: turnItems.filter(
+        (item) => !(item.type === "subagent" && item.origin === "app_owned"),
+      ),
       activeProviderThreadId: thread.activeProviderThreadId,
     }).length > 0
   )

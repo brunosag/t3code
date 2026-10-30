@@ -9,6 +9,7 @@ import {
   ProviderTurnId,
   RunId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
@@ -175,5 +176,44 @@ describe("idleCompactionWindow", () => {
     expect(idleCompactionWindow(settled(250_000, false), NOW_MS)).toBeNull();
     expect(idleCompactionWindow(settled(250_000), NOW_MS)).toBeNull();
     expect(idleCompactionWindow(records({ ...cache, usedTokens: 150_000 }), NOW_MS)).toBeNull();
+  });
+
+  it("waits for Claude's own background subagents but not for T3 delegates", () => {
+    const withSubagent = (origin: "provider_native" | "app_owned") => {
+      const value = records({ cacheExpiresInMs: 60 * MINUTE_MS });
+      value.turnItems = [
+        {
+          id: TurnItemId.make("subagent-item"),
+          threadId,
+          runId,
+          nodeId: NodeId.make("root-node"),
+          providerThreadId,
+          providerTurnId: null,
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: 1,
+          status: "running",
+          title: "Fix review findings",
+          startedAt: at(),
+          completedAt: null,
+          updatedAt: at(),
+          type: "subagent",
+          subagentId: NodeId.make("subagent-node"),
+          origin,
+          driver: ProviderDriverKind.make("claudeAgent"),
+          providerInstanceId: instanceId,
+          childThreadId: null,
+          prompt: "Fix the findings",
+          result: null,
+        },
+      ];
+      return value;
+    };
+    expect(idleCompactionWindow(withSubagent("provider_native"), NOW_MS)).toBeNull();
+    expect(idleCompactionWindow(withSubagent("app_owned"), NOW_MS)).toEqual({
+      runId,
+      startMs: NOW_MS + 58 * MINUTE_MS,
+      endMs: NOW_MS + 60 * MINUTE_MS,
+    });
   });
 });
