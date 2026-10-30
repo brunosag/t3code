@@ -75,7 +75,7 @@ export interface DraftState {
   readonly modelKey: string;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
-  /** Retain the source selection's provider options when the picker leaves instanceId:model unchanged. */
+  /** Provider options (effort and the like), kept while the picker leaves instanceId:model unchanged. */
   readonly baseModelSelection: ModelSelection | null;
   readonly signatureEnabled: boolean;
   readonly signatureHeader: string;
@@ -312,4 +312,16 @@ export function scheduledTaskDefaultModel(
   );
   const fallback = models.find(({ model }) => model.isDefault) ?? models[0];
   return fallback ? { instanceId: fallback.instanceId, model: fallback.model.slug } : null;
+}
+
+export function scheduledTaskModelSelection(
+  active: ModelSelection | null,
+  draft: ModelSelection | null,
+): ModelSelection | null {
+  return active !== null &&
+    draft !== null &&
+    draft.instanceId === active.instanceId &&
+    draft.model === active.model
+    ? draft
+    : active;
 }

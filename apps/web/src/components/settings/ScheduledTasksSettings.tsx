@@ -46,7 +46,8 @@ import {
 
 import { formatRelativeTime } from "../../timestampFormat";
 import { useEnvironmentSettings } from "../../hooks/useSettings";
-import { getCustomModelOptionsByInstance } from "../../modelSelection";
+import { getCustomModelOptionsByInstance, selectsPlanAgent } from "../../modelSelection";
+import { createModelSelection } from "@t3tools/shared/model";
 import { providerInstanceEntriesFor } from "../../providerInstances";
 import { usePrimaryCloudLinkState } from "../../cloud/primaryCloudLinkState";
 import { requestConfirmDialog } from "../../confirmDialog";
@@ -81,6 +82,7 @@ import {
   defaultOnceRunAt,
   scheduleFromDraft,
   scheduledTaskDefaultModel,
+  scheduledTaskModelSelection,
   taskToDraft,
   type DraftState,
   type ScheduleMode,
@@ -91,6 +93,7 @@ import { Menu, MenuTrigger, MenuPopup, MenuItem, MenuSeparator } from "../ui/men
 import { ToggleGroup, Toggle } from "../ui/toggle-group";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyMedia } from "../ui/empty";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { TraitsPicker } from "../chat/TraitsPicker";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -1184,6 +1187,10 @@ function ScheduledTaskEditorForm({
   const activeInstanceId =
     activeSelection?.instanceId ?? firstInstance?.instanceId ?? ("" as ProviderInstanceId);
   const activeModel = activeSelection?.model ?? "";
+  const activeInstanceEntry = instanceEntries.find(
+    (entry) => entry.instanceId === activeInstanceId,
+  );
+  const modelSelection = scheduledTaskModelSelection(activeSelection, draft.baseModelSelection);
   const modelOptionsByInstance = getCustomModelOptionsByInstance(
     settings,
     providers,
@@ -1211,12 +1218,11 @@ function ScheduledTaskEditorForm({
       tasksQuery.data === null
     )
       return;
-    const selection = activeSelection;
     if (
       !draft.title.trim() ||
       !draft.prompt.trim() ||
       !projects.some((project) => project.id === selectedProjectId) ||
-      selection === null
+      modelSelection === null
     ) {
       reportFailure("Scheduled task is incomplete", "Add a title, prompt, project, and model.");
       return;
@@ -1226,6 +1232,7 @@ function ScheduledTaskEditorForm({
       reportFailure("Invalid filter", parsedFilters.error);
       return;
     }
+    // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
     if (draft.scheduleMode === "once" && !(Date.parse(draft.runAt) > Date.now())) {
       reportFailure("Pick a later time", "A one-time task needs a date and time in the future.");
       return;
@@ -1256,12 +1263,6 @@ function ScheduledTaskEditorForm({
       reportFailure("Checkout path is required", "Enter the path of the checkout to run in.");
       return;
     }
-    const modelSelection =
-      draft.baseModelSelection !== null &&
-      draft.baseModelSelection.instanceId === selection.instanceId &&
-      draft.baseModelSelection.model === selection.model
-        ? draft.baseModelSelection
-        : selection;
     const workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy =
       draft.workspaceMode === "root"
         ? { type: "root" }
@@ -1496,7 +1497,7 @@ function ScheduledTaskEditorForm({
           </Field>
 
           <Field label="Model">
-            <div>
+            <div className="flex flex-wrap items-center gap-1.5">
               <ProviderModelPicker
                 environmentId={environmentId}
                 disabled={saving || !connected}
@@ -1511,6 +1512,31 @@ function ScheduledTaskEditorForm({
                   setDraft((current) => ({ ...current, modelKey: `${instanceId}:${model}` }))
                 }
               />
+              {activeInstanceEntry ? (
+                <TraitsPicker
+                  provider={activeInstanceEntry.driverKind}
+                  instanceId={activeInstanceId}
+                  models={activeInstanceEntry.models}
+                  model={activeModel}
+                  modelOptions={modelSelection?.options ?? []}
+                  allowPromptInjectedEffort={false}
+                  planModeEnabled={
+                    settings.planModeEnabled || selectsPlanAgent(modelSelection?.options)
+                  }
+                  disabled={saving || !connected}
+                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                  onModelOptionsChange={(options) =>
+                    setDraft((current) => ({
+                      ...current,
+                      baseModelSelection: createModelSelection(
+                        activeInstanceId,
+                        activeModel,
+                        options,
+                      ),
+                    }))
+                  }
+                />
+              ) : null}
             </div>
           </Field>
 

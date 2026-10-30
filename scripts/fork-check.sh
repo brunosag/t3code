@@ -18,6 +18,7 @@ vp test run \
   apps/server/src/provider/providerMaintenanceRunner.test.ts \
   apps/web/src/providerInstances.test.ts \
   apps/web/src/components/settings/ProviderSettingsForm.test.ts \
+  apps/web/src/components/settings/scheduledTasksSettings.logic.test.ts \
   packages/contracts/src/server.test.ts \
   packages/shared/src/serverSettings.test.ts \
   packages/shared/src/assistantCitations.test.ts \
