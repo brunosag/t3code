@@ -248,6 +248,7 @@ describe("DesktopBackendConfiguration", () => {
         assert.equal(first.bootstrap.t3Home, environment.baseDir);
         assert.equal(first.bootstrap.tailscaleServeEnabled, true);
         assert.equal(first.bootstrap.tailscaleServePort, 8443);
+        assert.equal(first.bootstrap.launcherPid, process.pid);
         assert.match(first.bootstrap.desktopBootstrapSecret ?? "", /^[0-9a-f]{64}$/i);
         assert.equal(
           second.bootstrap.desktopBootstrapSecret,
@@ -371,6 +372,8 @@ describe("DesktopBackendConfiguration", () => {
       assert.deepEqual(config.args.slice(0, 2), ["-d", "Ubuntu"]);
       assert.deepEqual(observedDistros, ["Ubuntu", "Ubuntu", "Ubuntu"]);
       assert.isTrue(Option.isNone(config.preflightFailure));
+      // A Windows pid never matches the backend's Linux parent.
+      assert.isUndefined(config.bootstrap.launcherPid);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

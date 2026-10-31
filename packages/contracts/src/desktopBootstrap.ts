@@ -27,6 +27,8 @@ export const DesktopBackendBootstrap = Schema.Struct({
   desktopBrowserFd: Schema.optionalKey(PositiveInt),
   desktopBrowserControlFd: Schema.optionalKey(PositiveInt),
   resourceMonitorPath: Schema.optionalKey(TrimmedNonEmptyString),
+  // The spawning desktop's pid, so a backend orphaned before it starts still notices. Omit in WSL.
+  launcherPid: Schema.optionalKey(PositiveInt),
 });
 
 export type DesktopBackendBootstrap = typeof DesktopBackendBootstrap.Type;

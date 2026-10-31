@@ -38,7 +38,9 @@ const runServerCommand = Effect.fn("server.runServerCommand")(function* (
   });
   return yield* Effect.raceFirst(
     run,
-    awaitLauncherLoss().pipe(
+    awaitLauncherLoss(
+      config.desktopLauncherPid === undefined ? {} : { launcherPid: config.desktopLauncherPid },
+    ).pipe(
       // End like SIGTERM does (interrupt-only exit, so the runtime forces process exit).
       Effect.andThen(Effect.interrupt),
     ),

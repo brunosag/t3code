@@ -4,7 +4,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 
 const DEFAULT_POLL_INTERVAL = Duration.seconds(2);
 
-// Capture before config and bootstrap reads to detect launcher loss during startup.
+// Fallback for launchers that do not send their pid; it misses a launcher that died before this module loaded.
 const startupParentPid = process.ppid;
 
 /**

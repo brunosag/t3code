@@ -455,7 +455,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
-  it.effect("reports the desktop bootstrap as the source of endpoints it supplied", () =>
+  it.effect("carries the desktop's launcher pid and endpoints from its bootstrap", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const baseDir = yield* fs.makeTempDirectoryScoped({
@@ -466,6 +466,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           otlpTracesUrl: "http://localhost:4318/v1/traces",
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",
           otlpLogsUrl: "http://localhost:4318/v1/logs",
+          launcherPid: 4100,
         }),
       );
 
@@ -486,6 +487,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         otlpTracesSource: "bootstrap",
         otlpMetricsSource: "bootstrap",
         otlpLogsSource: "bootstrap",
+        desktopLauncherPid: 4100,
       });
     }),
   );
