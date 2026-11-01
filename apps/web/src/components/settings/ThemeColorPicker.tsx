@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { isThemeColor, themeColorToHex, type ThemeColorRole } from "../../themePalette";
 import { cn } from "../../lib/utils";
 import { hexToHsv, hsvToHex, type HsvColor } from "../../lib/color";
@@ -241,21 +241,36 @@ function ThemeColorPicker({
   value,
   onChange,
   onOpenChange,
+  onEditStart,
+  onEditCancel,
+  onInteract,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   onOpenChange?: (open: boolean) => void;
+  onEditStart?: () => void;
+  onEditCancel?: () => void;
+  onInteract?: () => void;
 }) {
   const [committer] = useState(createFrameCommitter);
+  // Escape reverts the edit, so commits after it (the pending frame flushed on close, or a drag
+  // still firing through the exit animation) are dropped instead of landing on the restored colors.
+  const cancelledRef = useRef(false);
   // Unmounting with the popover open (the editor closes mid-drag) never fires onOpenChange.
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- flushes the frame committer on unmount, since an open popover never fires onOpenChange
   useEffect(() => committer.flush, [committer]);
   return (
     <Popover
-      onOpenChange={(open) => {
-        if (!open) committer.flush();
+      onOpenChange={(open, eventDetails) => {
+        cancelledRef.current = !open && eventDetails.reason === "escape-key";
         onOpenChange?.(open);
+        if (open) {
+          onEditStart?.();
+          return;
+        }
+        committer.flush();
+        if (cancelledRef.current) onEditCancel?.();
       }}
     >
       <Tooltip>
@@ -266,6 +281,8 @@ function ThemeColorPicker({
                 <button
                   aria-label={`Choose ${label} color`}
                   className="relative flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-foreground/30 transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                  onFocus={onInteract}
+                  onPointerDown={onInteract}
                   type="button"
                 >
                   <span
@@ -289,7 +306,9 @@ function ThemeColorPicker({
         <ThemeColorPickerPanel
           committer={committer}
           label={label}
-          onChange={onChange}
+          onChange={(nextValue) => {
+            if (!cancelledRef.current) onChange(nextValue);
+          }}
           value={value}
         />
       </PopoverPopup>
@@ -302,6 +321,9 @@ export const ThemeColorField = memo(function ThemeColorField({
   value,
   onChange,
   onPickerOpenChange,
+  onEditStart,
+  onEditCancel,
+  onSelect,
   onToggleSelected,
   selected = false,
   label: customLabel,
@@ -310,6 +332,9 @@ export const ThemeColorField = memo(function ThemeColorField({
   value: string;
   onChange: (role: ThemeColorRole, value: string) => void;
   onPickerOpenChange?: (role: ThemeColorRole, open: boolean) => void;
+  onEditStart?: (role: ThemeColorRole) => void;
+  onEditCancel?: (role: ThemeColorRole) => void;
+  onSelect?: (role: ThemeColorRole) => void;
   onToggleSelected?: (role: ThemeColorRole) => void;
   selected?: boolean;
   label?: string;
@@ -350,6 +375,9 @@ export const ThemeColorField = memo(function ThemeColorField({
           label={label}
           onChange={(nextValue) => onChange(role, nextValue)}
           onOpenChange={(open) => onPickerOpenChange?.(role, open)}
+          onEditCancel={() => onEditCancel?.(role)}
+          onEditStart={() => onEditStart?.(role)}
+          onInteract={() => onSelect?.(role)}
           value={swatchValue}
         />
         <Input
@@ -360,6 +388,8 @@ export const ThemeColorField = memo(function ThemeColorField({
           id={`${role}-hex`}
           nativeInput
           onChange={(event) => onChange(role, event.currentTarget.value)}
+          onFocus={() => onSelect?.(role)}
+          onPointerDown={() => onSelect?.(role)}
           size="compact"
           value={editorValue}
         />

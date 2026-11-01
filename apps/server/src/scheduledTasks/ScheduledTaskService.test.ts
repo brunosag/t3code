@@ -558,6 +558,10 @@ it.effect(
 
         const remind = yield* create("Remind", "2026-10-27T09:30:00-03:00");
         assert.equal(remind.task.nextRunAt, "2026-10-27T12:30:00.000Z");
+        // Running it by hand before its time keeps the task and its run.
+        yield* service.runNow({ id: remind.task.id });
+        const afterEarly = (yield* service.list()).tasks.find(({ id }) => id === remind.task.id);
+        assert.equal(afterEarly?.nextRunAt, "2026-10-27T12:30:00.000Z");
         const broken = yield* create("Broken", "2026-10-27T12:30:00Z");
 
         // Both come due while the server is asleep and run late.
