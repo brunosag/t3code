@@ -8,6 +8,7 @@ import {
   resolveSelectableProviderInstanceEntry,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
+import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import { getDisplayModelName, type ModelEsque } from "./providerIconUtils";
 
 // Fallback TTL: Claude's 1h cache plus slack.
@@ -97,6 +98,25 @@ export function resolveContextWindowModelDisplayName(
     ?.find((model) => model.slug === selection.model);
 
   return selectedModel ? getDisplayModelName(selectedModel) : selection.model;
+}
+
+/** The bar's full mark: auto-compaction when the provider reports it below the model's window. */
+export function contextWindowGauge(
+  usage: Pick<ContextWindowSnapshot, "usedTokens" | "maxTokens" | "autoCompactThreshold">,
+): { readonly limitTokens: number | null; readonly usedPercent: number | null } {
+  const maxTokens = usage.maxTokens != null && usage.maxTokens > 0 ? usage.maxTokens : null;
+  const threshold = usage.autoCompactThreshold ?? null;
+  const limitTokens =
+    threshold !== null && threshold > 0 && (maxTokens === null || threshold < maxTokens)
+      ? threshold
+      : maxTokens;
+  return {
+    limitTokens,
+    usedPercent:
+      limitTokens === null
+        ? null
+        : Math.round(Math.max(0, Math.min(100, (usage.usedTokens / limitTokens) * 100))),
+  };
 }
 
 export function formatContextWindowCompactionMessage(
