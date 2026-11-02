@@ -591,10 +591,10 @@ type MessagesTimelineRowContent =
       message: ChatMessage;
       projectedItem?: OrchestrationV2ProjectedTurnItem;
       showAssistantMeta: boolean;
+      /** The latest finished reply of a still-running response shows only its timestamp. */
+      showAssistantTimestamp: boolean;
       showAssistantCopyButton: boolean;
       assistantCopyStreaming: boolean;
-      /** The run's latest finished message while a question or approval pauses it. */
-      readAloudWhileAwaiting?: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
       /** Another of your messages follows directly, so the two sit closer together. */
@@ -1403,8 +1403,6 @@ export function deriveMessagesTimelineRows(input: {
   isWorking: boolean;
   /** Native subagent work has no app run; runless entries form the live response. */
   runlessWorkActive?: boolean;
-  /** A pending question or approval, which pauses the active run. */
-  awaitingUser?: boolean;
   activeTurnStartedAt?: string | null;
   turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
   supportsConversationRollback: boolean;
@@ -2031,16 +2029,10 @@ export function deriveMessagesTimelineRows(input: {
       timelineEntry.message.role === "assistant" &&
       runIdIsActiveResponse(timelineEntry.message.runId);
 
-    const showAssistantMeta =
+    const isTerminalAssistantMessage =
       timelineEntry.message.role === "assistant" &&
-      terminalAssistantMessageIds.has(timelineEntry.message.id) &&
-      !assistantResponseStillInProgress;
-
-    const readAloudWhileAwaiting =
-      input.awaitingUser === true &&
-      assistantResponseStillInProgress &&
-      !timelineEntry.message.streaming &&
       terminalAssistantMessageIds.has(timelineEntry.message.id);
+    const showAssistantMeta = isTerminalAssistantMessage && !assistantResponseStillInProgress;
 
     nextRows.push({
       kind: "message",
@@ -2051,9 +2043,12 @@ export function deriveMessagesTimelineRows(input: {
         ? {}
         : { projectedItem: timelineEntry.projectedItem }),
       showAssistantMeta,
+      showAssistantTimestamp:
+        isTerminalAssistantMessage &&
+        assistantResponseStillInProgress &&
+        !timelineEntry.message.streaming,
       showAssistantCopyButton: showAssistantMeta,
       assistantCopyStreaming: timelineEntry.message.streaming || assistantResponseStillInProgress,
-      ...(readAloudWhileAwaiting ? { readAloudWhileAwaiting } : {}),
       assistantTurnDiffSummary:
         timelineEntry.message.role === "assistant"
           ? turnDiffSummaryByAssistantMessageId.get(timelineEntry.message.id)
@@ -2515,9 +2510,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.message === bm.message &&
         a.projectedItem === bm.projectedItem &&
         a.showAssistantMeta === bm.showAssistantMeta &&
+        a.showAssistantTimestamp === bm.showAssistantTimestamp &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&
-        a.readAloudWhileAwaiting === bm.readAloudWhileAwaiting &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
         a.revertTurnCount === bm.revertTurnCount &&
         a.groupedWithNext === bm.groupedWithNext &&

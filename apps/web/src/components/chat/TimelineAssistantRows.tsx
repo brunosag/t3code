@@ -77,14 +77,13 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             showCopyButton={row.showAssistantCopyButton}
             copyStreaming={row.assistantCopyStreaming}
           />
-        ) : row.readAloudWhileAwaiting ? (
-          <div className="mt-1.5 flex items-center opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/assistant:opacity-100">
-            <ReadAloudButton
-              threadKey={ctx.routeThreadKey}
-              messageId={row.message.id}
-              text={row.message.text}
-            />
-          </div>
+        ) : row.showAssistantTimestamp ? (
+          <AssistantMessageMeta
+            className="mt-1.5"
+            message={row.message}
+            showCopyButton={false}
+            copyStreaming={row.assistantCopyStreaming}
+          />
         ) : null}
       </div>
     </>
