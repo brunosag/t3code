@@ -21,6 +21,8 @@ import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePat
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 import type { OtlpProtocol } from "@t3tools/shared/observability";
 
+export const DESKTOP_START_HIDDEN_ARG = "--hidden";
+
 export interface MakeDesktopEnvironmentInput {
   readonly dirname: string;
   readonly homeDirectory: string;
@@ -31,6 +33,8 @@ export interface MakeDesktopEnvironmentInput {
   readonly isPackaged: boolean;
   readonly resourcesPath: string;
   readonly runningUnderArm64Translation: boolean;
+  // Command-line arguments; `--hidden` starts without showing the main window.
+  readonly argv?: ReadonlyArray<string>;
 }
 
 export class DesktopEnvironment extends Context.Service<
@@ -45,6 +49,9 @@ export class DesktopEnvironment extends Context.Service<
     // Detached DevTools for the main window. Development only, and opt-in via
     // T3CODE_DESKTOP_DEVTOOLS so the dev app can be used as a daily driver.
     readonly openDevToolsOnStart: boolean;
+    // `--hidden` (a login autostart): load the main window without showing it,
+    // so the tray, a second launch or a deep link reveals it.
+    readonly startHidden: boolean;
     readonly appVersion: string;
     readonly appPath: string;
     readonly resourcesPath: string;
@@ -200,6 +207,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     isPackaged: input.isPackaged,
     isDevelopment,
     openDevToolsOnStart,
+    startHidden: input.argv?.includes(DESKTOP_START_HIDDEN_ARG) ?? false,
     appVersion: input.appVersion,
     appPath: input.appPath,
     resourcesPath,

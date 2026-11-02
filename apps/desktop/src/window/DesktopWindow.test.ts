@@ -200,8 +200,11 @@ const layerElectronTheme = Layer.succeed(ElectronTheme.ElectronTheme, {
   onUpdated: () => Effect.void,
 } satisfies ElectronTheme.ElectronTheme["Service"]);
 
-const makeLayerDesktopEnvironment = (env: Readonly<Record<string, string | undefined>> = {}) =>
-  DesktopEnvironment.layer(environmentInput).pipe(
+const makeLayerDesktopEnvironment = (
+  env: Readonly<Record<string, string | undefined>> = {},
+  argv?: ReadonlyArray<string>,
+) =>
+  DesktopEnvironment.layer({ ...environmentInput, ...(argv ? { argv } : {}) }).pipe(
     Layer.provide(
       Layer.mergeAll(
         NodeServices.layer,
@@ -227,6 +230,7 @@ function layerTest(input: {
   readonly createdWindowOptions?: Electron.BrowserWindowConstructorOptions[];
   readonly desktopSettings?: DesktopAppSettings.DesktopSettings;
   readonly desktopEnv?: Readonly<Record<string, string | undefined>>;
+  readonly argv?: ReadonlyArray<string>;
   readonly mainWindowBoundsUpdates?: DesktopAppSettings.DesktopWindowBounds[];
   readonly mainWindowMaximizedUpdates?: boolean[];
   readonly beforeMainWindowBoundsUpdate?: (
@@ -310,7 +314,9 @@ function layerTest(input: {
           recordMetrics: () => Effect.void,
           shutdown: Effect.void,
         }),
-        input.desktopEnv ? makeLayerDesktopEnvironment(input.desktopEnv) : layerDesktopEnvironment,
+        input.desktopEnv || input.argv
+          ? makeLayerDesktopEnvironment(input.desktopEnv, input.argv)
+          : layerDesktopEnvironment,
         layerDesktopAppSettings,
         layerDesktopClientSettings,
         layerDesktopServerExposure,
@@ -535,6 +541,117 @@ describe("DesktopWindow", () => {
 
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
         assert.deepEqual(fakeWindow.openDevTools.mock.calls[0], [{ mode: "detach" }]);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("keeps the first window of a --hidden start unshown until activated", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const revealed: Electron.BrowserWindow[] = [];
+      const layer = layerTest({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        desktopSettings: {
+          ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+          mainWindowMaximized: true,
+        },
+        argv: ["/app/t3code", "--hidden"],
+        onReveal: (window) => revealed.push(window),
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        fakeWindow.windowListeners.get("ready-to-show")?.();
+        assert.equal(revealed.length, 0);
+        assert.equal(fakeWindow.maximize.mock.calls.length, 0);
+
+        fakeWindow.windowListeners.get("show")?.();
+        assert.equal(fakeWindow.maximize.mock.calls.length, 1);
+
+        yield* desktopWindow.activate;
+        assert.deepEqual(revealed, [fakeWindow.window]);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("shows a --hidden start's window when activated before the backend is ready", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const revealed: Electron.BrowserWindow[] = [];
+      const layer = layerTest({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        argv: ["/app/t3code", "--hidden"],
+        onReveal: (window) => revealed.push(window),
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.activate;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        fakeWindow.windowListeners.get("ready-to-show")?.();
+        yield* Effect.yieldNow;
+        assert.deepEqual(revealed, [fakeWindow.window]);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("keeps the saved maximized state when quitting a --hidden start before showing", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const mainWindowMaximizedUpdates: boolean[] = [];
+      const layer = layerTest({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        desktopSettings: {
+          ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+          mainWindowMaximized: true,
+        },
+        mainWindowMaximizedUpdates,
+        argv: ["/app/t3code", "--hidden"],
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        fakeWindow.windowListeners.get("ready-to-show")?.();
+        yield* desktopWindow.flushMainWindowBounds;
+        assert.notInclude(mainWindowMaximizedUpdates, false);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("shows the first window of a normal start", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const revealed: Electron.BrowserWindow[] = [];
+      const layer = layerTest({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        argv: ["/app/t3code"],
+        onReveal: (window) => revealed.push(window),
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        fakeWindow.windowListeners.get("ready-to-show")?.();
+        yield* Effect.yieldNow;
+        assert.deepEqual(revealed, [fakeWindow.window]);
       }).pipe(Effect.provide(layer));
     }),
   );

@@ -99,6 +99,7 @@ const layerDesktopEnvironment = Layer.unwrap(
       homeDirectory: NodeOS.homedir(),
       platform,
       processArch,
+      argv: process.argv,
       ...metadata,
     });
   }),

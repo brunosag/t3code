@@ -227,7 +227,10 @@ export const make = DesktopLifecycle.of({
       }
       yield* electronApp.relaunch({
         execPath: process.execPath,
-        args: process.argv.slice(1),
+        // A relaunch (settings, recovery) brings the window back even after a hidden start.
+        args: process.argv
+          .slice(1)
+          .filter((arg) => arg !== DesktopEnvironment.DESKTOP_START_HIDDEN_ARG),
       });
       yield* electronApp.exit(0);
     }).pipe(
