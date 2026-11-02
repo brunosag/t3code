@@ -25,7 +25,6 @@ Test fixtures on this machine:
 ## Retained changes
 
 - **Claude thinking quotes:** web and desktop do not offer quoting on Claude thinking items; the Claude adapter also removes saved thinking citations while preserving user comments, whichever client sent them. Other providers keep their quoting behavior.
-- **Question lead-ins:** Claude 5.1+ thinking right before an `AskUserQuestion` shows as assistant text, even when it is the turn's only thought before the question, so the user sees what the agent wrote before answering. Other tool calls keep upstream's rule.
 - **Question drafts:** written answers to agent questions survive web reloads. Choosing an option moves a written answer into the thread draft.
 - **Self-settled threads compact:** a thread its own agent settled (it waits for its next event, such as a reminder or a message) still gets idle compaction before its cache expires, from 100K tokens instead of 200K, and stays settled through the `/compact` turn. Threads settled any other way are still skipped.
 - **Delegates don't hold off compaction:** a running `delegate_task` child does not stop its parent's idle compaction, because its result queues behind the `/compact` turn. Claude's own background work (background shell, native subagents) still does.
