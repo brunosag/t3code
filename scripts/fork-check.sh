@@ -24,6 +24,8 @@ vp test run \
   packages/shared/src/assistantCitations.test.ts \
   apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts \
   apps/server/src/usage/cliproxyApi.test.ts \
+  apps/server/src/usage/UsageLimitHistory.test.ts \
+  packages/shared/src/usageLimitRunway.test.ts \
   apps/web/src/components/GitActionsControl.logic.test.ts \
   apps/web/src/pendingUserInput.test.ts \
   apps/web/src/components/chat/MessagesTimeline.logic.test.ts \

@@ -375,6 +375,10 @@
       "types": "./src/usageLimits.ts",
       "import": "./src/usageLimits.ts"
     },
+    "./usageLimitRunway": {
+      "types": "./src/usageLimitRunway.ts",
+      "import": "./src/usageLimitRunway.ts"
+    },
     "./desktopAppControl": {
       "types": "./src/desktopAppControl.ts",
       "import": "./src/desktopAppControl.ts"

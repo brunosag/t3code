@@ -1,0 +1,82 @@
+import type { ServerProviderUsageWindow } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import { describe, expect, it } from "vite-plus/test";
+
+import { limitRunway } from "./usageLimitRunway.ts";
+
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+const now = Date.parse("2026-11-02T14:00:00.000Z");
+const iso = (at: number) => DateTime.formatIso(DateTime.makeUnsafe(at));
+
+const weekly = (
+  usedPercent: number,
+  resetsIn: number,
+  history?: ServerProviderUsageWindow["history"],
+): { readonly window: ServerProviderUsageWindow } => ({
+  window: {
+    id: "seven_day",
+    kind: "weekly",
+    label: "Weekly",
+    usedPercent,
+    resetsAt: iso(now + resetsIn),
+    windowDurationMins: 7 * 24 * 60,
+    ...(history ? { history } : {}),
+  },
+});
+
+/** Hourly buckets ending now, one value per hour. */
+const hourly = (values: readonly number[]) => ({
+  startsAt: iso(now - values.length * HOUR),
+  usedPercent: values,
+});
+
+describe("limitRunway", () => {
+  it("sets the safe burn by the refill that binds it", () => {
+    // 30% of the pool now and B's 50% back in a day must last until A resets.
+    const runway = limitRunway(
+      { members: [weekly(40, 5 * DAY + 3 * HOUR), weekly(100, DAY)] },
+      now,
+    );
+    expect(runway?.safe?.perDay).toBeCloseTo(80 / (5 + 3 / 24), 3);
+    expect(runway?.safe?.until).toBe(now + 5 * DAY + 3 * HOUR);
+    expect(runway?.burnPerDay).toBeNull();
+    expect(runway?.refills).toEqual([
+      { at: now + DAY, percent: 50 },
+      { at: now + 5 * DAY + 3 * HOUR, percent: 20 },
+    ]);
+    expect(runway?.out).toBeNull();
+  });
+
+  it("reads the last day's burn across a reset", () => {
+    // A reset 11.5 hours ago, between the readings for 13:00 and 14:00 hours back.
+    const a = [...Array.from({ length: 36 }, () => 90), ...Array.from({ length: 12 }, () => 5)];
+    const runway = limitRunway(
+      {
+        members: [
+          weekly(20, 7 * DAY - 11.5 * HOUR, hourly(a)),
+          weekly(100, 2 * DAY, hourly(Array.from({ length: 48 }, () => 100))),
+        ],
+      },
+      now,
+    );
+    // A spent 5% after the reset and 15% since; B spent nothing.
+    expect(runway?.burnPerDay).toBeCloseTo(10, 6);
+    expect(runway?.past.at(-1)).toEqual({ at: now, remaining: 40 });
+
+    const young = limitRunway(
+      { members: [weekly(20, 3 * DAY, hourly(Array.from({ length: 12 }, () => 10)))] },
+      now,
+    );
+    expect(young?.burnPerDay).toBeNull();
+  });
+
+  it("projects the stretch the current burn runs dry", () => {
+    // 20% a day empties the 30% left in 1.5 days, a day before A resets.
+    const values = Array.from({ length: 48 }, (_, index) => 70 - (47 - index) * (20 / 24));
+    const runway = limitRunway({ members: [weekly(70, 2.5 * DAY, hourly(values))] }, now);
+    expect(runway?.burnPerDay).toBeCloseTo(20, 6);
+    expect(runway?.out).toEqual({ at: now + 1.5 * DAY, until: now + 2.5 * DAY });
+    expect(runway?.safe?.perDay).toBeCloseTo(12, 3);
+  });
+});

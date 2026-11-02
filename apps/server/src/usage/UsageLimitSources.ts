@@ -15,6 +15,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Semaphore from "effect/Semaphore";
@@ -23,6 +24,7 @@ import * as Stream from "effect/Stream";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as Settings from "../serverSettings.ts";
 import { makeCliproxyApi } from "./cliproxyApi.ts";
+import { UsageLimitHistory } from "./UsageLimitHistory.ts";
 
 export class UsageLimitSources extends Context.Service<
   UsageLimitSources,
@@ -53,6 +55,7 @@ export const make = Effect.gen(function* () {
   const api = yield* makeCliproxyApi;
   const settingsService = yield* Settings.ServerSettingsService;
   const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
+  const history = yield* Effect.serviceOption(UsageLimitHistory);
   const stateRef = yield* Ref.make<ReadonlyArray<UsageLimitSourceSnapshot>>([]);
   const changes = yield* Effect.acquireRelease(
     PubSub.unbounded<ReadonlyArray<UsageLimitSourceSnapshot>>(),
@@ -83,8 +86,9 @@ export const make = Effect.gen(function* () {
   });
 
   const publish = Effect.fn("UsageLimitSources.publish")(function* (
-    next: ReadonlyArray<UsageLimitSourceSnapshot>,
+    read: ReadonlyArray<UsageLimitSourceSnapshot>,
   ) {
+    const next = Option.isSome(history) ? yield* history.value.annotate(read) : read;
     const changed = yield* Ref.modify(stateRef, (previous) =>
       Equal.equals(previous, next) ? [false, previous] : [true, next],
     );

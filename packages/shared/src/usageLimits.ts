@@ -252,6 +252,18 @@ export interface LimitAccount {
   readonly limits: ServerProviderUsageLimits;
 }
 
+// Only hub sources record readings, so keep them when another report of the login is fresher.
+function keepHistory(
+  windows: ReadonlyArray<ServerProviderUsageWindow>,
+  other: ReadonlyArray<ServerProviderUsageWindow>,
+): ReadonlyArray<ServerProviderUsageWindow> {
+  return windows.map((window) => {
+    if (window.history) return window;
+    const history = other.find((candidate) => candidate.id === window.id)?.history;
+    return history ? { ...window, history } : window;
+  });
+}
+
 export function collectLimitAccounts(presentations: LimitPresentations): readonly LimitAccount[] {
   const accounts = new Map<string, LimitAccount>();
   const creditSources = new Map<string, LimitAccount>();
@@ -311,6 +323,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         (creditSource ? creditSource.redeem : (winner.redeem ?? previous.redeem ?? next.redeem)),
       limits: {
         ...winner.limits,
+        windows: keepHistory(winner.limits.windows, (fresher ? previous : next).limits.windows),
         ...(creditSource?.limits.resetCredits
           ? { resetCredits: creditSource.limits.resetCredits }
           : { resetCredits: undefined }),
