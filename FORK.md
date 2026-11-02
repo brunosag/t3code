@@ -37,6 +37,7 @@ Test fixtures on this machine:
 - **Subagent effort labels:** a provider-native subagent shows an effort only when one was chosen or reported, not the model's catalog default.
 - **Model picker on touch:** opening the model picker or switching its provider tab by touch or pen does not focus the search, so the on-screen keyboard stays down. Mouse and keyboard still focus it.
 - **Sharp sheets:** sheets, including the narrow-window sidebar, and the sidebar's provider update pill do not keep `will-change: transform`. With it, Chromium keeps the layer rasterized mid-slide at a fractional scale, so the text stays blurry after it settles.
+- **Re-saved chat images:** each assistant message mints its own URL for a local image it embeds, so a later message showing a file re-saved under the same path shows the new contents instead of the browser's cached copy. Tested in `TimelineAssistantRows.test.tsx`.
 - **Theme editor:** the role spotlight pauses while a color picker is open, so a color is judged against the unobscured app.
 - **Project group names:** a title every grouped project shares names the group, even when it equals the repository name.
 - **Project defaults:** provider-selected repositories and owner/repository shorthand clone over SSH; explicit pasted URLs keep their transport. Settings can choose the base directory for new named projects.
