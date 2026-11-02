@@ -79,7 +79,7 @@ function PoolWindowCard({
   readonly description?: string | undefined;
 }) {
   const runway = limitRunway(pool, now);
-  return runway ? (
+  return runway?.paced ? (
     <RunwayCard
       pool={pool}
       runway={runway}
@@ -89,7 +89,14 @@ function PoolWindowCard({
       now={now}
     />
   ) : (
-    <BalanceCard pool={pool} label={label} description={description} now={now} />
+    <BalanceCard
+      pool={pool}
+      runway={runway}
+      label={label}
+      description={description}
+      color={color}
+      now={now}
+    />
   );
 }
 

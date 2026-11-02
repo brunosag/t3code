@@ -7,7 +7,8 @@ import { usePrimarySettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { formatShortTimestamp, formatUpcomingTimestamp } from "../../timestampFormat";
 
-const DAY = 86_400_000;
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
 const weekdayFormatter = new Intl.DateTimeFormat(undefined, { weekday: "short" });
 const dateFormatter = new Intl.DateTimeFormat(undefined, { month: "numeric", day: "numeric" });
 
@@ -56,16 +57,20 @@ function Headline({ label, remaining }: { readonly label: string; readonly remai
   );
 }
 
-/** Session-length windows burn in bursts, so they show only what is left and when more arrives. */
+/** Session-length windows burn in bursts, so they show what is left and when more arrives, without a pace. */
 export function BalanceCard({
   pool,
+  runway,
   label,
   description,
+  color,
   now,
 }: {
   readonly pool: LimitPoolWindow;
+  readonly runway: LimitRunway | null;
   readonly label: string;
   readonly description: string | undefined;
+  readonly color: string;
   readonly now: number;
 }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
@@ -88,6 +93,7 @@ export function BalanceCard({
           </span>
         ) : null}
       </div>
+      {runway ? <RunwayChart runway={runway} color={color} now={now} label={label} /> : null}
     </Card>
   );
 }
@@ -172,7 +178,7 @@ function RunwayChart({
     ...refill,
     top: runway.projection.findLast((point) => point.at === refill.at)?.remaining ?? 0,
   }));
-  const ticks = axisTicks(runway.from, runway.to);
+  const ticks = axisTicks(runway.from, runway.to, timestampFormat);
   const out = runway.out;
   return (
     <div
@@ -263,8 +269,20 @@ function RunwayChart({
   );
 }
 
-/** Weekday names centred on each day, or a date each week for longer windows. */
-function axisTicks(from: number, to: number) {
+/** Hours for spans under a day, weekday names centred on each day, or a date each week beyond. */
+function axisTicks(from: number, to: number, timestampFormat: TimestampFormat) {
+  if (to - from < DAY) {
+    const step = to - from <= 12 * HOUR ? 2 * HOUR : 4 * HOUR;
+    const hourFormatter = new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      ...(timestampFormat === "locale" ? {} : { hour12: timestampFormat === "12-hour" }),
+    });
+    const ticks: Array<{ at: number; label: string }> = [];
+    for (let at = startOfDay(from); at < to; at += step) {
+      if (at > from) ticks.push({ at, label: hourFormatter.format(at) });
+    }
+    return ticks;
+  }
   const weekly = to - from <= 10 * DAY;
   const ticks: Array<{ at: number; label: string }> = [];
   for (

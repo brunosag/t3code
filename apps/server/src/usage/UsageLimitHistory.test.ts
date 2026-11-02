@@ -53,7 +53,7 @@ const snapshot = (weeklyUsed: number): UsageLimitSourceSnapshot[] => [
 const windows = (snapshots: ReadonlyArray<UsageLimitSourceSnapshot>) =>
   snapshots[0]!.accounts[0]!.usageLimits.windows;
 
-it("keeps each hour's last weekly reading for two days", () => {
+it("keeps each step's last reading: weekly hourly for two days, session by ten minutes for one", () => {
   let readings = UsageLimitHistory.recordReadings({}, snapshot(10), start + 20 * 60_000);
   readings = UsageLimitHistory.recordReadings(readings, snapshot(12), start + 50 * 60_000);
   readings = UsageLimitHistory.recordReadings(
@@ -62,15 +62,23 @@ it("keeps each hour's last weekly reading for two days", () => {
     start + 2 * HOUR + 5 * 60_000,
   );
   const [session, weekly] = windows(UsageLimitHistory.attachHistory(readings, snapshot(15)));
-  expect(session?.history).toBeUndefined();
+  expect(session?.history).toEqual({
+    startsAt: "2026-11-02T10:20:00.000Z",
+    stepMins: 10,
+    usedPercent: [50, null, null, 50, ...Array.from({ length: 6 }, () => null), 50],
+  });
   expect(weekly?.history).toEqual({
     startsAt: "2026-11-02T10:00:00.000Z",
+    stepMins: 60,
     usedPercent: [12, null, 15],
   });
 
   const later = UsageLimitHistory.recordReadings(readings, snapshot(30), start + 49 * HOUR);
-  expect(windows(UsageLimitHistory.attachHistory(later, snapshot(30)))[1]?.history).toEqual({
+  const [laterSession, laterWeekly] = windows(UsageLimitHistory.attachHistory(later, snapshot(30)));
+  expect(laterSession?.history?.usedPercent).toEqual([50]);
+  expect(laterWeekly?.history).toEqual({
     startsAt: "2026-11-02T12:00:00.000Z",
+    stepMins: 60,
     usedPercent: [15, ...Array.from({ length: 46 }, () => null), 30],
   });
 });

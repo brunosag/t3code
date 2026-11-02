@@ -14,12 +14,24 @@ import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
 
-const HOUR = 3_600_000;
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
 // Burn is read over the last day against the reading a day before it, so keep two.
-const KEEP_HOURS = 48;
-const MIN_WINDOW_MINS = 24 * 60;
+const KEEP = 48 * HOUR;
 
-/** Window key, then hour start (epoch ms), to the last usedPercent read in that hour. */
+/** Day-long windows keep two days hourly; shorter ones keep one window in ten-minute steps. */
+function bucketsOf(windowMins: number) {
+  return windowMins >= 24 * 60
+    ? { step: HOUR, keep: KEEP }
+    : { step: 10 * MINUTE, keep: windowMins * MINUTE };
+}
+
+function prune(steps: Record<string, number>, now: number, step: number, keep: number) {
+  const oldest = Math.floor(now / step) * step - keep + step;
+  return Object.fromEntries(Object.entries(steps).filter(([at]) => Number(at) >= oldest));
+}
+
+/** Window key, then step start (epoch ms), to the last usedPercent read in that step. */
 const Readings = Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Number));
 type Readings = typeof Readings.Type;
 const ReadingsJson = Schema.fromJsonString(Readings);
@@ -35,8 +47,14 @@ function trackedWindows(snapshots: ReadonlyArray<UsageLimitSourceSnapshot>) {
       account.usageLimits.unavailable
         ? []
         : account.usageLimits.windows.flatMap((window) =>
-            (window.windowDurationMins ?? 0) >= MIN_WINDOW_MINS
-              ? [{ key: windowKey(source.id, account.id, window.id), window }]
+            (window.windowDurationMins ?? 0) > 0
+              ? [
+                  {
+                    key: windowKey(source.id, account.id, window.id),
+                    window,
+                    ...bucketsOf(window.windowDurationMins ?? 0),
+                  },
+                ]
               : [],
           ),
     ),
@@ -48,15 +66,17 @@ export function recordReadings(
   snapshots: ReadonlyArray<UsageLimitSourceSnapshot>,
   now: number,
 ): Readings {
-  const hour = Math.floor(now / HOUR) * HOUR;
-  const oldest = hour - (KEEP_HOURS - 1) * HOUR;
   const next: Record<string, Record<string, number>> = {};
-  for (const [key, hours] of Object.entries(readings)) {
-    const kept = Object.entries(hours).filter(([at]) => Number(at) >= oldest);
-    if (kept.length > 0) next[key] = Object.fromEntries(kept);
+  // Windows no longer reported still age out.
+  for (const [key, steps] of Object.entries(readings)) {
+    const kept = prune(steps, now, HOUR, KEEP);
+    if (Object.keys(kept).length > 0) next[key] = kept;
   }
-  for (const { key, window } of trackedWindows(snapshots)) {
-    next[key] = { ...next[key], [hour]: window.usedPercent };
+  for (const { key, window, step, keep } of trackedWindows(snapshots)) {
+    next[key] = {
+      ...prune(next[key] ?? {}, now, step, keep),
+      [Math.floor(now / step) * step]: window.usedPercent,
+    };
   }
   return next;
 }
@@ -72,16 +92,18 @@ export function attachHistory(
       usageLimits: {
         ...account.usageLimits,
         windows: account.usageLimits.windows.map((window) => {
-          const hours = readings[windowKey(source.id, account.id, window.id)];
-          if ((window.windowDurationMins ?? 0) < MIN_WINDOW_MINS || !hours) return window;
-          const starts = Object.keys(hours).map(Number);
+          const steps = readings[windowKey(source.id, account.id, window.id)];
+          if (!window.windowDurationMins || !steps) return window;
+          const { step } = bucketsOf(window.windowDurationMins);
+          const starts = Object.keys(steps).map(Number);
           const first = Math.min(...starts);
-          const count = (Math.max(...starts) - first) / HOUR + 1;
+          const count = (Math.max(...starts) - first) / step + 1;
           return {
             ...window,
             history: {
               startsAt: DateTime.formatIso(DateTime.makeUnsafe(first)),
-              usedPercent: Array.from({ length: count }, (_, i) => hours[first + i * HOUR] ?? null),
+              stepMins: step / MINUTE,
+              usedPercent: Array.from({ length: count }, (_, i) => steps[first + i * step] ?? null),
             },
           };
         }),
@@ -93,7 +115,7 @@ export function attachHistory(
 export class UsageLimitHistory extends Context.Service<
   UsageLimitHistory,
   {
-    /** Records each long window's reading and returns the snapshots with their recent history. */
+    /** Records each window's reading and returns the snapshots with their recent history. */
     readonly annotate: (
       snapshots: ReadonlyArray<UsageLimitSourceSnapshot>,
     ) => Effect.Effect<ReadonlyArray<UsageLimitSourceSnapshot>>;

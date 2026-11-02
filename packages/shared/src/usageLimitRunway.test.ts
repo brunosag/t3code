@@ -79,4 +79,60 @@ describe("limitRunway", () => {
     expect(runway?.out).toEqual({ at: now + 1.5 * DAY, until: now + 2.5 * DAY });
     expect(runway?.safe?.perDay).toBeCloseTo(12, 3);
   });
+
+  it("charts a session's refills without a pace", () => {
+    const session = (
+      window: Pick<ServerProviderUsageWindow, "usedPercent" | "resetsAt" | "history">,
+    ) => ({
+      window: {
+        id: "five_hour",
+        kind: "session" as const,
+        label: "Session",
+        windowDurationMins: 300,
+        ...window,
+      },
+    });
+    // A filled up over the last half hour; B is unused, so its window has not started; C is blocked
+    // behind its spent weekly quota until Thursday.
+    const runway = limitRunway(
+      {
+        members: [
+          session({
+            usedPercent: 60,
+            resetsAt: iso(now + HOUR),
+            history: { startsAt: iso(now - 30 * 60_000), stepMins: 10, usedPercent: [20, 40, 60] },
+          }),
+          session({
+            usedPercent: 0,
+            history: { startsAt: iso(now - 30 * 60_000), stepMins: 10, usedPercent: [0, 0, 0] },
+          }),
+          {
+            window: {
+              id: "five_hour",
+              kind: "session",
+              label: "Session",
+              usedPercent: 100,
+              resetsAt: iso(now + 3 * DAY),
+              history: { startsAt: iso(now - 30 * 60_000), stepMins: 10, usedPercent: [0, 0, 0] },
+            },
+          },
+        ],
+      },
+      now,
+    );
+    expect(runway).toMatchObject({
+      from: now - 5 * HOUR,
+      to: now + 5 * HOUR,
+      paced: false,
+      burnPerDay: null,
+      safe: null,
+      out: null,
+      refills: [{ at: now + HOUR, percent: 20 }],
+    });
+    expect(runway?.past.map(({ at, remaining }) => [at, Math.round(remaining)])).toEqual([
+      [now - 20 * 60_000, 60],
+      [now - 10 * 60_000, 53],
+      [now, 47],
+    ]);
+  });
 });

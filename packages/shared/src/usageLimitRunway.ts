@@ -18,8 +18,11 @@ export interface RunwayPoint {
 }
 
 export interface LimitRunway {
+  /** Up to two days back, or now when nothing is recorded. */
   readonly from: number;
   readonly to: number;
+  /** Whether burn and safe pace apply: day-or-longer windows. Shorter ones fill in bursts. */
+  readonly paced: boolean;
   /** Recorded pool balance, ending now; empty until the server has readings. */
   readonly past: readonly RunwayPoint[];
   /** Balance ahead at the current burn, or with no more use when the burn is unknown. */
@@ -40,13 +43,27 @@ interface Account {
   readonly cap: number;
 }
 
+/** A session the pool blocks behind its spent weekly quota: no clock of its own, nothing usable. */
+function blocked(window: ServerProviderUsageWindow) {
+  return window.windowDurationMins === undefined && window.usedPercent >= 100;
+}
+
 function accountsOf(pool: Pool, now: number): Account[] | null {
   const cap = 100 / pool.members.length;
   const accounts: Account[] = [];
   for (const { window } of pool.members) {
+    if (blocked(window)) {
+      const reset = window.resetsAt ? Date.parse(window.resetsAt) : Infinity;
+      accounts.push({ balance: 0, reset: reset > now ? reset : Infinity, period: Infinity, cap });
+      continue;
+    }
     const period = (window.windowDurationMins ?? 0) * MINUTE;
-    const reset = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
-    if (period < DAY || !Number.isFinite(reset)) return null;
+    let reset = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+    // An unused session has no clock yet; it starts full and starts counting on first use.
+    if (!Number.isFinite(reset) && period > 0 && period < DAY && window.usedPercent === 0) {
+      reset = Infinity;
+    }
+    if (period <= 0 || Number.isNaN(reset)) return null;
     // A reading taken before its own reset means the window has since refilled.
     const missed = reset > now ? 0 : Math.floor((now - reset) / period) + 1;
     accounts.push({
@@ -56,7 +73,7 @@ function accountsOf(pool: Pool, now: number): Account[] | null {
       cap,
     });
   }
-  return accounts.length > 0 ? accounts : null;
+  return accounts.some((account) => Number.isFinite(account.period)) ? accounts : null;
 }
 
 /** Spends from the account that resets first, since its quota is lost at the reset. */
@@ -121,10 +138,11 @@ function readings(window: ServerProviderUsageWindow, now: number) {
   const history = window.history;
   if (!history) return null;
   const start = Date.parse(history.startsAt);
-  // Each bucket holds the hour's last reading, so date it to the hour's end.
+  const step = (history.stepMins ?? 60) * MINUTE;
+  // Each bucket holds its step's last reading, so date it to the step's end.
   return [
     ...history.usedPercent.flatMap((used, index) =>
-      used === null ? [] : [{ at: Math.min(start + (index + 1) * HOUR, now), used }],
+      used === null ? [] : [{ at: Math.min(start + (index + 1) * step, now), used }],
     ),
     { at: now, used: window.usedPercent },
   ];
@@ -157,21 +175,26 @@ function burnPerDay(pool: Pool, now: number): number | null {
   return total / pool.members.length;
 }
 
-function pastBalance(pool: Pool, now: number): RunwayPoint[] {
-  const byAccount = pool.members.map(
-    ({ window }) =>
-      new Map((readings(window, now) ?? []).slice(0, -1).map((sample) => [sample.at, sample.used])),
+function pastBalance(pool: Pool, from: number, now: number): RunwayPoint[] {
+  // A blocked session's own readings show quota it cannot use, so it counts as empty.
+  const byAccount = pool.members.map(({ window }) =>
+    blocked(window)
+      ? null
+      : new Map(
+          (readings(window, now) ?? []).slice(0, -1).map((sample) => [sample.at, sample.used]),
+        ),
   );
-  const [first, ...rest] = byAccount;
+  const [first, ...rest] = byAccount.filter((account) => account !== null);
   if (!first) return [];
   const shared = [...first.keys()].filter(
-    (at) => at >= now - PAST && at < now && rest.every((account) => account.has(at)),
+    (at) => at >= from && at < now && rest.every((account) => account.has(at)),
   );
   return [
     ...shared.map((at) => ({
       at,
       remaining:
-        byAccount.reduce((sum, account) => sum + (100 - account.get(at)!), 0) / byAccount.length,
+        byAccount.reduce((sum, account) => sum + (account ? 100 - account.get(at)! : 0), 0) /
+        byAccount.length,
     })),
     {
       at: now,
@@ -182,22 +205,28 @@ function pastBalance(pool: Pool, now: number): RunwayPoint[] {
   ];
 }
 
-/** Pools of day-or-longer windows with reset clocks; shorter windows burn in bursts, so get none. */
+/** Spans one window ahead and up to two days back; windows shorter than a day get no burn or pace. */
 export function limitRunway(pool: Pool, now: number): LimitRunway | null {
   const accounts = accountsOf(pool, now);
   if (!accounts) return null;
-  const to = now + Math.max(...accounts.map((account) => account.period));
-  const burn = burnPerDay(pool, now);
-  const { points, refills, out } = simulate(accounts, burn ?? 0, now, to);
-  const past = pastBalance(pool, now);
+  const period = Math.max(
+    ...accounts.flatMap((account) => (Number.isFinite(account.period) ? [account.period] : [])),
+  );
+  const paced = accounts.every((account) => account.period >= DAY);
+  const from = now - Math.min(PAST, period);
+  const burn = paced ? burnPerDay(pool, now) : null;
+  const { points, refills, out } = simulate(accounts, burn ?? 0, now, now + period);
+  const past = pastBalance(pool, from, now);
+  const recorded = past.length > 1;
   return {
-    from: now - PAST,
-    to,
-    past: past.length > 1 ? past : [],
+    from: recorded ? from : now,
+    to: now + period,
+    paced,
+    past: recorded ? past : [],
     projection: points,
     refills,
     out,
     burnPerDay: burn,
-    safe: safeBurn(accounts, now),
+    safe: paced ? safeBurn(accounts, now) : null,
   };
 }
