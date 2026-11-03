@@ -3,10 +3,11 @@ import { expect, it } from "@effect/vitest";
 import { ServerConfigStreamEvent, UsageLimitSourceId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
-import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as UsageLimitSources from "./UsageLimitSources.ts";
 
@@ -71,9 +72,6 @@ it.effect("keeps malformed source URLs encodable for config subscribers", () =>
           },
         },
       }),
-      Layer.mock(BackgroundPolicy.BackgroundPolicy)({
-        shouldRunScopeWork: () => Effect.succeed(false),
-      }),
       Layer.succeed(
         HttpClient.HttpClient,
         HttpClient.make(() => Effect.die("Unexpected network request")),
@@ -116,9 +114,6 @@ it.effect("labels hub accounts with their saved name and image", () =>
           },
         },
       }),
-      Layer.mock(BackgroundPolicy.BackgroundPolicy)({
-        shouldRunScopeWork: () => Effect.succeed(false),
-      }),
       Layer.succeed(
         HttpClient.HttpClient,
         HttpClient.make((request) =>
@@ -140,6 +135,42 @@ it.effect("labels hub accounts with their saved name and image", () =>
           ),
         ),
       ),
+      NodeCrypto.layer,
+    ]),
+    Effect.scoped,
+  ),
+);
+
+it.effect("reads the hub on its interval with no client open", () =>
+  Effect.gen(function* () {
+    const reads = yield* Queue.unbounded<void>();
+    yield* UsageLimitSources.make.pipe(
+      Effect.provide(
+        Layer.succeed(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Queue.offer(reads, undefined).pipe(
+              Effect.as(HttpClientResponse.fromWeb(request, Response.json({ files: [] }))),
+            ),
+          ),
+        ),
+      ),
+    );
+    yield* Queue.take(reads);
+    yield* TestClock.adjust("5 minutes");
+    yield* Queue.take(reads);
+  }).pipe(
+    Effect.provide([
+      ServerSettings.layerTest({
+        usageLimitSources: {
+          [UsageLimitSourceId.make("hub")]: {
+            kind: "cliproxy",
+            url: "http://hub.test:8317",
+            managementKey: "management-secret",
+            enabled: true,
+          },
+        },
+      }),
       NodeCrypto.layer,
     ]),
     Effect.scoped,

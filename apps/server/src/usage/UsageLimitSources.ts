@@ -21,7 +21,6 @@ import * as Ref from "effect/Ref";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
-import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as Settings from "../serverSettings.ts";
 import { makeCliproxyApi } from "./cliproxyApi.ts";
 import { UsageLimitHistory } from "./UsageLimitHistory.ts";
@@ -54,7 +53,6 @@ function sourceLabel(id: string, config: UsageLimitSourceConfig): string {
 export const make = Effect.gen(function* () {
   const api = yield* makeCliproxyApi;
   const settingsService = yield* Settings.ServerSettingsService;
-  const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
   const history = yield* Effect.serviceOption(UsageLimitHistory);
   const stateRef = yield* Ref.make<ReadonlyArray<UsageLimitSourceSnapshot>>([]);
   const changes = yield* Effect.acquireRelease(
@@ -167,16 +165,12 @@ export const make = Effect.gen(function* () {
     ),
     Effect.orElseSucceed(() => DEFAULT_PROVIDER_HEALTH_REFRESH_INTERVAL),
   );
+  // Runs with no client open too, so the recorded history has no gaps while nobody looks.
   yield* Effect.forever(
     interval.pipe(
       Effect.flatMap((wait) => Effect.sleep(Duration.isPositive(wait) ? wait : "60 seconds")),
       Effect.andThen(interval),
-      Effect.flatMap((current) =>
-        Duration.isPositive(current)
-          ? backgroundPolicy.shouldRunScopeWork({ type: "provider-status" })
-          : Effect.succeed(false),
-      ),
-      Effect.flatMap((shouldRun) => (shouldRun ? refresh : Effect.void)),
+      Effect.flatMap((current) => (Duration.isPositive(current) ? refresh : Effect.void)),
       Effect.ignoreCause({ log: true }),
     ),
   ).pipe(Effect.forkScoped);
