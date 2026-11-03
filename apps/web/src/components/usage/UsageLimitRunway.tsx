@@ -215,14 +215,18 @@ function RunwayChart({
           preserveAspectRatio="none"
           className="absolute inset-0 size-full overflow-visible"
         >
-          <polygon points={area(runway.past)} fill={color} fillOpacity={0.3} />
-          <polyline
-            points={line(runway.past)}
-            fill="none"
-            stroke={color}
-            strokeWidth={2}
-            vectorEffect="non-scaling-stroke"
-          />
+          {runway.past.map((stretch) => (
+            <g key={stretch[0]!.at}>
+              <polygon points={area(stretch)} fill={color} fillOpacity={0.3} />
+              <polyline
+                points={line(stretch)}
+                fill="none"
+                stroke={color}
+                strokeWidth={2}
+                vectorEffect="non-scaling-stroke"
+              />
+            </g>
+          ))}
           <polygon points={area(runway.projection)} fill={color} fillOpacity={0.1} />
           <polyline
             points={line(runway.projection)}

@@ -65,7 +65,7 @@ describe("limitRunway", () => {
     );
     // A spent 5% after the reset and 15% since; B spent nothing.
     expect(runway?.burnPerDay).toBeCloseTo(10, 6);
-    expect(runway?.past.at(-1)).toEqual({ at: now, remaining: 40 });
+    expect(runway?.past.at(-1)?.at(-1)).toEqual({ at: now, remaining: 40 });
 
     const young = limitRunway(
       { members: [weekly(20, 3 * DAY, hourly(Array.from({ length: 12 }, () => 10)))] },
@@ -95,7 +95,7 @@ describe("limitRunway", () => {
         ...window,
       },
     });
-    // A filled up over the last half hour; B is unused, so its window has not started; C is blocked
+    // A filled up over the last hour, with no readings for half of it; B is unused, so its window has not started; C is blocked
     // behind its spent weekly quota until Thursday.
     const runway = limitRunway(
       {
@@ -103,11 +103,19 @@ describe("limitRunway", () => {
           session({
             usedPercent: 60,
             resetsAt: iso(now + HOUR),
-            history: { startsAt: iso(now - 30 * 60_000), stepMins: 10, usedPercent: [20, 40, 60] },
+            history: {
+              startsAt: iso(now - HOUR),
+              stepMins: 10,
+              usedPercent: [20, 30, null, null, 40, 60],
+            },
           }),
           session({
             usedPercent: 0,
-            history: { startsAt: iso(now - 30 * 60_000), stepMins: 10, usedPercent: [0, 0, 0] },
+            history: {
+              startsAt: iso(now - HOUR),
+              stepMins: 10,
+              usedPercent: [0, 0, null, null, 0, 0],
+            },
           }),
           {
             window: {
@@ -132,10 +140,19 @@ describe("limitRunway", () => {
       out: null,
       refills: [{ at: now + HOUR, percent: 20 }],
     });
-    expect(runway?.past.map(({ at, remaining }) => [at, Math.round(remaining)])).toEqual([
-      [now - 20 * 60_000, 60],
-      [now - 10 * 60_000, 53],
-      [now, 47],
+    expect(
+      runway?.past.map((stretch) =>
+        stretch.map(({ at, remaining }) => [at, Math.round(remaining)]),
+      ),
+    ).toEqual([
+      [
+        [now - 50 * 60_000, 60],
+        [now - 40 * 60_000, 57],
+      ],
+      [
+        [now - 10 * 60_000, 53],
+        [now, 47],
+      ],
     ]);
   });
 });

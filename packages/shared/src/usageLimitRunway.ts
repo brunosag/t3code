@@ -23,8 +23,8 @@ export interface LimitRunway {
   readonly to: number;
   /** Whether burn and safe pace apply: day-or-longer windows. Shorter ones fill in bursts. */
   readonly paced: boolean;
-  /** Recorded pool balance, ending now; empty until the server has readings. */
-  readonly past: readonly RunwayPoint[];
+  /** Recorded pool balance in unbroken stretches, the last ending now; empty until the server has readings. */
+  readonly past: ReadonlyArray<readonly RunwayPoint[]>;
   /** Balance ahead at the current burn; at the safe pace while the burn is unknown, or with no more use without a pace. */
   readonly projection: readonly RunwayPoint[];
   readonly refills: ReadonlyArray<{ readonly at: number; readonly percent: number }>;
@@ -175,7 +175,7 @@ function burnPerDay(pool: Pool, now: number): number | null {
   return total / pool.members.length;
 }
 
-function pastBalance(pool: Pool, from: number, now: number): RunwayPoint[] {
+function pastBalance(pool: Pool, from: number, now: number): RunwayPoint[][] {
   // A blocked session's own readings show quota it cannot use, so it counts as empty.
   const byAccount = pool.members.map(({ window }) =>
     blocked(window)
@@ -189,7 +189,7 @@ function pastBalance(pool: Pool, from: number, now: number): RunwayPoint[] {
   const shared = [...first.keys()].filter(
     (at) => at >= from && at < now && rest.every((account) => account.has(at)),
   );
-  return [
+  const points = [
     ...shared.map((at) => ({
       at,
       remaining:
@@ -203,6 +203,17 @@ function pastBalance(pool: Pool, from: number, now: number): RunwayPoint[] {
         pool.members.length,
     },
   ];
+  // Readings stop while no client is open; joining across a gap would draw a reset as a slow climb.
+  const step = Math.max(
+    ...pool.members.map(({ window }) => (window.history?.stepMins ?? 60) * MINUTE),
+  );
+  const stretches: RunwayPoint[][] = [];
+  for (const [index, point] of points.entries()) {
+    const previous = points[index - 1];
+    if (previous && point.at - previous.at <= step) stretches.at(-1)!.push(point);
+    else stretches.push([point]);
+  }
+  return stretches.filter((stretch) => stretch.length > 1);
 }
 
 /** Spans one window ahead and up to two days back; windows shorter than a day get no burn or pace. */
@@ -219,7 +230,7 @@ export function limitRunway(pool: Pool, now: number): LimitRunway | null {
   // Without a burn, assuming no more use stacks refills on an untouched balance and looks roomier than it is.
   const { points, refills, out } = simulate(accounts, burn ?? safe?.perDay ?? 0, now, now + period);
   const past = pastBalance(pool, from, now);
-  const recorded = past.length > 1;
+  const recorded = past.length > 0;
   return {
     from: recorded ? from : now,
     to: now + period,
