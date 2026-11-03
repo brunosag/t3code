@@ -6,7 +6,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as NetService from "@t3tools/shared/Net";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
@@ -31,7 +31,6 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopStartupRecovery from "./DesktopStartupRecovery.ts";
 import * as DesktopState from "./DesktopState.ts";
-import * as DesktopTray from "./DesktopTray.ts";
 import * as DesktopRemoteUpdates from "../updates/DesktopRemoteUpdates.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopSnapShot from "../snapShot/DesktopSnapShot.ts";
@@ -43,8 +42,8 @@ const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
 const MAX_TCP_PORT = 65_535;
 const DESKTOP_BACKEND_PORT_PROBE_HOSTS = ["127.0.0.1", "0.0.0.0", "::"] as const;
 
-const makeDesktopRunId = Crypto.Crypto.pipe(
-  Effect.flatMap((crypto) => crypto.randomUUIDv4()),
+const makeDesktopRunId = SecureRandom.SecureRandom.pipe(
+  Effect.flatMap((random) => random.uuidV4()),
   Effect.map((value) => value.replaceAll("-", "").slice(0, 12)),
 );
 
@@ -335,13 +334,11 @@ const startup = Effect.gen(function* () {
   yield* appIdentity.configure;
   yield* previewPasskeys.configure;
   yield* applicationMenu.configure;
-  yield* (yield* DesktopTray.DesktopTray).configure;
   yield* updates.configure;
   yield* DesktopRemoteUpdates.listen;
   yield* DesktopStartupRecovery.listen;
-  // The pre-ready pass already wrote the entry, so registering the scheme default
-  // only spawns `xdg-mime`. Let it overlap the backend boot rather than delay it.
-  yield* Effect.forkScoped(linuxUrlHandler.register);
+  // Portal identity is prepared pre-ready; MIME helpers must not gate the backend or window.
+  yield* linuxUrlHandler.register.pipe(Effect.forkScoped);
   yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
 }).pipe(Effect.withSpan("desktop.startup"));
 

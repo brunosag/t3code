@@ -58,9 +58,6 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
               onUseArtifactTemplate={ctx.onUseArtifactTemplate}
               onRunShellCommand={ctx.onRunShellCommand}
               onImageExpand={ctx.onImageExpand}
-              // Agents re-save images under the same path; a new message must not reuse the
-              // URL minted for an earlier one, which the browser serves from its cache.
-              workspaceMutationId={row.message.id}
             />
           </AssistantCitationSource>
         </div>
