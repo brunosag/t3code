@@ -32,7 +32,7 @@ const hourly = (values: readonly number[]) => ({
 });
 
 describe("limitRunway", () => {
-  it("sets the safe burn by the refill that binds it", () => {
+  it("sets the safe burn by the refill that binds it, and projects it while the burn is unknown", () => {
     // 30% of the pool now and B's 50% back in a day must last until A resets.
     const runway = limitRunway(
       { members: [weekly(40, 5 * DAY + 3 * HOUR), weekly(100, DAY)] },
@@ -41,10 +41,13 @@ describe("limitRunway", () => {
     expect(runway?.safe?.perDay).toBeCloseTo(80 / (5 + 3 / 24), 3);
     expect(runway?.safe?.until).toBe(now + 5 * DAY + 3 * HOUR);
     expect(runway?.burnPerDay).toBeNull();
-    expect(runway?.refills).toEqual([
-      { at: now + DAY, percent: 50 },
-      { at: now + 5 * DAY + 3 * HOUR, percent: 20 },
+    // At the safe pace A is spent by its reset, so it refills its whole half.
+    expect(runway?.refills.map(({ at, percent }) => [at, Math.round(percent)])).toEqual([
+      [now + DAY, 50],
+      [now + 5 * DAY + 3 * HOUR, 50],
     ]);
+    const atReset = runway?.projection.find((point) => point.at === now + 5 * DAY + 3 * HOUR);
+    expect(atReset?.remaining).toBeCloseTo(0, 3);
     expect(runway?.out).toBeNull();
   });
 

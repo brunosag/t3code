@@ -25,10 +25,10 @@ export interface LimitRunway {
   readonly paced: boolean;
   /** Recorded pool balance, ending now; empty until the server has readings. */
   readonly past: readonly RunwayPoint[];
-  /** Balance ahead at the current burn, or with no more use when the burn is unknown. */
+  /** Balance ahead at the current burn; at the safe pace while the burn is unknown, or with no more use without a pace. */
   readonly projection: readonly RunwayPoint[];
   readonly refills: ReadonlyArray<{ readonly at: number; readonly percent: number }>;
-  /** The first stretch the projection has nothing left. */
+  /** The first stretch the current burn leaves nothing; null while the burn is unknown. */
   readonly out: { readonly at: number; readonly until: number } | null;
   /** Pool percent per day over the last day; null until every account has a day of readings. */
   readonly burnPerDay: number | null;
@@ -215,7 +215,9 @@ export function limitRunway(pool: Pool, now: number): LimitRunway | null {
   const paced = accounts.every((account) => account.period >= DAY);
   const from = now - Math.min(PAST, period);
   const burn = paced ? burnPerDay(pool, now) : null;
-  const { points, refills, out } = simulate(accounts, burn ?? 0, now, now + period);
+  const safe = paced ? safeBurn(accounts, now) : null;
+  // Without a burn, assuming no more use stacks refills on an untouched balance and looks roomier than it is.
+  const { points, refills, out } = simulate(accounts, burn ?? safe?.perDay ?? 0, now, now + period);
   const past = pastBalance(pool, from, now);
   const recorded = past.length > 1;
   return {
@@ -225,8 +227,8 @@ export function limitRunway(pool: Pool, now: number): LimitRunway | null {
     past: recorded ? past : [],
     projection: points,
     refills,
-    out,
+    out: burn === null ? null : out,
     burnPerDay: burn,
-    safe: paced ? safeBurn(accounts, now) : null,
+    safe,
   };
 }
