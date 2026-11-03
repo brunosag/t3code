@@ -39,7 +39,7 @@ Test fixtures on this machine:
 - **Theme editor:** the role spotlight pauses while a color picker is open, so a color is judged against the unobscured app.
 - **Project group names:** a title every grouped project shares names the group, even when it equals the repository name.
 - **Project defaults:** provider-selected repositories and owner/repository shorthand clone over SSH; explicit pasted URLs keep their transport. Settings can choose the base directory for new named projects.
-- **Background work:** Linux holds a sleep and lid-switch inhibitor while agent work remains unfinished, excluding pull-request watches. The desktop tray remains available.
+- **Background work:** Linux holds a sleep and lid-switch inhibitor while agent work remains unfinished, excluding pull-request watches. The desktop tray remains available; startup configuring it is tested in `DesktopApp.test.ts` (an upstream merge dropped the call on 2026-11-03).
 - **Hub cooldown resets:** when every CLIProxyAPI credential for a Claude model is cooling down and the error has no `reset after` time (upstream reads that one), the failed turn takes its reset time from the Limits hub, so auto-resume and the limit banner work. The Claude CLI drops the reset time CLIProxyAPI sends.
 - **Context fills to auto-compaction:** the thread details card's Context row measures against the auto-compact threshold when the provider reports one below the model's window, and names the model's window in its tooltip. The composer's context meter keeps upstream's scale.
 - **Usage limits layout:** the Limits view can hide and reorder providers, and hide single limits (such as a model-scoped weekly limit) from a provider's ⋯ menu; the choices are saved per browser.

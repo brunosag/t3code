@@ -126,7 +126,7 @@ it.effect(
             relaunch: () => Effect.void,
           }),
           Effect.provideService(DesktopTray.DesktopTray, {
-            configure: Effect.void,
+            configure: record("tray"),
             isActive: Effect.succeed(false),
           }),
           Effect.provideService(DesktopClerk.DesktopClerk, {
@@ -229,7 +229,7 @@ it.effect(
       );
       yield* Deferred.await(registrationStarted);
       yield* Deferred.await(windowStarted);
-      assert.deepEqual(events, ["identity", "ready", "identity", "backend", "window"]);
+      assert.deepEqual(events, ["identity", "ready", "identity", "tray", "backend", "window"]);
       assert.isFalse(yield* Deferred.isDone(registrationStopped));
       yield* (yield* DesktopShutdown.DesktopShutdown).request;
       yield* Fiber.join(app);
