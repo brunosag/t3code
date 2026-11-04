@@ -29,6 +29,7 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AccountChip } from "../usage/AccountChip";
 import { AddUsageLimitSourceDialog } from "./AddUsageLimitSourceDialog";
+import { withHubLabel } from "./AddUsageLimitSourceDialog.logic";
 import { searchableSetting } from "./settingsSearch";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
@@ -71,6 +72,9 @@ export function UsageProviderSettings({
     // The redacted management key round-trips as a marker, so the stored key is kept.
     updateSettings({ usageLimitSources: { [id]: { ...source, accounts } } });
   };
+
+  const saveLabel = (id: string, source: UsageLimitSourceConfig, name: string) =>
+    updateSettings({ usageLimitSources: { [id]: withHubLabel(source, name) } });
 
   const setCursorUsageEnabled = async (enabled: boolean) => {
     setUpdatingCursor(true);
@@ -123,7 +127,20 @@ export function UsageProviderSettings({
             return (
               <SettingsRow
                 key={id}
-                title={label}
+                title={
+                  readOnly ? (
+                    label
+                  ) : (
+                    <span className="block w-56 max-w-full">
+                      <UsageHubNameInput
+                        key={source.label ?? ""}
+                        name={source.label ?? ""}
+                        url={source.url}
+                        onSave={(name) => saveLabel(id, source, name)}
+                      />
+                    </span>
+                  )
+                }
                 description={
                   <span className="break-all">
                     CLI Proxy{source.enabled ? "" : " · Disabled"}
@@ -170,6 +187,33 @@ export function UsageProviderSettings({
         />
       ) : null}
     </>
+  );
+}
+
+function UsageHubNameInput({
+  name,
+  url,
+  onSave,
+}: {
+  readonly name: string;
+  readonly url: string;
+  readonly onSave: (name: string) => void;
+}) {
+  const [draft, setDraft] = useState(name);
+  return (
+    <Input
+      size="sm"
+      value={draft}
+      placeholder={url}
+      aria-label="Hub name"
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        if (draft.trim() !== name) onSave(draft);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+      }}
+    />
   );
 }
 

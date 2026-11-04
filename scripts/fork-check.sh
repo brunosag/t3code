@@ -34,6 +34,7 @@ vp test run \
   apps/web/src/components/chat/modelPickerSearch.test.ts \
   apps/web/src/components/chat/ContextWindowMeter.logic.test.ts \
   apps/web/src/versionSkew.test.ts \
+  apps/web/src/components/settings/AddUsageLimitSourceDialog.logic.test.ts \
   apps/web/src/components/usage/usagePagePreferences.test.ts \
   apps/web/src/components/usage/usageProviders.test.ts \
   packages/contracts/src/settings.test.ts \

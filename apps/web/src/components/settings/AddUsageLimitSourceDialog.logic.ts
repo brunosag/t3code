@@ -1,4 +1,8 @@
-import { type UnifiedSettings, UsageLimitSourceId } from "@t3tools/contracts";
+import {
+  type UnifiedSettings,
+  type UsageLimitSourceConfig,
+  UsageLimitSourceId,
+} from "@t3tools/contracts";
 
 export function sourceIdFromUrl(
   url: string,
@@ -21,4 +25,11 @@ export function sourceIdFromUrl(
     id = `${base}-${suffix}`;
   }
   return UsageLimitSourceId.make(id);
+}
+
+/** Saved entries are replaced whole, so an empty name must drop the key to fall back to the URL. */
+export function withHubLabel(source: UsageLimitSourceConfig, name: string): UsageLimitSourceConfig {
+  const { label: _previous, ...rest } = source;
+  const label = name.trim();
+  return label ? { ...rest, label } : rest;
 }

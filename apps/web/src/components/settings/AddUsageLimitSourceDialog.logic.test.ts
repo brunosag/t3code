@@ -1,8 +1,12 @@
-import { DEFAULT_SERVER_SETTINGS, type ServerSettings } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  type ServerSettings,
+  UsageLimitSourceId,
+} from "@t3tools/contracts";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import { describe, expect, it } from "vite-plus/test";
 
-import { sourceIdFromUrl } from "./AddUsageLimitSourceDialog.logic";
+import { sourceIdFromUrl, withHubLabel } from "./AddUsageLimitSourceDialog.logic";
 
 describe("adding usage limit sources", () => {
   it.each([
@@ -57,5 +61,29 @@ describe("adding usage limit sources", () => {
         enabled: true,
       },
     ]);
+  });
+
+  it("renames a hub and clears the name back to its URL", () => {
+    const id = UsageLimitSourceId.make("cliproxy-proxy.test");
+    const saved = {
+      kind: "cliproxy",
+      url: "http://proxy.test:8318",
+      label: "Claude Pool",
+      managementKey: "key",
+      enabled: true,
+      accounts: { "codex-1": { name: "Personal" } },
+    } as const;
+    let settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      usageLimitSources: { [id]: saved },
+    });
+    const rename = (name: string) =>
+      applyServerSettingsPatch(settings, {
+        usageLimitSources: { [id]: withHubLabel(settings.usageLimitSources[id]!, name) },
+      });
+    settings = rename(" VPS hub ");
+    expect(settings.usageLimitSources[id]).toEqual({ ...saved, label: "VPS hub" });
+    settings = rename("  ");
+    const { label: _label, ...unnamed } = saved;
+    expect(settings.usageLimitSources[id]).toEqual(unnamed);
   });
 });
