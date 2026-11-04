@@ -1,10 +1,12 @@
-import { useEffect, useSyncExternalStore, type CSSProperties } from "react";
+import { useSyncExternalStore, type CSSProperties } from "react";
+import { Link } from "@tanstack/react-router";
 import { PauseIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { speechTextFromMarkdown } from "@t3tools/client-runtime/read-aloud";
 
 import { getClientSettings } from "~/hooks/useSettings";
 import { readAloud } from "~/lib/readAloud";
+import { useThreadShell } from "~/state/entities";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -74,26 +76,24 @@ export function ReadAloudButton({
   );
 }
 
-/** Sits above the composer so playback stays controllable after its message scrolls away. */
+/**
+ * Sits above the composer so playback stays controllable after its message scrolls away.
+ * Playback outlives the thread it came from, so every thread shows it with a link back.
+ */
 export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
-  const prefix = `${threadKey}\0`;
   const state = useSyncExternalStore(
     readAloud.subscribe,
-    () => {
-      const snapshot = readAloud.getSnapshot();
-      return snapshot?.messageKey.startsWith(prefix) ? snapshot : null;
-    },
+    () => readAloud.getSnapshot(),
     getServerSnapshot,
   );
-  // oxlint-disable-next-line t3code/react-effect-budget -- Leaving a thread stops its audio, which plays outside React.
-  useEffect(
-    () => () => {
-      if (readAloud.getSnapshot()?.messageKey.startsWith(`${threadKey}\0`)) readAloud.stop();
-    },
-    [threadKey],
-  );
+  const sourceThreadKey = state?.messageKey.slice(0, state.messageKey.indexOf("\0")) ?? null;
+  const sourceRef =
+    sourceThreadKey !== null && sourceThreadKey !== threadKey
+      ? parseScopedThreadKey(sourceThreadKey)
+      : null;
+  const sourceShell = useThreadShell(sourceRef);
 
-  if (!state || parseScopedThreadKey(threadKey) === null) return null;
+  if (!state) return null;
   const preparing = state.status === "preparing";
   // Buffering still means the user asked to listen, so it offers Pause.
   const playing = state.status === "playing" || state.status === "buffering";
@@ -122,6 +122,15 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
             <Volume2Icon />
           </ComposerBanner.Icon>
           <ComposerBanner.Content className="gap-2 text-muted-foreground tabular-nums">
+            {sourceRef ? (
+              <Link
+                to="/$environmentId/$threadId"
+                params={sourceRef}
+                className="max-w-[40%] shrink-0 truncate text-foreground hover:underline"
+              >
+                {sourceShell?.title?.trim() || "Other thread"}
+              </Link>
+            ) : null}
             {state.error ? (
               <span role="status" className="truncate">
                 {state.error}

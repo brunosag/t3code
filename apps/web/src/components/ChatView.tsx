@@ -3545,7 +3545,7 @@ export default function ChatView(props: ChatViewProps) {
                   >
                     <ChildThreadApprovals threadRef={activeThreadRef} />
                     <ComposerSurface.Shell contextRow={showComposerContextStrip}>
-                      {isDraftHeroState ? null : <ReadAloudPlayer threadKey={routeThreadKey} />}
+                      <ReadAloudPlayer threadKey={routeThreadKey} />
                       <ComposerSurface.Host
                         inert={queuedRunEdit.isSaving}
                         aria-busy={queuedRunEdit.isSaving}

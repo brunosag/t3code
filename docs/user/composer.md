@@ -35,7 +35,8 @@ it. Very large code blocks are shown without syntax highlighting.
 On web and desktop, hover a completed agent response and choose **Read aloud**
 beside Copy. A player above the composer has pause, resume, stop, a seek bar,
 and playback speed from 0.5× to 2×. Starting another response stops the current one.
-Switching threads stops playback.
+Playback continues when you switch threads; the player then names the thread it
+came from, and choosing that name takes you back.
 
 Choose the voice in **Settings → Chat → Read aloud voice**, where **Preview**
 plays a short sample. Voices cover American and British English, and their quality varies.
