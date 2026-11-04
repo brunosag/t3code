@@ -27,6 +27,7 @@ vp test run \
   apps/server/src/usage/UsageLimitHistory.test.ts \
   apps/server/src/usage/UsageLimitSources.test.ts \
   packages/shared/src/usageLimitRunway.test.ts \
+  packages/shared/src/usageLimits.test.ts \
   apps/web/src/components/GitActionsControl.logic.test.ts \
   apps/web/src/pendingUserInput.test.ts \
   apps/web/src/components/chat/MessagesTimeline.logic.test.ts \

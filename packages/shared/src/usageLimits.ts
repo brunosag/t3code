@@ -255,14 +255,47 @@ export interface LimitAccount {
   readonly limits: ServerProviderUsageLimits;
 }
 
+type UsageHistory = NonNullable<ServerProviderUsageWindow["history"]>;
+
+/** Each server records only while it runs, so a step either one saw fills the other's gap. */
+function mergeHistory(
+  preferred: UsageHistory | undefined,
+  other: UsageHistory | undefined,
+): UsageHistory | undefined {
+  if (!preferred || !other) return preferred ?? other;
+  const stepMins = preferred.stepMins ?? 60;
+  if ((other.stepMins ?? 60) !== stepMins) return preferred;
+  const step = stepMins * 60_000;
+  const steps = new Map<number, number>();
+  for (const history of [other, preferred]) {
+    const start = Date.parse(history.startsAt);
+    history.usedPercent.forEach((used, index) => {
+      if (used !== null) steps.set(start + index * step, used);
+    });
+  }
+  if (steps.size === 0) return preferred;
+  const first = Math.min(...steps.keys());
+  const count = Math.round((Math.max(...steps.keys()) - first) / step) + 1;
+  return {
+    startsAt: DateTime.formatIso(DateTime.makeUnsafe(first)),
+    stepMins,
+    usedPercent: Array.from(
+      { length: count },
+      (_, index) => steps.get(first + index * step) ?? null,
+    ),
+  };
+}
+
 // Only hub sources record readings, so keep them when another report of the login is fresher.
 function keepHistory(
   windows: ReadonlyArray<ServerProviderUsageWindow>,
   other: ReadonlyArray<ServerProviderUsageWindow>,
 ): ReadonlyArray<ServerProviderUsageWindow> {
   return windows.map((window) => {
-    if (window.history) return window;
-    const history = other.find((candidate) => candidate.id === window.id)?.history;
+    const history = mergeHistory(
+      window.history,
+      other.find((candidate) => candidate.id === window.id)?.history,
+    );
     return history ? { ...window, history } : window;
   });
 }

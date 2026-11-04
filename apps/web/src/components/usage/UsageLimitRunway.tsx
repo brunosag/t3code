@@ -202,7 +202,11 @@ function RunwayChart({
               }}
             />
             <span
-              className="absolute top-0.5 -translate-x-full pe-1.5 text-2xs font-medium whitespace-nowrap text-warning"
+              className={cn(
+                "absolute top-0.5 text-2xs font-medium whitespace-nowrap text-warning",
+                // Too close to now, the label would run over the now marker, so it goes inside the band.
+                x(out.at) - x(now) < 25 ? "ps-1.5" : "-translate-x-full pe-1.5",
+              )}
               style={{ left: `${x(out.at)}%` }}
             >
               out {formatAt(out.at, timestampFormat, now)}

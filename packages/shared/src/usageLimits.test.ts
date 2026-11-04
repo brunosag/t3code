@@ -716,6 +716,57 @@ describe("pools", () => {
     expect(accounts[0]?.displayName).toBe("claude-team-seat");
   });
 
+  it("fills the gaps in one environment's hub history from another's", () => {
+    const hub = (
+      checkedAt: string,
+      usedPercent: ReadonlyArray<number | null>,
+      startsAt: string,
+    ) => ({
+      ...source,
+      checkedAt,
+      accounts: [
+        {
+          id: "claude-team-seat.json",
+          driver: claude,
+          usageLimits: {
+            checkedAt,
+            windows: [{ ...weekly, usedPercent: 30, history: { startsAt, usedPercent } }],
+          },
+        },
+      ],
+    });
+    const input = new Map([
+      [
+        EnvironmentId.make("asleep"),
+        {
+          ...laptop,
+          serverConfig: {
+            providers: [],
+            usageLimitSources: [
+              hub("2026-09-03T12:00:00.000Z", [20, null, null, 26], "2026-09-03T08:00:00.000Z"),
+            ],
+          },
+        },
+      ],
+      [
+        EnvironmentId.make("always-on"),
+        {
+          entry: { target: { label: "Server" } },
+          serverConfig: {
+            providers: [],
+            usageLimitSources: [hub(checkedAt, [10, 20, 22, 24, 25], "2026-09-03T07:00:00.000Z")],
+          },
+        },
+      ],
+    ]);
+    const [account] = collectLimitAccounts(input);
+    expect(account?.limits.windows[0]?.history).toEqual({
+      startsAt: "2026-09-03T07:00:00.000Z",
+      stepMins: 60,
+      usedPercent: [10, 20, 22, 24, 26],
+    });
+  });
+
   it("labels a default-named instance merged with a hub account by e-mail, keeping a chosen name", () => {
     const native = provider({
       driver: claude,
