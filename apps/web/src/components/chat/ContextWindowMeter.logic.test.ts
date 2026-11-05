@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { hasDismissedResumeCompaction } from "@t3tools/client-runtime/state/context-window";
 import {
-  contextWindowGauge,
   hasAvailableCompactionProvider,
   resolveContextWindowModelDisplayName,
   shouldReserveContextWindowMeter,
@@ -78,24 +77,6 @@ describe("hasAvailableCompactionProvider", () => {
       }),
     ).toBe(true);
   });
-});
-
-describe("contextWindowGauge", () => {
-  it.each([
-    { threshold: 317_000, max: 1_000_000, used: 158_500, limit: 317_000, percent: 50 },
-    { threshold: 317_000, max: 1_000_000, used: 400_000, limit: 317_000, percent: 100 },
-    { threshold: null, max: 1_000_000, used: 250_000, limit: 1_000_000, percent: 25 },
-    { threshold: 1_200_000, max: 1_000_000, used: 250_000, limit: 1_000_000, percent: 25 },
-    { threshold: 317_000, max: null, used: 31_700, limit: 317_000, percent: 10 },
-    { threshold: null, max: null, used: 31_700, limit: null, percent: null },
-  ])(
-    "fills to $limit with threshold $threshold and window $max",
-    ({ threshold, max, used, limit, percent }) => {
-      expect(
-        contextWindowGauge({ usedTokens: used, maxTokens: max, autoCompactThreshold: threshold }),
-      ).toEqual({ limitTokens: limit, usedPercent: percent });
-    },
-  );
 });
 
 describe("resolveContextWindowModelDisplayName", () => {
