@@ -49,7 +49,7 @@ import { useEnvironmentSettings } from "../../hooks/useSettings";
 import { getCustomModelOptionsByInstance, selectsPlanAgent } from "../../modelSelection";
 import { createModelSelection } from "@t3tools/shared/model";
 import { providerInstanceEntriesFor } from "../../providerInstances";
-import { usePrimaryCloudLinkState } from "../../cloud/primaryCloudLinkState";
+import { usePrimaryCloudLinkState } from "../../cloud/cloudLinkState";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { webhookAddress } from "@t3tools/client-runtime/webhook-address";
 import { Link, useNavigate } from "@tanstack/react-router";

@@ -84,16 +84,18 @@ const make = Effect.gen(function* () {
       yield* fileSystem.readFileString(source.value),
     );
     yield* Effect.acquireRelease(
-      Effect.tryPromise(() =>
-        startStatusNotifierItem({
-          id: "t3code",
-          title: environment.displayName,
-          iconThemePath,
-          iconName: SYMBOLIC_ICON_NAME,
-          menu,
-          activate: open,
-        }),
-      ),
+      Effect.tryPromise({
+        try: () =>
+          startStatusNotifierItem({
+            id: "t3code",
+            title: environment.displayName,
+            iconThemePath,
+            iconName: SYMBOLIC_ICON_NAME,
+            menu,
+            activate: open,
+          }),
+        catch: (cause) => new DesktopTrayCreateError({ platform: environment.platform, cause }),
+      }),
       (close) => Effect.sync(close).pipe(Effect.ensuring(Ref.set(active, false))),
     );
     yield* Ref.set(active, true);

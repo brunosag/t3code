@@ -59,6 +59,7 @@ export function ReadAloudVoiceSettings() {
     () => readAloud.getSnapshot(PREVIEW_KEY),
     getServerSnapshot,
   );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- stops the preview's audio playback on unmount
   useEffect(() => () => readAloud.stopMessage(PREVIEW_KEY), []);
 
   const previewing = preview !== null && preview.status !== "error" && preview.status !== "ended";
