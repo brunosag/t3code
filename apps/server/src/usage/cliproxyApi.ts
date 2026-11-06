@@ -109,6 +109,19 @@ const ClaudeUsage = Schema.Struct({
     ),
   ),
 });
+const ClaudeProfile = Schema.Struct({
+  organization: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({ rate_limit_tier: Schema.optional(Schema.NullOr(Schema.String)) }),
+    ),
+  ),
+});
+// Max quotas are multiples of Pro's; pooled meters weight accounts by them.
+const CLAUDE_TIERS: Record<string, { readonly plan: string; readonly capacity: number }> = {
+  default_claude_ai: { plan: "Claude Pro", capacity: 1 },
+  default_claude_max_5x: { plan: "Claude Max 5x", capacity: 5 },
+  default_claude_max_20x: { plan: "Claude Max 20x", capacity: 20 },
+};
 const CreditList = Schema.Struct({
   credits: Schema.Array(
     Schema.Struct({
@@ -126,6 +139,7 @@ const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 const decodeApiResponse = Schema.decodeUnknownEffect(ApiResponse);
 const decodeCreditList = Schema.decodeUnknownEffect(Schema.fromJsonString(CreditList));
 const decodeClaudeUsage = Schema.decodeUnknownEffect(Schema.fromJsonString(ClaudeUsage));
+const decodeClaudeProfile = Schema.decodeUnknownEffect(Schema.fromJsonString(ClaudeProfile));
 const decodeCodexUsage = Schema.decodeUnknownEffect(Schema.fromJsonString(CodexUsage));
 const isUsageLimitSourceError = Schema.is(UsageLimitSourceError);
 
@@ -308,6 +322,22 @@ export const makeCliproxyApi = Effect.gen(function* () {
       .toSorted((a, b) => Date.parse(a.expires_at) - Date.parse(b.expires_at));
   });
 
+  // A plan rarely changes, so each account's is read once per process.
+  const claudeTiers = new Map<string, (typeof CLAUDE_TIERS)[string]>();
+  const claudeTier = Effect.fn("CliproxyApi.claudeTier")(function* (
+    hub: CliproxyHub,
+    account: typeof AuthFile.Type,
+  ) {
+    const known = claudeTiers.get(account.id);
+    if (known) return known;
+    const profile = yield* decodeClaudeProfile(
+      yield* apiCall(hub, account, "https://api.anthropic.com/api/oauth/profile"),
+    );
+    const tier = CLAUDE_TIERS[profile.organization?.rate_limit_tier ?? ""];
+    if (tier) claudeTiers.set(account.id, tier);
+    return tier;
+  });
+
   const readAccount = Effect.fn("CliproxyApi.readAccount")(function* (
     hub: CliproxyHub,
     account: typeof AuthFile.Type,
@@ -343,9 +373,11 @@ export const makeCliproxyApi = Effect.gen(function* () {
           spend: usage.spend,
           extra_usage: usage.extra_usage ?? null,
         };
+        const tier = yield* claudeTier(hub, account).pipe(Effect.orElseSucceed(() => undefined));
         return {
           ...base,
-          plan: "Claude Subscription",
+          plan: tier?.plan ?? "Claude Subscription",
+          ...(tier ? { capacity: tier.capacity } : {}),
           usageLimits: claudeUsageResponseToLimits({
             checkedAt,
             response: {

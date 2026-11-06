@@ -2,8 +2,15 @@ import type { ServerProviderUsageWindow } from "@t3tools/contracts";
 
 /** The pool's accounts, each through its own reading of the window. */
 interface Pool {
-  readonly members: ReadonlyArray<{ readonly window: ServerProviderUsageWindow }>;
+  readonly members: ReadonlyArray<{
+    readonly window: ServerProviderUsageWindow;
+    /** Part of the pool's quota; equal parts when omitted. */
+    readonly share?: number;
+  }>;
 }
+
+const shareOf = (pool: Pool, member: Pool["members"][number]) =>
+  member.share ?? 1 / pool.members.length;
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -30,7 +37,7 @@ export interface LimitRunway {
   readonly refills: ReadonlyArray<{ readonly at: number; readonly percent: number }>;
   /** The first stretch the current burn leaves nothing; null while the burn is unknown. */
   readonly out: { readonly at: number; readonly until: number } | null;
-  /** Pool percent per day over the last day; null until every account has a day of readings. */
+  /** Pool percent per day over the last day; null until some account has a day of readings. */
   readonly burnPerDay: number | null;
   /** The fastest steady burn that never runs out before quota comes back, and the refill that sets it. */
   readonly safe: { readonly perDay: number; readonly until: number } | null;
@@ -49,9 +56,10 @@ function blocked(window: ServerProviderUsageWindow) {
 }
 
 function accountsOf(pool: Pool, now: number): Account[] | null {
-  const cap = 100 / pool.members.length;
   const accounts: Account[] = [];
-  for (const { window } of pool.members) {
+  for (const member of pool.members) {
+    const { window } = member;
+    const cap = 100 * shareOf(pool, member);
     if (blocked(window)) {
       const reset = window.resetsAt ? Date.parse(window.resetsAt) : Infinity;
       accounts.push({ balance: 0, reset: reset > now ? reset : Infinity, period: Infinity, cap });
@@ -150,17 +158,21 @@ function readings(window: ServerProviderUsageWindow, now: number) {
 
 function burnPerDay(pool: Pool, now: number): number | null {
   let total = 0;
-  for (const { window } of pool.members) {
+  let dayLong = false;
+  for (const member of pool.members) {
+    const { window } = member;
     const samples = readings(window, now);
-    const base = samples?.findLastIndex((sample) => sample.at <= now - DAY) ?? -1;
-    if (!samples || base < 0) return null;
+    if (!samples) return null;
+    const base = samples.findLastIndex((sample) => sample.at <= now - DAY);
+    dayLong ||= base >= 0;
     const reset = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
     const period = (window.windowDurationMins ?? 0) * MINUTE;
     // A reading is dated to its hour's end, so a reset may fall up to an hour before it.
     const resetBetween = (from: number, to: number) =>
       [1, 2, 3].some((k) => from - HOUR < reset - k * period && reset - k * period <= to);
     let spent = 0;
-    for (let index = base + 1; index < samples.length; index++) {
+    // An account first read within the day joined the pool then; what it spent since is the day's.
+    for (let index = Math.max(base, 0) + 1; index < samples.length; index++) {
       const previous = samples[index - 1]!;
       const current = samples[index]!;
       spent +=
@@ -170,37 +182,39 @@ function burnPerDay(pool: Pool, now: number): number | null {
             : 0
           : current.used - previous.used;
     }
-    total += spent / ((now - samples[base]!.at) / DAY);
+    total += (shareOf(pool, member) * spent) / (base < 0 ? 1 : (now - samples[base]!.at) / DAY);
   }
-  return total / pool.members.length;
+  return dayLong ? total : null;
 }
 
 function pastBalance(pool: Pool, from: number, now: number): RunwayPoint[][] {
   // A blocked session's own readings show quota it cannot use, so it counts as empty.
-  const byAccount = pool.members.map(({ window }) =>
-    blocked(window)
-      ? null
-      : new Map(
-          (readings(window, now) ?? []).slice(0, -1).map((sample) => [sample.at, sample.used]),
-        ),
-  );
-  const [first, ...rest] = byAccount.filter((account) => account !== null);
-  if (!first) return [];
-  const shared = [...first.keys()].filter(
-    (at) => at >= from && at < now && rest.every((account) => account.has(at)),
-  );
+  const byAccount = pool.members.map((member) => ({
+    share: shareOf(pool, member),
+    samples: blocked(member.window) ? [] : (readings(member.window, now) ?? []).slice(0, -1),
+    blocked: blocked(member.window),
+  }));
+  // An account without readings would draw as empty, not as unknown.
+  if (byAccount.some((account) => !account.blocked && account.samples.length === 0)) return [];
+  const times = [
+    ...new Set(byAccount.flatMap((account) => account.samples.map((sample) => sample.at))),
+  ]
+    .filter((at) => at >= from && at < now)
+    .sort((left, right) => left - right);
+  // An account adds its quota from its first reading, when it joined the pool; a missed read keeps its last.
+  const remainingAt = (at: number) =>
+    byAccount.reduce((sum, account) => {
+      const last = account.samples.findLast((sample) => sample.at <= at);
+      return sum + (last ? account.share * (100 - last.used) : 0);
+    }, 0);
   const points = [
-    ...shared.map((at) => ({
-      at,
-      remaining:
-        byAccount.reduce((sum, account) => sum + (account ? 100 - account.get(at)! : 0), 0) /
-        byAccount.length,
-    })),
+    ...times.map((at) => ({ at, remaining: remainingAt(at) })),
     {
       at: now,
-      remaining:
-        pool.members.reduce((sum, { window }) => sum + (100 - window.usedPercent), 0) /
-        pool.members.length,
+      remaining: pool.members.reduce(
+        (sum, member) => sum + shareOf(pool, member) * (100 - member.window.usedPercent),
+        0,
+      ),
     },
   ];
   // Readings stop while no client is open; joining across a gap would draw a reset as a slow climb.

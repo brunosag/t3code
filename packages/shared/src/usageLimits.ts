@@ -241,6 +241,8 @@ export interface LimitAccount {
   readonly displayName: string | null;
   readonly email: string | undefined;
   readonly plan: string | undefined;
+  /** Quota size relative to the driver's other accounts; unknown for native logins. */
+  readonly capacity: number | undefined;
   readonly accentColor: string | undefined;
   readonly image: string | undefined;
   readonly environments: ReadonlyArray<{
@@ -359,6 +361,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
           ? null
           : displayName,
       plan: planSources.get(key)?.plan ?? previous.plan ?? next.plan,
+      capacity: previous.capacity ?? next.capacity,
       accentColor: previous.accentColor ?? next.accentColor,
       image: previous.image ?? next.image,
       environments,
@@ -393,6 +396,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         displayName: provider.displayName?.trim() || null,
         email: provider.auth.email,
         plan: provider.auth.label,
+        capacity: undefined,
         accentColor: provider.accentColor,
         image: undefined,
         environments: [{ environmentId, label }],
@@ -417,6 +421,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
           displayName: account.name ?? (account.email ? null : hubAccountName(account)),
           email: account.email,
           plan: account.plan,
+          capacity: account.capacity,
           accentColor: undefined,
           image: account.image,
           environments: [],
@@ -466,6 +471,8 @@ export interface LimitPoolMember {
   readonly account: LimitAccount;
   readonly window: ServerProviderUsageWindow;
   readonly refillPercent: number;
+  /** This account's part of the pool's quota; the pool's shares sum to 1. */
+  readonly share: number;
 }
 
 export interface LimitPoolWindow {
@@ -561,7 +568,11 @@ function poolKey(driver: ServerProvider["driver"], window: ServerProviderUsageWi
   return driver === "codex" ? window.kind : `${window.kind}:${window.id}`;
 }
 
-function poolMember(account: LimitAccount, reported: ServerProviderUsageWindow, now: number) {
+function poolMember(
+  account: LimitAccount,
+  reported: ServerProviderUsageWindow,
+  now: number,
+): Omit<LimitPoolMember, "share"> {
   const spentWeekly =
     reported.kind === "session"
       ? account.limits.windows.find(
@@ -606,7 +617,7 @@ function poolMember(account: LimitAccount, reported: ServerProviderUsageWindow, 
 }
 
 function poolWindows(accounts: readonly LimitAccount[], now: number): readonly LimitPoolWindow[] {
-  const byKey = new Map<string, LimitPoolMember[]>();
+  const byKey = new Map<string, Omit<LimitPoolMember, "share">[]>();
   for (const account of accounts) {
     for (const reported of account.limits.windows) {
       const member = poolMember(account, reported, now);
@@ -620,19 +631,33 @@ function poolWindows(accounts: readonly LimitAccount[], now: number): readonly L
       else byKey.set(key, [member]);
     }
   }
-  const pools = [...byKey].map(([key, members]): LimitPoolWindow => {
+  const pools = [...byKey].map(([key, unweighted]): LimitPoolWindow => {
+    // Equal shares unless every account's plan size is known.
+    const capacities = unweighted.map((member) => member.account.capacity);
+    const total = capacities.every((capacity) => capacity !== undefined)
+      ? capacities.reduce((sum, capacity) => sum + capacity, 0)
+      : null;
+    const members = unweighted.map((member): LimitPoolMember => ({
+      ...member,
+      share: total === null ? 1 / unweighted.length : (member.account.capacity ?? 0) / total,
+    }));
     const memberByAccount = new Map(members.map((member) => [member.account.key, member]));
     const first = members[0]!.window;
     const id = members[0]!.account.driver === "codex" ? key : first.id;
-    const usedPercent = members.reduce((sum, m) => sum + m.window.usedPercent, 0) / members.length;
+    const usedPercent = members.reduce((sum, m) => sum + m.share * m.window.usedPercent, 0);
     // Judge pace only for windows with reset clocks; others add spend without elapsed time.
     const timed = members.flatMap((m) => {
       const share = elapsedShare(m.window, now);
-      return share === null ? [] : [{ used: m.window.usedPercent, elapsed: share }];
+      return share === null
+        ? []
+        : [{ used: m.window.usedPercent, elapsed: share, weight: m.share }];
     });
-    const timedUsed = timed.reduce((sum, t) => sum + t.used, 0) / timed.length;
+    const timedWeight = timed.reduce((sum, t) => sum + t.weight, 0);
+    const timedUsed = timed.reduce((sum, t) => sum + t.weight * t.used, 0) / timedWeight;
     const meanElapsed =
-      timed.length > 0 ? timed.reduce((sum, t) => sum + t.elapsed, 0) / timed.length : null;
+      timed.length > 0
+        ? timed.reduce((sum, t) => sum + t.weight * t.elapsed, 0) / timedWeight
+        : null;
     const resets = members
       .flatMap((member) => {
         const at = resetMillis(member.window);
@@ -642,7 +667,7 @@ function poolWindows(accounts: readonly LimitAccount[], now: number): readonly L
               {
                 member,
                 at,
-                restoresPercent: Math.round(member.refillPercent / members.length),
+                restoresPercent: Math.round(member.refillPercent * member.share),
               },
             ];
       })

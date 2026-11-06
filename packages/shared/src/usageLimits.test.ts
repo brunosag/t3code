@@ -943,6 +943,16 @@ describe("pools", () => {
       ["hub:b", 20],
     ]);
     expect(week).toMatchObject({ id: "seven_day", remainingPercent: 80, members: [{}] });
+    // A plan four times b's size holds four fifths of the pool, once every plan is known.
+    const [weighted] = collectLimitPools(
+      collectLimitAccounts(input).map((account) => ({
+        ...account,
+        capacity: account.key === "hub:a" ? 4 : 1,
+      })),
+      now,
+    )[0]!.windows;
+    expect(weighted).toMatchObject({ remainingPercent: 28, usedPercent: 72 });
+    expect(weighted?.resets.map((reset) => reset.restoresPercent)).toEqual([64, 8]);
     // Codex reports `primary` for both its five-hour and (on Go) monthly window.
     const mixed = collectLimitPools(
       [
@@ -953,6 +963,7 @@ describe("pools", () => {
           displayName: "Go",
           email: undefined,
           plan: undefined,
+          capacity: undefined,
           accentColor: undefined,
           image: undefined,
           environments: [],
@@ -999,6 +1010,7 @@ describe("pooled account columns", () => {
     displayName: key,
     email: undefined,
     plan: undefined,
+    capacity: undefined,
     accentColor: undefined,
     image: undefined,
     environments: [],

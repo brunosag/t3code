@@ -83,6 +83,8 @@ export const UsageLimitSourceAccount = Schema.Struct({
   name: Schema.optional(TrimmedNonEmptyString),
   image: Schema.optional(UsageAccountImage),
   plan: Schema.optional(TrimmedNonEmptyString),
+  /** Quota size relative to the driver's other accounts, such as 5 for Claude Max 5x against Pro's 1. */
+  capacity: Schema.optional(Schema.Number.check(Schema.isGreaterThan(0))),
   workspaceId: Schema.optional(TrimmedNonEmptyString),
   usageLimits: ServerProviderUsageLimits,
 });

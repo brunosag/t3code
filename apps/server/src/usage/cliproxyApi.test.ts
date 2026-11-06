@@ -337,28 +337,31 @@ describe("CLIProxyAPI built-in management API", () => {
     }),
   );
 
-  it.effect("maps Claude scoped windows without a scheduler plugin", () =>
+  it.effect("maps Claude scoped windows and plan size without a scheduler plugin", () =>
     Effect.gen(function* () {
       const test = fixture({
         accounts: [{ ...accounts[0]!, provider: "claude" }],
         // The usage endpoint answers 429 to requests without a Claude Code user agent.
         upstream: (request) => ({
           status: request.header?.["User-Agent"]?.startsWith("claude-code/") ? 200 : 429,
-          body: {
-            five_hour: { utilization: 10, resets_at: null },
-            seven_day: { utilization: 50, resets_at: "2099-01-01T00:00:00Z" },
-            limits: [
-              {
-                kind: "weekly_scoped",
-                percent: 80,
-                resets_at: null,
-                scope: { model: { display_name: "Fable" } },
+          body: request.url?.endsWith("/oauth/profile")
+            ? { organization: { rate_limit_tier: "default_claude_max_5x" } }
+            : {
+                five_hour: { utilization: 10, resets_at: null },
+                seven_day: { utilization: 50, resets_at: "2099-01-01T00:00:00Z" },
+                limits: [
+                  {
+                    kind: "weekly_scoped",
+                    percent: 80,
+                    resets_at: null,
+                    scope: { model: { display_name: "Fable" } },
+                  },
+                ],
               },
-            ],
-          },
         }),
       });
       const api = yield* test.api;
+      yield* api.readAccounts(config);
       const result = yield* api.readAccounts(config);
       expect(
         result[0]?.usageLimits.windows.map((window) => [window.id, window.usedPercent]),
@@ -367,6 +370,10 @@ describe("CLIProxyAPI built-in management API", () => {
         ["seven_day", 50],
         ["seven_day_fable", 80],
       ]);
+      expect(result[0]).toMatchObject({ plan: "Claude Max 5x", capacity: 5 });
+      expect(
+        test.requests.filter((request) => request.body?.url?.endsWith("/oauth/profile")),
+      ).toHaveLength(1);
     }),
   );
 

@@ -74,6 +74,37 @@ describe("limitRunway", () => {
     expect(young?.burnPerDay).toBeNull();
   });
 
+  it("keeps the pool's history and burn when a smaller account joins mid-day", () => {
+    // Two Max 5x accounts and a Pro one at a fifth of their size, which joined 6 hours ago.
+    const max = (values: readonly number[]) => ({
+      ...weekly(values.at(-1)!, 3 * DAY, hourly(values)),
+      share: 5 / 11,
+    });
+    const flat = Array.from({ length: 48 }, () => 50);
+    const pro = {
+      ...weekly(30, 5 * DAY, {
+        startsAt: iso(now - 6 * HOUR),
+        usedPercent: [10, 12, 15, 20, 25, 30],
+      }),
+      share: 1 / 11,
+    };
+    const runway = limitRunway(
+      { members: [max(flat), max(Array.from({ length: 48 }, (_, i) => 26 + i / 2)), pro] },
+      now,
+    );
+    // The second Max spent 12% of its quota over the day, the Pro 20% of its own since joining.
+    expect(runway?.burnPerDay).toBeCloseTo((5 * 12 + 20) / 11, 6);
+    const past = runway?.past.flat() ?? [];
+    expect(past[0]?.at).toBe(now - 2 * DAY + HOUR);
+    // The Pro account adds its quota from its first reading.
+    const joined = past.findIndex((point) => point.at === now - 5 * HOUR);
+    expect(past[joined]!.remaining - past[joined - 1]!.remaining).toBeCloseTo(
+      90 / 11 - 5 / 11 / 2,
+      6,
+    );
+    expect(past.at(-1)).toEqual({ at: now, remaining: (5 * 50 + 5 * 50.5 + 70) / 11 });
+  });
+
   it("projects the stretch the current burn runs dry", () => {
     // 20% a day empties the 30% left in 1.5 days, a day before A resets.
     const values = Array.from({ length: 48 }, (_, index) => 70 - (47 - index) * (20 / 24));
@@ -138,7 +169,7 @@ describe("limitRunway", () => {
       burnPerDay: null,
       safe: null,
       out: null,
-      refills: [{ at: now + HOUR, percent: 20 }],
+      refills: [{ at: now + HOUR, percent: expect.closeTo(20, 6) }],
     });
     expect(
       runway?.past.map((stretch) =>
