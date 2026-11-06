@@ -40,6 +40,7 @@ it.effect("keeps malformed source URLs encodable for config subscribers", () =>
   }).pipe(
     Effect.provide([
       Layer.succeed(SecretResolver.SecretResolver, {
+        label: (provider) => Effect.succeed(provider),
         read: (references) => Effect.succeed(references.map(() => undefined)),
         invalidate: () => Effect.void,
       }),
@@ -91,6 +92,7 @@ it.effect("keeps malformed source URLs encodable for config subscribers", () =>
 const literalSecrets = Layer.succeed(SecretResolver.SecretResolver, {
   read: (references) => Effect.succeed(references.map(() => undefined)),
   invalidate: () => Effect.void,
+  label: (provider) => Effect.succeed(provider),
 });
 
 it.effect("labels hub accounts with their saved name and image", () =>
@@ -230,6 +232,7 @@ it.effect("reads a management key from its secret provider", () => {
         },
       }),
       Layer.succeed(SecretResolver.SecretResolver, {
+        label: (provider) => Effect.succeed(provider),
         read: (references) =>
           Effect.succeed(
             references.map((reference) =>

@@ -7,7 +7,7 @@ function subscribeToNavigationHistory(onChange: () => void): () => void {
   return () => window.navigation.removeEventListener("currententrychange", onChange);
 }
 
-export function canNavigateHistory(direction: HistoryDirection): boolean {
+function canNavigateHistory(direction: HistoryDirection): boolean {
   return direction === "back" ? window.navigation.canGoBack : window.navigation.canGoForward;
 }
 

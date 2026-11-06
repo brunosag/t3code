@@ -1037,7 +1037,8 @@ export function resolveLinuxFileExclusions(arch?: typeof BuildArch.Type) {
   return [...LINUX_FILE_EXCLUSIONS, `!${ONNX_RUNTIME_BINARIES}/linux/${unusedArch}/**/*`];
 }
 
-// node-pty bundles both Darwin architectures; only universal apps need both.
+// Native packages (node-pty, objc-js) ship prebuilds for both Darwin architectures; only universal
+// apps need both. macOS 27 warns that an arm64 app holding x64-only code won't open on macOS 28.
 export function resolveMacFileExclusions(arch?: typeof BuildArch.Type) {
   if (arch === undefined || arch === "universal") {
     return [...MAC_FILE_EXCLUSIONS];
@@ -1046,7 +1047,7 @@ export function resolveMacFileExclusions(arch?: typeof BuildArch.Type) {
   const unusedArch = arch === "arm64" ? "x64" : "arm64";
   return [
     ...MAC_FILE_EXCLUSIONS,
-    `!**/node_modules/node-pty/prebuilds/darwin-${unusedArch}/**/*`,
+    `!**/node_modules/**/prebuilds/darwin-${unusedArch}/**/*`,
     `!${ONNX_RUNTIME_BINARIES}/darwin/${unusedArch}/**/*`,
   ];
 }
@@ -2823,7 +2824,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     // Disable smart unpack so native packages' JS/metadata stay archived and avoid slowing NSIS with loose files.
     ...(platform === "win"
       ? { asar: { smartUnpack: false }, asarUnpack: [WINDOWS_NATIVE_ASAR_UNPACK_GLOB] }
-      : {}),
+      : { asarUnpack: ["**/node_modules/@transcribe-cpp/**/*.{dylib,so,so.*}"] }),
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
       ...(platform === "linux" ? LINUX_CAPTURE_EXTRA_RESOURCES : []),

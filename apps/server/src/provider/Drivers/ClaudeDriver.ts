@@ -164,6 +164,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
         ...(Option.isSome(usageLimitSources)
           ? { claudeCooldownResetAt: usageLimitSources.value.claudeCooldownResetAt }
           : {}),
+        modelCatalog,
       },
     ).pipe(
       Effect.mapError(
