@@ -78,7 +78,7 @@ import {
   deriveProviderSubagentStatus,
   deriveProviderExtensionStatuses,
   deriveReportedModelSelection,
-  formatProviderSubagentEffort,
+  formatModelSelectionEffort,
   deriveResumableRunId,
   deriveRunlessWorkStartedAt,
   deriveThreadActivityRun,
@@ -1744,7 +1744,7 @@ export default function ChatView(props: ChatViewProps) {
   const providerSubagentEffortLabel =
     activeThread === undefined
       ? null
-      : formatProviderSubagentEffort(
+      : formatModelSelectionEffort(
           activeThread.modelSelection,
           providerSubagentModels,
           reportedModelSelection,

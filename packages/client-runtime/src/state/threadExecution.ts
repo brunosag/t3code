@@ -232,32 +232,6 @@ export function formatModelSelectionEffort(
   return null;
 }
 
-/** Names a native subagent's explicit or reported effort; catalog defaults are not observations. */
-export function formatProviderSubagentEffort(
-  selection: ModelSelection,
-  models: ReadonlyArray<ServerProviderModel> = [],
-  reportedSelection?: ModelSelection | null,
-): string | null {
-  const caps = models.find((model) => model.slug === selection.model)?.capabilities;
-  if (!caps) return null;
-  for (const id of REASONING_EFFORT_OPTION_IDS) {
-    const descriptor = caps.optionDescriptors?.find((candidate) => candidate.id === id);
-    if (descriptor?.type !== "select") continue;
-    const option =
-      selection.options?.find((candidate) => candidate.id === id) ??
-      (reportedSelection?.instanceId === selection.instanceId &&
-      reportedSelection.model === selection.model
-        ? reportedSelection.options?.find((candidate) => candidate.id === id)
-        : undefined);
-    if (option === undefined) continue;
-    return (
-      descriptor.options.find((choice) => choice.id === option.value)?.label ??
-      (option.value === "default" ? "Default" : null)
-    );
-  }
-  return null;
-}
-
 /** A reported model the picker catalog does not know, such as `claude-opus-5[1m]`, keeps its raw effort. */
 export function formatSubagentEffort(input: {
   readonly modelSlug: string | null;
