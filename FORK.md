@@ -1,77 +1,62 @@
 # T3 Code fork
 
-This fork follows upstream's V2 orchestrator. Its Pi provider is upstream's, without fork changes.
+The user's fork of upstream T3 Code. Where this file and `AGENTS.md` differ, this file wins. Fork notes go here, not in `AGENTS.md`, which upstream edits almost daily.
 
-## Working here
+## You may
 
-Where this file and `AGENTS.md` differ, this file wins. Fork rules go here, not in `AGENTS.md`: upstream edits that file almost daily, so fork lines there conflict on merge.
+- Land finished work on `bsag`, started from `origin/bsag` (never the stale local `main`), unless the user asked to review it first. Pushing `bsag` deploys (below).
+- Skip upstream's process: Pull requests, Evals, Documentation, the bug-proof rule under Verifying (failing test first, before/after captures) and the ask-first browser rules don't apply.
+- Check user-visible changes on the deployed instance after the deploy (`~/local/t3-pi/DEPLOYMENT.md` on `vps` says how to reach it). A worktree dev server costs a ~4 GB install and a seeded database (the live one is past the 500 MiB auto-seed limit: `vp run migrate-dev-db`); start one only when a change can't be seen deployed or shipping it unseen could break the live instance.
 
-- **Surfaces.** The fork ships the server with its web client to `vps`, and a Linux desktop build. "Hit every surface" means those; macOS, Windows and the relay only when asked.
-- **Mobile.** The mobile app is unused. Leave `apps/mobile` exactly as upstream has it, even when a fork change stops it compiling: do not edit, test or typecheck it.
-- **Upstream process.** Pull requests, Evals, Documentation, and the bug-proof rule under Verifying (failing test first, before/after captures) do not apply. A retained change gets a line under [Retained changes](#retained-changes) and a test listed in `scripts/fork-check.sh`: that test is what tells an upstream merge broke it.
-- **Checks.** Before pushing, run `scripts/fork-check.sh`, the deploy's own gate; the pre-commit hook formats. `vp run check:changed origin/bsag` is optional (its default base, the closest remote `main`, is upstream's, so it diffs the whole fork and runs past ten minutes).
-- **Browser checks.** Upstream's ask-first browser rules do not apply. See a user-visible change on the deployed instance after its deploy (`~/local/t3-pi/DEPLOYMENT.md` on `vps` says how to reach it). A worktree dev server costs a ~4 GB install and a seeded database (the live one is past the 500 MiB auto-seed limit, so run `vp run migrate-dev-db`); start one only when the change cannot be seen deployed, or shipping it unseen could break the live instance.
-- **Landing.** Finished work lands on `bsag` (see [Deployment](#deployment)), not a feature branch, unless the user asked to review it first.
+## Limits
 
-Test fixtures on this machine:
-
-- If tests fail at collection with `Cannot read properties of undefined (reading 'config')`, use the checkout's `node_modules/.bin/vp` instead of a global `vp`; mismatched Vitest versions cause this error.
-- Bare-repository fetch fixtures that map into `refs/heads` use `--no-prune`; an inherited `fetch.prune=true` can delete the mapped branch during that fetch.
-- Subprocess identity fixtures use a real executable (`process.execPath` for Node, Bash for WSL shell fixtures) and a readiness signal. NixOS multicall coreutils may exit when copied under another name or discard a custom `argv[0]`.
-- NixOS fixtures cannot assume `/usr/bin/node` or `/bin/ps` exists; use `process.execPath` and PATH-resolved procps when emulating macOS.
-- Private IPC tests reject a `/tmp` owned by another non-root user. Set `TMPDIR` to a short, owned mode-700 directory for those tests; keep the listener’s ownership checks.
-- `vp run` prepends checkout binaries to PATH, shadowing command shims. Browser-free test runs need explicit Vitest `--exclude` arguments, including `**/*.browser.test.*` and `**/ServerBrowserPage.test.ts`.
-
-## Retained changes
-
-- **Claude thinking quotes:** web and desktop do not offer quoting on Claude thinking items; the Claude adapter also removes saved thinking citations while preserving user comments, whichever client sent them. Other providers keep their quoting behavior.
-- **Question drafts:** written answers to agent questions survive web reloads. Choosing an option moves a written answer into the thread draft.
-- **Self-settled threads compact:** a thread its own agent settled (it waits for its next event, such as a reminder or a message) still gets idle compaction before its cache expires, from 100K tokens instead of 200K, and stays settled through the `/compact` turn. Threads settled any other way are still skipped.
-- **Delegates don't hold off compaction:** a running `delegate_task` child does not stop its parent's idle compaction, because its result queues behind the `/compact` turn. Claude's own background work (background shell, native subagents) still does.
-- **Interval schedules keep their slot:** an interval task that fires late (the machine was asleep) or is run by hand stays on the grid its previous due time set, instead of restarting the interval from when it ran. A schedule edit or re-enable still starts a new grid from that moment.
-- **One-time scheduled tasks:** a successful run that uses up an upstream `once` schedule deletes the task, instead of leaving it with no next run; a failed one stays with its error, and a manual run before its time keeps it. Every schedule type runs a missed run late, once, instead of skipping it (upstream skips fixed-time runs missed by over 10 minutes).
-- **Scheduled task models:** updating a task through `schedule_task` with `scheduledTaskId` takes a `delegate_task`-style `target`, so agents can move a task to another provider, model or options; scheduled task summaries include the model. The web task editor sets options such as effort with the composer's traits picker, and keeps them while its model stays the same.
-- **Fast Mode switch:** the server can disable Fast Mode, including saved selections and delegated tasks.
-- **Read aloud:** web and desktop synthesize assistant messages on their environment, with a player above the composer that keeps playing across thread switches and links back to its thread. A running turn's latest finished message can be read before the turn ends, from a hover row with its timestamp (upstream reverted that row; the fork keeps it, tested in `MessagesTimeline.logic.test.ts`). Guest transcripts have no speech controls.
-- **Model picker on touch:** opening the model picker or switching its provider tab by touch or pen does not focus the search, so the on-screen keyboard stays down. Mouse and keyboard still focus it.
-- **Sharp sheets:** sheets, including the narrow-window sidebar, and the sidebar's provider update pill do not keep `will-change: transform`. With it, Chromium keeps the layer rasterized mid-slide at a fractional scale, so the text stays blurry after it settles.
-- **Theme editor:** the role spotlight pauses while a color picker is open, so a color is judged against the unobscured app.
-- **Project group names:** a title every grouped project shares names the group, even when it equals the repository name.
-- **Project defaults:** provider-selected repositories and owner/repository shorthand clone over SSH; explicit pasted URLs keep their transport. Settings can choose the base directory for new named projects.
-- **Background work:** Linux holds a sleep and lid-switch inhibitor while agent work remains unfinished, excluding pull-request watches. The desktop tray remains available; startup configuring it is tested in `DesktopApp.test.ts` (an upstream merge dropped the call on 2026-11-03).
-- **Hub cooldown resets:** when every CLIProxyAPI credential for a Claude model is cooling down and the error has no `reset after` time (upstream reads that one), the failed turn takes its reset time from the Limits hub, so auto-resume and the limit banner work. The Claude CLI drops the reset time CLIProxyAPI sends.
-- **Hub names:** Settings → Usage providers renames a hub in place; clearing the name shows its URL again.
-- **Usage limits layout:** the Limits view can hide and reorder providers, hide single limits (such as a model-scoped weekly limit), and hide a pool's account rows from a provider's ⋯ menu; the choices are saved per browser.
-- **Limits burn and runway:** the Limits view pools a provider's accounts, and under each pooled limit lists every account that reports it with its own balance and reset (shown unless hidden from the ⋯ menu). Hub Claude accounts weigh in by plan size from their profile's rate-limit tier (Max 5x counts five Pros); pools with an account of unknown size weigh accounts equally. Every window charts the pool's balance from up to two days back to one window ahead, with its refills; an account that joins the pool adds its quota from its first reading, and its spend since then counts toward the day's burn. Day-or-longer windows add the pool's burn over the last day and the fastest steady burn that lasts until quota comes back, and project that pace until the burn is known; a burn under 80% of that pace has room to spare, up to it is on pace, and past it is too fast. Shorter ones show what is left and the next refill, and while some account spent in the last 20 minutes, project the last hour's burn and when it runs out. The server reads the hub every provider refresh interval even with no client open, and keeps hub-account readings in `usage-limit-history.json` (48 hours hourly for long windows, one window in ten-minute steps for sessions); native provider logins are not recorded, so their charts start at now and show no burn. When several environments read the same hub, the page joins their readings, so one that slept does not leave gaps.
-- **Installed web app names:** the server serves `manifest.webmanifest` named `T3 Code (<environment label>)`, so web apps installed from several machines stay apart on a phone.
-- **Stable branding:** the web client a server serves and the Linux desktop build use the black production icons and are titled plain “T3 Code”, without upstream’s “(Beta)” or “(Nightly)”. The desktop’s nightly version only picks its update channel; its Electron runtime name stays “T3 Code Nightly” so its keyring state does not move.
-- **Deploys wait for idle agents:** `t3 service install --defer-restart` selects a version without restarting the service; the server switches to it once no thread has had agent work for two minutes, or 12 hours after it first saw the version. The fork deploy uses it.
-- **Agent memory on small hosts:** `T3CODE_AGENT_MEMORY_HIGH`, `_MAX` and `_SWAP_MAX` override the agents slice's RAM-derived limits, for a host (the VPS) whose own cgroup limit also holds the server. `check:changed` runs knip, typecheck and tests one at a time, one worker each, when less than 6 GB is free under MemAvailable and its cgroups' limits.
-- **Orphaned desktop backends exit:** the desktop sends its pid in the backend bootstrap, so a backend whose desktop died before it finished loading still shuts down instead of holding the T3 home. An AppImage update under NixOS `appimage-run` does this: `bwrap --die-with-parent` kills the relaunched app when the old one exits.
-- **No swipe navigation:** horizontal wheel input (trackpad swipes and a mouse's side wheel alike; Chromium on Linux does not tell them apart) never goes back or forward through threads. Upstream's `HistorySwipeNavigation` is deleted, so an upstream merge that edits or mounts it conflicts or fails the typecheck in `scripts/fork-check.sh`.
-- **Hidden desktop start:** `--hidden` (the laptop's login autostart passes it) loads the main window without showing it; the tray, launching the app again or a deep link shows it. A relaunch drops the switch. Tested in `DesktopWindow.test.ts`.
-- **Installation and desktop fixes:** provider updates recognize npm ownership before native-looking layouts; Linux desktop entries match window identities, which needs the `--class` switch upstream dropped. Development can omit Electron, reuse the last server build for lean desktop startup, open DevTools explicitly, and exit when its desktop window closes. Desktop dev origins stay out of the server’s embedded web client.
-
-## Migration
-
-Upstream imports legacy conversation messages into V2. Continued imported threads receive a portable context handoff; old provider session bindings, checkpoints, and tool history are not imported. Native Pi session files remain separate from T3's database. Keep a database backup before deploying this migration; reverting the executable is not a database rollback.
+- Before pushing, run `scripts/fork-check.sh`, the deploy's own gate (`vp run check:changed origin/bsag` is optional: its default base is upstream's `main`, so it diffs the whole fork for over ten minutes).
+- Surfaces are the server with its web client on `vps` and the Linux desktop build; macOS, Windows and the relay only when asked.
+- Leave `apps/mobile` exactly as upstream has it, even when a fork change stops it compiling: don't edit, test or typecheck it.
+- Keep `packages/provider-pi` identical to upstream. Don't restore the removed V1 adapter or permission layer.
+- The live installation is `~/local/t3-pi` on `vps`; preserve its `userdata` and keep development state separate. Back up its database before deploying a migration; reverting the executable is not a database rollback.
+- `t3 service restart` on the host interrupts running agents; otherwise the server switches to a deployed version by itself once agents are idle.
+- Enable `SERVER_RELEASES_PUBLISHED` (`apps/server/src/cloud/selfUpdate.ts`) only when matching release artifacts exist; fork server releases are not published.
+- The npm-installed server loads `@ff-labs/fff-node` through an ESM import (upstream's single-executable path needs a patched CommonJS export the npm package lacks); changing that import means changing the installation layout too.
 
 ## Deployment
 
-`bsag` is the fork's base and default branch: start work from `origin/bsag`, never the stale local `main`. A push to `bsag` deploys. A successful run installs the version and selects it (`activeVersion` in `~/local/t3-pi/runtime/service-state.json` on `vps`) without restarting the server, which switches once agent work is idle (see [Retained changes](#retained-changes)). Watch the run (`gh run watch`); the deploy is live when `serverVersion` from `/.well-known/t3/environment` on the server's port ends in the pushed commit's 9-character SHA. To switch before then, run `t3 service restart` on the host, which interrupts running agents. Put `[skip ci]` in a docs-only commit message to skip the deploy.
+A push to `bsag` runs `.github/workflows/deploy-fork-vps.yml`: it runs the fork check, builds the server with its web client, and installs the npm tarball on `vps` over Tailscale with `t3 service install --defer-restart`, which selects the version (`activeVersion` in `~/local/t3-pi/runtime/service-state.json`) without restarting. Watch the run (`gh run watch`); the deploy is live when `serverVersion` from `/.well-known/t3/environment` on the server's port ends in the pushed commit's 9-character SHA. `[skip ci]` in a docs-only commit message skips the deploy. Linux desktop builds publish fork prereleases through `.github/workflows/desktop-fork-linux.yml`. Host procedures are in `~/local/t3-pi/DEPLOYMENT.md`.
 
-Pushing `bsag` runs `.github/workflows/deploy-fork-vps.yml`, which tests the retained changes, builds the server with its web client and the black production icons, and installs the npm tarball on `vps` over Tailscale. `vps` is an OVHcloud VPS (since 2026-10-27), reached over Tailscale as `bsag`; `tutor-prod` remains a compatibility SSH alias. Secrets are `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, and `VPS_DEPLOY_KEY`; repository variables are `VPS_HOST` and `VPS_USER`.
+## Upstream merges
 
-The live installation is `~/local/t3-pi`; preserve its `userdata` and keep development state separate. Runtime versions use `-fork.<short-sha>`, with the core derived from the upstream release package. Installation retains previous complete runtimes and uses the stock service launcher through a Node shim at `runtime/versions/<version>/t3`. Host procedures live in `~/local/t3-pi/DEPLOYMENT.md`.
+- Merge upstream into a review worktree and run `scripts/fork-check.sh` before updating `bsag`. In a conflict, take upstream's side unless it touches a retained change below.
+- Only the two fork workflows run; every upstream workflow is disabled (`gh workflow disable -R brunosag/t3code <file>`), since their stuck runs once got the fork's Actions paused, which stopped deploys. After each merge, disable any newly arrived one.
+- The desktop app stages only the server dependencies matched in `scripts/lib/cli-external-packages.ts`, never their peers. When a merge bumps one of those and a dependency becomes a peer, declare it in `apps/server/package.json`, or the AppImage backend crash-loops on a missing module and the app never opens.
+- A new retained change gets a line below and a test in `scripts/fork-check.sh`, so a merge that breaks it fails.
 
-Fork server releases are not published. Non-desktop environments advertise `serverUpdateUnavailable`, so clients do not offer the stock updater. `SERVER_RELEASES_PUBLISHED` in `apps/server/src/cloud/selfUpdate.ts` controls this; enable it only when matching release artifacts exist. Linux desktop builds publish fork prereleases through `.github/workflows/desktop-fork-linux.yml`.
+## Retained changes
 
-The npm-installed server loads `@ff-labs/fff-node` through an ESM import. Upstream's single-executable path needs a patched CommonJS export that the npm-installed package does not have; changing this import requires changing the installation layout too.
+- **Claude thinking quotes:** no quoting on Claude thinking items; the Claude adapter strips saved thinking citations but keeps user comments.
+- **Question drafts:** written answers to agent questions survive reloads; choosing an option moves the answer into the thread draft.
+- **Compaction:** a thread its own agent settled still gets idle compaction (from 100K tokens) and stays settled through it; a running `delegate_task` child doesn't hold off its parent's compaction.
+- **Schedules:** a late or manual interval run keeps the previous grid; a used-up `once` schedule deletes its task after success; missed runs of every type run late once (upstream skips fixed-time runs missed by over 10 minutes); `schedule_task` updates take a `delegate_task`-style `target`, and the web editor sets options with the traits picker.
+- **Fast Mode switch:** the server can disable Fast Mode, saved selections and delegated tasks included.
+- **Read aloud:** local speech synthesis with a player above the composer that survives thread switches; a running turn's latest finished message can be read from its hover row (upstream reverted that row; tested in `MessagesTimeline.logic.test.ts`). No speech controls for guests.
+- **Model picker on touch:** touch or pen doesn't focus the search, so the on-screen keyboard stays down.
+- **Sharp sheets:** sheets and the sidebar's provider update pill don't keep `will-change: transform`, which leaves text blurry after the slide.
+- **Theme editor:** the role spotlight pauses while a color picker is open.
+- **Project groups and defaults:** a title every grouped project shares names the group; provider-selected repositories and owner/repo shorthand clone over SSH; Settings chooses the base directory for new projects.
+- **Background work:** Linux holds a sleep and lid inhibitor while agent work is unfinished (not pull-request watches); the desktop tray stays, and its startup call is tested in `DesktopApp.test.ts` (an upstream merge once dropped it).
+- **Limits hub:** a turn failed on CLIProxyAPI cooldown without a `reset after` time takes its reset from the Limits hub; hubs can be renamed; the Limits view hides and reorders providers, limits and account rows, pools accounts by plan size with burn, runway and charts, and the server records hub readings in `usage-limit-history.json` even with no client open.
+- **Installed web app names:** `manifest.webmanifest` is named `T3 Code (<environment label>)`.
+- **Stable branding:** the served web client and Linux desktop build use the black production icons and plain "T3 Code"; the desktop's Electron runtime name stays "T3 Code Nightly" so its keyring state doesn't move.
+- **Deploys wait for idle agents:** `t3 service install --defer-restart` switches once no thread has had agent work for two minutes, or after 12 hours.
+- **Agent memory on small hosts:** `T3CODE_AGENT_MEMORY_HIGH`, `_MAX` and `_SWAP_MAX` override the agents slice's limits; `check:changed` runs its steps one at a time under 6 GB free.
+- **Orphaned desktop backends exit:** the backend gets the desktop's pid at bootstrap and exits if it dies (an AppImage update under `appimage-run` does this).
+- **No swipe navigation:** horizontal wheel input never moves through threads; upstream's `HistorySwipeNavigation` is deleted, so a merge that edits or mounts it conflicts or fails the fork check's typecheck.
+- **Hidden desktop start:** `--hidden` (the laptop's login autostart) loads the window without showing it; tested in `DesktopWindow.test.ts`.
+- **Installation and desktop fixes:** provider updates recognize npm ownership before native-looking layouts; Linux desktop entries need the `--class` switch upstream dropped; development can omit Electron, reuse the last server build (`dev:desktop:lean`), open DevTools explicitly and exit when its window closes; desktop dev origins stay out of the server's embedded web client.
 
-## Maintenance
+## Test fixtures on this machine
 
-Merge upstream into a review worktree and run `scripts/fork-check.sh` before updating `bsag`. In a conflict, take upstream's side unless it touches a retained change above.
-
-Only `deploy-fork-vps.yml` and `desktop-fork-linux.yml` run on the fork; every upstream workflow is disabled (`gh workflow disable -R brunosag/t3code <file>`), since their stuck runs once got the fork's Actions paused, which stopped deploys. After each upstream merge, disable any newly arrived workflow. Keep `packages/provider-pi` identical to upstream. Do not restore the removed V1 adapter or permission layer.
-
-The desktop app stages only the server dependencies matched in `scripts/lib/cli-external-packages.ts`, never their peer dependencies. When an upstream merge bumps one of those packages (such as `@cursor/sdk`) and a dependency becomes a peer, declare it in `apps/server/package.json`, or the AppImage backend crash-loops on a missing module and the app never opens (zod, 2026-10-27).
+- `Cannot read properties of undefined (reading 'config')` at collection: use the checkout's `node_modules/.bin/vp`, not a global `vp` (mismatched Vitest).
+- Bare-repository fetch fixtures that map into `refs/heads` use `--no-prune`; an inherited `fetch.prune=true` can delete the mapped branch.
+- Subprocess identity fixtures use a real executable (`process.execPath`, Bash for WSL fixtures) and a readiness signal: NixOS multicall coreutils may exit when copied under another name or drop a custom `argv[0]`. Don't assume `/usr/bin/node` or `/bin/ps`.
+- Private IPC tests reject a `/tmp` owned by another user: set `TMPDIR` to a short, owned mode-700 directory.
+- `vp run` prepends checkout binaries to PATH, shadowing shims. Browser-free runs need `--exclude` for `**/*.browser.test.*` and `**/ServerBrowserPage.test.ts`.
