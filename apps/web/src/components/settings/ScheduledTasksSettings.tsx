@@ -1329,6 +1329,8 @@ function ScheduledTaskEditorForm({
     (entry) => entry.instanceId === activeInstanceId,
   );
   const modelSelection = scheduledTaskModelSelection(activeSelection, draft.baseModelSelection);
+  // Bound runs use the thread's current model, so the stored one has no effect.
+  const boundToThread = draft.threadId !== "" && draft.threadMode !== "new_thread";
   const modelOptionsByInstance = getCustomModelOptionsByInstance(
     settings,
     providers,
@@ -1654,49 +1656,51 @@ function ScheduledTaskEditorForm({
             />
           </Field>
 
-          <Field label="Model">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <ProviderModelPicker
-                environmentId={environmentId}
-                disabled={saving || !connected}
-                activeInstanceId={activeInstanceId}
-                model={activeModel}
-                lockedProvider={null}
-                instanceEntries={instanceEntries}
-                modelOptionsByInstance={modelOptionsByInstance}
-                isComposerOwned={false}
-                triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                onInstanceModelChange={(instanceId, model) =>
-                  setDraft((current) => ({ ...current, modelKey: `${instanceId}:${model}` }))
-                }
-              />
-              {activeInstanceEntry ? (
-                <TraitsPicker
-                  provider={activeInstanceEntry.driverKind}
-                  instanceId={activeInstanceId}
-                  models={activeInstanceEntry.models}
-                  model={activeModel}
-                  modelOptions={modelSelection?.options ?? []}
-                  allowPromptInjectedEffort={false}
-                  planModeEnabled={
-                    settings.planModeEnabled || selectsPlanAgent(modelSelection?.options)
-                  }
+          {boundToThread ? null : (
+            <Field label="Model">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <ProviderModelPicker
+                  environmentId={environmentId}
                   disabled={saving || !connected}
+                  activeInstanceId={activeInstanceId}
+                  model={activeModel}
+                  lockedProvider={null}
+                  instanceEntries={instanceEntries}
+                  modelOptionsByInstance={modelOptionsByInstance}
+                  isComposerOwned={false}
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  onModelOptionsChange={(options) =>
-                    setDraft((current) => ({
-                      ...current,
-                      baseModelSelection: createModelSelection(
-                        activeInstanceId,
-                        activeModel,
-                        options,
-                      ),
-                    }))
+                  onInstanceModelChange={(instanceId, model) =>
+                    setDraft((current) => ({ ...current, modelKey: `${instanceId}:${model}` }))
                   }
                 />
-              ) : null}
-            </div>
-          </Field>
+                {activeInstanceEntry ? (
+                  <TraitsPicker
+                    provider={activeInstanceEntry.driverKind}
+                    instanceId={activeInstanceId}
+                    models={activeInstanceEntry.models}
+                    model={activeModel}
+                    modelOptions={modelSelection?.options ?? []}
+                    allowPromptInjectedEffort={false}
+                    planModeEnabled={
+                      settings.planModeEnabled || selectsPlanAgent(modelSelection?.options)
+                    }
+                    disabled={saving || !connected}
+                    triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                    onModelOptionsChange={(options) =>
+                      setDraft((current) => ({
+                        ...current,
+                        baseModelSelection: createModelSelection(
+                          activeInstanceId,
+                          activeModel,
+                          options,
+                        ),
+                      }))
+                    }
+                  />
+                ) : null}
+              </div>
+            </Field>
+          )}
 
           <div className="space-y-3">
             {task?.schedule.type === "interval" &&
