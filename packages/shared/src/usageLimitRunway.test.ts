@@ -105,16 +105,32 @@ describe("limitRunway", () => {
     expect(past.at(-1)).toEqual({ at: now, remaining: (5 * 50 + 5 * 50.5 + 70) / 11 });
   });
 
-  it("projects the stretch the current burn runs dry", () => {
+  it("projects the stretch the current burn runs dry, and weighs the burn against the safe pace", () => {
+    const burning = (perDay: number) =>
+      limitRunway(
+        {
+          members: [
+            weekly(
+              70,
+              2.5 * DAY,
+              hourly(Array.from({ length: 48 }, (_, index) => 70 - (47 - index) * (perDay / 24))),
+            ),
+          ],
+        },
+        now,
+      );
     // 20% a day empties the 30% left in 1.5 days, a day before A resets.
-    const values = Array.from({ length: 48 }, (_, index) => 70 - (47 - index) * (20 / 24));
-    const runway = limitRunway({ members: [weekly(70, 2.5 * DAY, hourly(values))] }, now);
+    const runway = burning(20);
     expect(runway?.burnPerDay).toBeCloseTo(20, 6);
     expect(runway?.out).toEqual({ at: now + 1.5 * DAY, until: now + 2.5 * DAY });
     expect(runway?.safe?.perDay).toBeCloseTo(12, 3);
+    expect(runway?.pace).toBe("ahead");
+    // Just under the safe 12% a day is on pace; well under has room to spare.
+    expect(burning(11.9)?.pace).toBe("on");
+    expect(burning(9.5)?.pace).toBe("under");
   });
 
-  it("charts a session's refills without a pace", () => {
+  it("charts a session's refills, with a burn only while it is in use", () => {
     const session = (
       window: Pick<ServerProviderUsageWindow, "usedPercent" | "resetsAt" | "history">,
     ) => ({
@@ -126,8 +142,8 @@ describe("limitRunway", () => {
         ...window,
       },
     });
-    // A filled up over the last hour, with no readings for half of it; B is unused, so its window has not started; C is blocked
-    // behind its spent weekly quota until Thursday.
+    // A filled up until half an hour ago, with no readings for part of it; B is unused, so its window has not started; C is
+    // blocked behind its spent weekly quota until Thursday.
     const runway = limitRunway(
       {
         members: [
@@ -137,7 +153,7 @@ describe("limitRunway", () => {
             history: {
               startsAt: iso(now - HOUR),
               stepMins: 10,
-              usedPercent: [20, 30, null, null, 40, 60],
+              usedPercent: [20, 30, 60, null, 60, 60],
             },
           }),
           session({
@@ -179,11 +195,35 @@ describe("limitRunway", () => {
       [
         [now - 50 * 60_000, 60],
         [now - 40 * 60_000, 57],
+        [now - 30 * 60_000, 47],
       ],
       [
-        [now - 10 * 60_000, 53],
+        [now - 10 * 60_000, 47],
         [now, 47],
       ],
     ]);
+
+    // Spending 10% every ten minutes empties the 10% left in ten minutes, hours before the reset.
+    const inUse = limitRunway(
+      {
+        members: [
+          session({
+            usedPercent: 90,
+            resetsAt: iso(now + 3 * HOUR),
+            history: {
+              startsAt: iso(now - HOUR),
+              stepMins: 10,
+              usedPercent: [40, 50, 60, 70, 80, 90],
+            },
+          }),
+        ],
+      },
+      now,
+    );
+    expect(inUse).toMatchObject({
+      burnPerDay: expect.closeTo(1440, 6),
+      out: { at: now + 10 * 60_000, until: now + 3 * HOUR },
+      pace: null,
+    });
   });
 });

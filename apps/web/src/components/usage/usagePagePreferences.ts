@@ -10,6 +10,7 @@ const UsagePagePreferencesSchema = Schema.Struct({
   hiddenProviders: Schema.optional(Schema.Array(UsageProviderKind)),
   providerOrder: Schema.optional(Schema.Array(UsageProviderKind)),
   hiddenLimits: Schema.optional(Schema.Array(Schema.String)),
+  hiddenAccountRows: Schema.optional(Schema.Array(UsageProviderKind)),
 });
 export type UsagePagePreferences = typeof UsagePagePreferencesSchema.Type;
 

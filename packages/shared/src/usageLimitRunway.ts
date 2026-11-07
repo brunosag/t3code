@@ -1,5 +1,7 @@
 import type { ServerProviderUsageWindow } from "@t3tools/contracts";
 
+import type { LimitPace } from "./usageLimits.ts";
+
 /** The pool's accounts, each through its own reading of the window. */
 interface Pool {
   readonly members: ReadonlyArray<{
@@ -16,6 +18,11 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const PAST = 2 * DAY;
+/** How far back a session's burn reads, and how recent its last spend must be to count as in use. */
+const RECENT = HOUR;
+const IN_USE = 20 * MINUTE;
+/** Burn under this part of the safe pace has room for a heavier day; up to the safe pace it is on pace. */
+const ROOM = 0.8;
 const EPSILON = 1e-9;
 
 export interface RunwayPoint {
@@ -28,7 +35,7 @@ export interface LimitRunway {
   /** Up to two days back, or now when nothing is recorded. */
   readonly from: number;
   readonly to: number;
-  /** Whether burn and safe pace apply: day-or-longer windows. Shorter ones fill in bursts. */
+  /** Whether the safe pace applies: day-or-longer windows. Shorter ones fill in bursts. */
   readonly paced: boolean;
   /** Recorded pool balance in unbroken stretches, the last ending now; empty until the server has readings. */
   readonly past: ReadonlyArray<readonly RunwayPoint[]>;
@@ -37,10 +44,15 @@ export interface LimitRunway {
   readonly refills: ReadonlyArray<{ readonly at: number; readonly percent: number }>;
   /** The first stretch the current burn leaves nothing; null while the burn is unknown. */
   readonly out: { readonly at: number; readonly until: number } | null;
-  /** Pool percent per day over the last day; null until some account has a day of readings. */
+  /**
+   * Pool percent per day over the last day; null until some account has a day of readings.
+   * A session's is over the last hour, and null unless some account spent in the last 20 minutes.
+   */
   readonly burnPerDay: number | null;
   /** The fastest steady burn that never runs out before quota comes back, and the refill that sets it. */
   readonly safe: { readonly perDay: number; readonly until: number } | null;
+  /** The burn against the safe pace; null while either is unknown. */
+  readonly pace: LimitPace | null;
 }
 
 interface Account {
@@ -187,6 +199,39 @@ function burnPerDay(pool: Pool, now: number): number | null {
   return dayLong ? total : null;
 }
 
+function recentBurnPerDay(pool: Pool, now: number): number | null {
+  let total = 0;
+  let inUse = false;
+  for (const member of pool.members) {
+    if (blocked(member.window)) continue;
+    const samples = readings(member.window, now);
+    if (!samples) return null;
+    const base = Math.max(
+      samples.findLastIndex((sample) => sample.at <= now - RECENT),
+      0,
+    );
+    const span = now - samples[base]!.at;
+    if (span <= 0) continue;
+    let spent = 0;
+    for (let index = base + 1; index < samples.length; index++) {
+      const previous = samples[index - 1]!;
+      const current = samples[index]!;
+      // A session's balance only drops back at its reset, when the new session starts from zero.
+      const rise = current.used < previous.used ? current.used : current.used - previous.used;
+      spent += rise;
+      if (rise > 0 && current.at > now - IN_USE) inUse = true;
+    }
+    total += (shareOf(pool, member) * spent) / (span / DAY);
+  }
+  return inUse ? total : null;
+}
+
+function paceOf(burn: number | null, safe: LimitRunway["safe"]): LimitPace | null {
+  if (burn === null || safe === null) return null;
+  if (burn > safe.perDay) return "ahead";
+  return burn < ROOM * safe.perDay ? "under" : "on";
+}
+
 function pastBalance(pool: Pool, from: number, now: number): RunwayPoint[][] {
   // A blocked session's own readings show quota it cannot use, so it counts as empty.
   const byAccount = pool.members.map((member) => ({
@@ -230,7 +275,7 @@ function pastBalance(pool: Pool, from: number, now: number): RunwayPoint[][] {
   return stretches.filter((stretch) => stretch.length > 1);
 }
 
-/** Spans one window ahead and up to two days back; windows shorter than a day get no burn or pace. */
+/** Spans one window ahead and up to two days back; windows shorter than a day get only a recent burn. */
 export function limitRunway(pool: Pool, now: number): LimitRunway | null {
   const accounts = accountsOf(pool, now);
   if (!accounts) return null;
@@ -239,7 +284,7 @@ export function limitRunway(pool: Pool, now: number): LimitRunway | null {
   );
   const paced = accounts.every((account) => account.period >= DAY);
   const from = now - Math.min(PAST, period);
-  const burn = paced ? burnPerDay(pool, now) : null;
+  const burn = paced ? burnPerDay(pool, now) : recentBurnPerDay(pool, now);
   const safe = paced ? safeBurn(accounts, now) : null;
   // Without a burn, assuming no more use stacks refills on an untouched balance and looks roomier than it is.
   const { points, refills, out } = simulate(accounts, burn ?? safe?.perDay ?? 0, now, now + period);
@@ -255,5 +300,6 @@ export function limitRunway(pool: Pool, now: number): LimitRunway | null {
     out: burn === null ? null : out,
     burnPerDay: burn,
     safe,
+    pace: paceOf(burn, safe),
   };
 }

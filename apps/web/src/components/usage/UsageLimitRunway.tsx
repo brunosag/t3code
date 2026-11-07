@@ -1,5 +1,5 @@
 import type { LimitRunway, RunwayPoint } from "@t3tools/shared/usageLimitRunway";
-import type { LimitPoolWindow } from "@t3tools/shared/usageLimits";
+import type { LimitPace, LimitPoolWindow } from "@t3tools/shared/usageLimits";
 import type { TimestampFormat } from "@t3tools/contracts";
 import type { ReactNode } from "react";
 
@@ -24,15 +24,23 @@ function startOfDay(at: number) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
+const PACE: Record<LimitPace, { readonly label: string; readonly className: string }> = {
+  ahead: { label: "Slow down", className: "text-warning" },
+  on: { label: "On pace", className: "text-foreground" },
+  under: { label: "Room to spare", className: "text-success" },
+};
+
 function formatRate(perDay: number) {
   return perDay > 0 && perDay < 1 ? "<1%" : `${Math.round(perDay)}%`;
 }
 
 function Card({
   description,
+  accounts,
   children,
 }: {
   readonly description: string | undefined;
+  readonly accounts: ReactNode;
   readonly children: ReactNode;
 }) {
   return (
@@ -40,6 +48,9 @@ function Card({
       {children}
       {description ? (
         <p className="text-xs text-muted-foreground md:col-span-2">{description}</p>
+      ) : null}
+      {accounts ? (
+        <div className="border-t border-border/60 pt-3 md:col-span-2">{accounts}</div>
       ) : null}
     </div>
   );
@@ -63,6 +74,7 @@ export function BalanceCard({
   runway,
   label,
   description,
+  accounts,
   color,
   now,
 }: {
@@ -70,6 +82,8 @@ export function BalanceCard({
   readonly runway: LimitRunway | null;
   readonly label: string;
   readonly description: string | undefined;
+  /** Each account's own reading, under the pooled figure. */
+  readonly accounts?: ReactNode;
   readonly color: string;
   readonly now: number;
 }) {
@@ -77,7 +91,7 @@ export function BalanceCard({
   const next = pool.resets.find((reset) => reset.restoresPercent > 0);
   const out = pool.remainingPercent === 0;
   return (
-    <Card description={description}>
+    <Card description={description} accounts={accounts}>
       <div className="flex flex-col gap-1">
         <Headline label={label} remaining={pool.remainingPercent} />
         {next ? (
@@ -103,6 +117,7 @@ export function RunwayCard({
   runway,
   label,
   description,
+  accounts,
   color,
   now,
 }: {
@@ -110,25 +125,27 @@ export function RunwayCard({
   readonly runway: LimitRunway;
   readonly label: string;
   readonly description: string | undefined;
+  /** Each account's own reading, under the pooled figure. */
+  readonly accounts?: ReactNode;
   readonly color: string;
   readonly now: number;
 }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
   const at = (time: number) => formatAt(time, timestampFormat, now);
-  const { burnPerDay: burn, safe } = runway;
+  const { burnPerDay: burn, safe, pace } = runway;
   const empty = pool.remainingPercent === 0;
-  const fast = burn !== null && safe !== null && burn > safe.perDay;
+  const fast = pace === "ahead";
   return (
-    <Card description={description}>
+    <Card description={description} accounts={accounts}>
       <div className="flex flex-col gap-1">
         <Headline label={label} remaining={pool.remainingPercent} />
         {empty && runway.refills[0] ? (
           <span className="mt-1 text-sm font-medium text-warning">
             Out until {at(runway.refills[0].at)}
           </span>
-        ) : burn !== null && safe ? (
-          <span className={cn("mt-1 text-sm font-medium", fast ? "text-warning" : "text-success")}>
-            {fast ? "Slow down" : "Room to spare"}
+        ) : pace ? (
+          <span className={cn("mt-1 text-sm font-medium", PACE[pace].className)}>
+            {PACE[pace].label}
           </span>
         ) : null}
         {!empty && (burn !== null || safe) ? (

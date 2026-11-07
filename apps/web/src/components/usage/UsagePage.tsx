@@ -211,6 +211,7 @@ export function UsagePage() {
   const hiddenProviders = new Set(preferences.hiddenProviders);
   const providerOrder = orderedProviders(preferences.providerOrder);
   const hiddenLimits = new Set(preferences.hiddenLimits);
+  const hiddenAccountRows = new Set(preferences.hiddenAccountRows);
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
   const {
@@ -541,6 +542,8 @@ export function UsagePage() {
                 }
                 hiddenLimits={hiddenLimits}
                 onHiddenLimitsChange={(next) => updatePreferences({ hiddenLimits: next })}
+                hiddenAccountRows={hiddenAccountRows}
+                onHiddenAccountRowsChange={(next) => updatePreferences({ hiddenAccountRows: next })}
                 cursorPrompt={
                   cursorAccessEnvironments.length > 0 ? (
                     <CursorEnableLimits

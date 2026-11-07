@@ -6,9 +6,11 @@ import {
   collectLimitPools,
   cursorUsageWindowDetails,
   displayLimitWindows,
+  formatDuration,
   type LimitAccount,
   type LimitPool,
   type LimitPoolWindow,
+  remainingPercent,
 } from "@t3tools/shared/usageLimits";
 import { limitRunway } from "@t3tools/shared/usageLimitRunway";
 import type { UsageProviderKind } from "@t3tools/contracts";
@@ -42,7 +44,7 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { AccountChip } from "./AccountChip";
-import { ResetCredits, barColor } from "./UsageLimits";
+import { ResetCredits, WindowBar, barColor } from "./UsageLimits";
 import { BalanceCard, RunwayCard } from "./UsageLimitRunway";
 import { moveProvider, PROVIDER_ORDER, usageProviderForDriver } from "./usageProviders";
 
@@ -65,26 +67,72 @@ function AccountName({
   );
 }
 
+/** Accounts without a reading for this window are left out. */
+function AccountRows({
+  pool,
+  color,
+  now,
+}: {
+  readonly pool: LimitPoolWindow;
+  readonly color: string;
+  readonly now: number;
+}) {
+  // Plan sizes only weigh the pool when every account's is known.
+  const weighted = pool.members.every((member) => member.account.capacity !== undefined);
+  return (
+    <div className="grid grid-cols-[minmax(0,9rem)_minmax(3rem,1fr)_auto] items-center gap-x-3 md:grid-cols-[11rem_minmax(0,1fr)_auto] md:gap-x-6">
+      {pool.members.map(({ account, window }) => {
+        const name =
+          account.displayName ??
+          account.email ??
+          providerClients.get(account.driver)?.label ??
+          String(account.driver);
+        const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+        return (
+          <Fragment key={account.key}>
+            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <AccountChip email={account.email} image={account.image} />
+              <span className="min-w-0 truncate">{name}</span>
+              {weighted && account.capacity !== 1 ? (
+                <span className="shrink-0 opacity-60">×{account.capacity}</span>
+              ) : null}
+              <span className="ms-auto shrink-0 tabular-nums">{remainingPercent(window)}%</span>
+            </span>
+            <WindowBar thin color={color} window={window} now={now} label={name} />
+            <span className="text-end text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+              {resetsAt > now ? `in ${formatDuration(resetsAt - now)}` : null}
+            </span>
+          </Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
 function PoolWindowCard({
   pool,
   color,
   now,
   label,
   description,
+  showAccounts,
 }: {
   readonly pool: LimitPoolWindow;
   readonly color: string;
   readonly now: number;
   readonly label: string;
   readonly description?: string | undefined;
+  readonly showAccounts: boolean;
 }) {
   const runway = limitRunway(pool, now);
+  const accounts = showAccounts ? <AccountRows pool={pool} color={color} now={now} /> : null;
   return runway?.paced ? (
     <RunwayCard
       pool={pool}
       runway={runway}
       label={label}
       description={description}
+      accounts={accounts}
       color={color}
       now={now}
     />
@@ -94,13 +142,14 @@ function PoolWindowCard({
       runway={runway}
       label={label}
       description={description}
+      accounts={accounts}
       color={color}
       now={now}
     />
   );
 }
 
-/** Credits belong to one login, so these rows are the only place the page names accounts. */
+/** Credits belong to one login, so they list by account even with account rows hidden. */
 function ResetCreditRows({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
   const banked = pool.accounts.flatMap((account) =>
     account.redeem && account.limits.resetCredits?.availableCount
@@ -139,6 +188,7 @@ function limitKey(pool: LimitPool, window: LimitPoolWindow) {
 function PoolActions({
   label,
   limits,
+  accounts,
   onMoveUp,
   onMoveDown,
   onHide,
@@ -150,6 +200,8 @@ function PoolActions({
     readonly shown: boolean;
     readonly onToggle: () => void;
   }>;
+  /** Null for a pool of one account. */
+  readonly accounts: { readonly shown: boolean; readonly onToggle: () => void } | null;
   readonly onMoveUp: (() => void) | null;
   readonly onMoveDown: (() => void) | null;
   readonly onHide: () => void;
@@ -191,6 +243,15 @@ function PoolActions({
             </MenuSubPopup>
           </MenuSub>
         ) : null}
+        {accounts ? (
+          <MenuCheckboxItem
+            checked={accounts.shown}
+            closeOnClick={false}
+            onCheckedChange={accounts.onToggle}
+          >
+            Show accounts
+          </MenuCheckboxItem>
+        ) : null}
         <MenuItem onClick={onHide}>
           <EyeOffIcon aria-hidden />
           Hide {label}
@@ -205,11 +266,13 @@ function PoolSection({
   now,
   actions,
   hiddenLimits,
+  showAccounts,
 }: {
   readonly pool: LimitPool;
   readonly now: number;
   readonly actions: ReactNode;
   readonly hiddenLimits: ReadonlySet<string>;
+  readonly showAccounts: boolean;
 }) {
   const color = barColor(pool.driver);
   const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
@@ -241,6 +304,7 @@ function PoolSection({
             now={now}
             label={details?.label ?? window.label}
             description={details?.description}
+            showAccounts={showAccounts}
           />
         );
       })}
@@ -258,6 +322,8 @@ export function UsageLimitsPooled({
   onHideProvider,
   hiddenLimits = new Set(),
   onHiddenLimitsChange,
+  hiddenAccountRows = new Set(),
+  onHiddenAccountRowsChange,
 }: {
   readonly presentations: Parameters<typeof collectLimitAccounts>[0];
   readonly now: number;
@@ -267,6 +333,8 @@ export function UsageLimitsPooled({
   readonly onHideProvider?: (provider: UsageProviderKind) => void;
   readonly hiddenLimits?: ReadonlySet<string>;
   readonly onHiddenLimitsChange?: (hiddenLimits: readonly string[]) => void;
+  readonly hiddenAccountRows?: ReadonlySet<UsageProviderKind>;
+  readonly onHiddenAccountRowsChange?: (providers: readonly UsageProviderKind[]) => void;
 }) {
   const rank = (pool: LimitPool) => {
     const provider = usageProviderForDriver(pool.driver);
@@ -278,8 +346,15 @@ export function UsageLimitsPooled({
   const shownProviders = pools.flatMap((pool) => usageProviderForDriver(pool.driver) ?? []);
   const poolActions = (pool: LimitPool) => {
     const provider = usageProviderForDriver(pool.driver);
-    if (!provider || !onProviderOrderChange || !onHideProvider || !onHiddenLimitsChange)
+    if (
+      !provider ||
+      !onProviderOrderChange ||
+      !onHideProvider ||
+      !onHiddenLimitsChange ||
+      !onHiddenAccountRowsChange
+    )
       return null;
+    const accountsShown = !hiddenAccountRows.has(provider);
     const index = shownProviders.indexOf(provider);
     const move = (offset: -1 | 1) => () =>
       onProviderOrderChange(moveProvider(providerOrder, shownProviders, provider, offset));
@@ -299,11 +374,28 @@ export function UsageLimitsPooled({
               ),
           };
         })}
+        accounts={
+          pool.accounts.length > 1
+            ? {
+                shown: accountsShown,
+                onToggle: () =>
+                  onHiddenAccountRowsChange(
+                    accountsShown
+                      ? [...hiddenAccountRows, provider]
+                      : [...hiddenAccountRows].filter((entry) => entry !== provider),
+                  ),
+              }
+            : null
+        }
         onMoveUp={index > 0 ? move(-1) : null}
         onMoveDown={index < shownProviders.length - 1 ? move(1) : null}
         onHide={() => onHideProvider(provider)}
       />
     );
+  };
+  const accountRowsHidden = (pool: LimitPool) => {
+    const provider = usageProviderForDriver(pool.driver);
+    return provider !== undefined && hiddenAccountRows.has(provider);
   };
   const notices = collectLimitNotices(presentations);
   const externalLinks = collectExternalUsageLinks(presentations);
@@ -327,6 +419,7 @@ export function UsageLimitsPooled({
             now={now}
             actions={poolActions(pool)}
             hiddenLimits={hiddenLimits}
+            showAccounts={pool.accounts.length > 1 && !accountRowsHidden(pool)}
           />
         </Fragment>
       ))}

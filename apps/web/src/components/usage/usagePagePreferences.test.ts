@@ -24,13 +24,14 @@ afterEach(() => {
 });
 
 describe("Usage page preferences", () => {
-  it("round-trips hidden providers, order and limits, and reads older saves without them", () => {
+  it("round-trips hidden providers, order, limits and account rows, and reads older saves without them", () => {
     const saved = {
       metric: "cost",
       windowDays: 7,
       hiddenProviders: ["codex"],
       providerOrder: ["antigravity", "claude"],
       hiddenLimits: ["claudeAgent:seven_day_fable"],
+      hiddenAccountRows: ["claude"],
     } as const;
     saveUsagePagePreferences(saved);
     expect(readUsagePagePreferences()).toEqual(saved);

@@ -22,6 +22,7 @@ import { GaugeIcon, TrendingDownIcon, TrendingUpIcon } from "lucide-react";
 import { Fragment, type ReactNode, useLayoutEffect, useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
+import { cn } from "../../lib/utils";
 import { observeResize } from "../../lib/observeResize";
 import { environmentPresentations } from "../../state/presentation";
 import { useEnvironmentScope, readEnvironmentScope } from "../../state/session";
@@ -113,14 +114,19 @@ function usePaceMark(timeLeft: number | null) {
   return [setBar, roomy ? paceMarkStyles(timeLeft) : null] as const;
 }
 
-function WindowBar({
+export function WindowBar({
   color,
   window,
   now,
+  label = window.label,
+  thin = false,
 }: {
   readonly color: string;
   readonly window: ServerProviderUsageWindow;
   readonly now: number;
+  readonly label?: string;
+  /** For a detail row under a larger figure. */
+  readonly thin?: boolean;
 }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
   const remaining = remainingPercent(window);
@@ -130,7 +136,7 @@ function WindowBar({
   const resetsAt = window.resetsAt
     ? formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)
     : null;
-  const summary = `${window.label}: ${remaining}% left${
+  const summary = `${label}: ${remaining}% left${
     timeLeft === null ? "" : `, ${timeLeft}% of the window left`
   }${resetsIn ? `, ${resetsIn}` : ""}`;
 
@@ -143,24 +149,38 @@ function WindowBar({
             role="img"
             aria-label={summary}
             tabIndex={0}
-            className="relative h-6 cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className={cn(
+              "relative cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+              thin ? "h-5" : "h-6",
+            )}
           />
         }
       >
         {/* Clip both layers so the gap exposes even a translucent composer surface. */}
         <div className="absolute inset-0" style={paceMark?.gap}>
-          <div className="absolute inset-x-0 inset-y-1.5 rounded-full bg-muted" />
+          <div
+            className={cn(
+              "absolute inset-x-0 rounded-full bg-muted",
+              thin ? "inset-y-2" : "inset-y-1.5",
+            )}
+          />
           {remaining > 0 ? (
             <div
-              className="absolute inset-y-1.5 left-0 rounded-full"
-              style={{ width: `${remaining}%`, backgroundColor: color }}
+              className={cn("absolute left-0 rounded-full", thin ? "inset-y-2" : "inset-y-1.5")}
+              style={{
+                width: `${remaining}%`,
+                backgroundColor: thin ? `color-mix(in oklab, ${color} 80%, transparent)` : color,
+              }}
             />
           ) : null}
         </div>
         {paceMark ? (
           <span
             aria-hidden
-            className="absolute inset-y-1 w-0.5 -translate-x-1/2 rounded-full bg-foreground"
+            className={cn(
+              "absolute -translate-x-1/2 rounded-full bg-foreground",
+              thin ? "inset-y-1.5 w-px opacity-60" : "inset-y-1 w-0.5",
+            )}
             style={paceMark.tick}
           />
         ) : null}
@@ -374,6 +394,8 @@ export function UsageLimitsSection({
   readonly onHideProvider: (provider: UsageProviderKind) => void;
   readonly hiddenLimits: ReadonlySet<string>;
   readonly onHiddenLimitsChange: (hiddenLimits: readonly string[]) => void;
+  readonly hiddenAccountRows: ReadonlySet<UsageProviderKind>;
+  readonly onHiddenAccountRowsChange: (providers: readonly UsageProviderKind[]) => void;
 }) {
   const presentations = useAtomValue(environmentPresentations.presentationsWithProvidersAtom);
   const hiddenDrivers = new Set<ServerProvider["driver"]>(
