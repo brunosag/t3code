@@ -1663,6 +1663,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         const openCode = ProviderInstanceId.make("opencode");
         const hub = UsageLimitSourceId.make("hub");
         const withUsage = yield* serverSettings.updateSettings({
+          cloudSpeechCredentials: { openai: usageReference, xai: "literal-fixture" },
           usageLimitSources: {
             [hub]: {
               kind: "cliproxy",
@@ -1708,6 +1709,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
           secretReferences: false,
         });
         assert.notInclude(JSON.stringify(legacy), "op://");
+        assert.deepEqual(legacy.cloudSpeechCredentials, {
+          openai: SECRET_REDACTED,
+          xai: SECRET_REDACTED,
+          openrouter: "",
+        });
         assert.equal(legacy.sourceControlHosts.bitbucket?.accessToken, SECRET_REDACTED);
         assert.equal(legacy.usageLimitSources[hub]?.managementKey, SECRET_REDACTED);
         assert.equal(legacy.easDeviceHosts[0]?.accessToken, SECRET_REDACTED);
@@ -1717,6 +1723,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         assert.equal(configOf(legacy, antigravity)?.apiKey, SECRET_REDACTED);
         assert.equal(configOf(legacy, openCode)?.serverPassword, SECRET_REDACTED);
         const echoed = yield* serverSettings.updateSettings({
+          cloudSpeechCredentials: legacy.cloudSpeechCredentials,
           sourceControlHosts: legacy.sourceControlHosts,
           usageLimitSources: legacy.usageLimitSources,
           easDeviceHosts: legacy.easDeviceHosts,
@@ -1729,6 +1736,11 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
           "ghe.acme.test": "ghp_ghe",
         });
         assert.deepEqual(echoed.usageLimitSources[hub]?.managementKey, usageReference);
+        assert.deepEqual(echoed.cloudSpeechCredentials, {
+          openai: usageReference,
+          xai: "literal-fixture",
+          openrouter: "",
+        });
         assert.deepEqual(echoed.easDeviceHosts[0]?.accessToken, easReference);
         assert.deepEqual(echoed.simlockDeviceHosts[0]?.agentToken, simlockReference);
         assert.deepEqual(configOf(echoed, antigravity)?.apiKey, antigravityReference);
@@ -1768,6 +1780,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
           bitbucket: { accessToken: personal("Bitbucket/token") },
           github: { tokens: { "github.com": personal("GitHub/token"), "ghe.acme.test": work } },
         },
+        cloudSpeechCredentials: { openai: personal("Voice/key"), xai: work },
         usageLimitSources: {
           [hub]: {
             kind: "cliproxy",
@@ -1812,6 +1825,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
         "ghe.acme.test": work,
       });
       assert.equal(removed.usageLimitSources[hub]?.managementKey, "");
+      assert.deepEqual(removed.cloudSpeechCredentials, { openai: "", xai: work, openrouter: "" });
       assert.equal(removed.easDeviceHosts[0]?.accessToken, "");
       assert.deepEqual(Object.keys(removed.secretProviders), ["work"]);
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),
@@ -1821,6 +1835,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
     Effect.sync(() => {
       // Shipped clients decode these as strings. Each must be covered by the older-client case above.
       assert.deepEqual(strictSecretReferencePaths(ServerSettings.ast), [
+        "cloudSpeechCredentials.openai",
+        "cloudSpeechCredentials.xai",
+        "cloudSpeechCredentials.openrouter",
         "easDeviceHosts.[].accessToken",
         "simlockDeviceHosts.[].agentToken",
         "usageLimitSources.*.managementKey",
