@@ -1,6 +1,11 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { expect, it } from "@effect/vitest";
-import { SecretProviderId, ServerConfigStreamEvent, UsageLimitSourceId } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  SecretProviderId,
+  ServerConfigStreamEvent,
+  UsageLimitSourceId,
+} from "@t3tools/contracts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -95,7 +100,9 @@ const literalSecrets = Layer.succeed(SecretResolver.SecretResolver, {
   label: (provider) => Effect.succeed(provider),
 });
 
-it.effect("labels hub accounts with their saved name and image", () =>
+const hubUsageReads = { count: 0 };
+
+it.effect("labels hub accounts with their saved name and image and republishes a new order", () =>
   Effect.gen(function* () {
     const sources = yield* UsageLimitSources.make;
     yield* sources.refresh;
@@ -111,6 +118,18 @@ it.effect("labels hub accounts with their saved name and image", () =>
       },
       { id: "plain.json", email: "plain@example.com", name: undefined, image: undefined },
     ]);
+    const reads = hubUsageReads.count;
+    yield* sources.setAccountOrder({
+      sourceId: UsageLimitSourceId.make("hub"),
+      driver: ProviderDriverKind.make("codex"),
+      accountIds: ["plain.json"],
+    });
+    const [reordered] = yield* sources.current;
+    expect(reordered?.accounts.map(({ id, priority }) => ({ id, priority }))).toEqual([
+      { id: "named.json", priority: 0 },
+      { id: "plain.json", priority: 1 },
+    ]);
+    expect(hubUsageReads.count).toBe(reads);
   }).pipe(
     Effect.provide([
       literalSecrets,
@@ -131,22 +150,25 @@ it.effect("labels hub accounts with their saved name and image", () =>
       Layer.succeed(
         HttpClient.HttpClient,
         HttpClient.make((request) =>
-          Effect.succeed(
-            HttpClientResponse.fromWeb(
+          Effect.sync(() => {
+            if (request.url.endsWith("/api-call")) hubUsageReads.count += 1;
+            return HttpClientResponse.fromWeb(
               request,
-              request.url.endsWith("/auth-files")
-                ? Response.json({
-                    files: ["named", "plain"].map((name) => ({
-                      id: `${name}.json`,
-                      auth_index: name,
-                      provider: "codex",
-                      email: `${name}@example.com`,
-                      id_token: { chatgpt_account_id: name },
-                    })),
-                  })
-                : Response.json({ status_code: 200, body: "{}" }),
-            ),
-          ),
+              request.url.endsWith("/auth-files/fields")
+                ? Response.json({ status: "ok" })
+                : request.url.endsWith("/auth-files")
+                  ? Response.json({
+                      files: ["named", "plain"].map((name) => ({
+                        id: `${name}.json`,
+                        auth_index: name,
+                        provider: "codex",
+                        email: `${name}@example.com`,
+                        id_token: { chatgpt_account_id: name },
+                      })),
+                    })
+                  : Response.json({ status_code: 200, body: "{}" }),
+            );
+          }),
         ),
       ),
       NodeCrypto.layer,

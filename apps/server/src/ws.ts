@@ -2653,6 +2653,8 @@ export const layerWsRpc = (
             );
             return { outcome };
           }),
+        [WS_METHODS.usageLimitSourceSetAccountOrder]: (input) =>
+          usageLimitSources.setAccountOrder(input),
         [WS_METHODS.providerAuthStart]: (input) => providerAuth.start(input, currentSessionId),
         [WS_METHODS.providerAuthRespond]: (input) =>
           Effect.annotateCurrentSpan({ instanceId: input.instanceId }).pipe(

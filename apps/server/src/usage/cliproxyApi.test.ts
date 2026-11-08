@@ -1,3 +1,4 @@
+import { ProviderDriverKind } from "@t3tools/contracts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -45,12 +46,14 @@ const RequestBody = Schema.Struct({
 type RequestBody = typeof RequestBody.Type;
 const decodeRequest = Schema.decodeUnknownSync(Schema.fromJsonString(RequestBody));
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 function fixture(
   options: {
     accounts?: Array<
       (typeof accounts)[number] & {
         disabled?: boolean;
+        priority?: unknown;
         cooldowns?: ReadonlyArray<{ scope: string; model_key?: string; retry_at: string }>;
         id_token: { chatgpt_account_id: string; plan_type?: string; chatgpt_plan_type?: string };
       }
@@ -60,10 +63,16 @@ function fixture(
   } = {},
 ) {
   const requests: Array<{ path: string; body?: RequestBody }> = [];
+  const fieldPatches: unknown[] = [];
   const http = HttpClient.make((request) =>
     Effect.sync(() => {
       expect(request.headers.authorization).toBe("Bearer management-secret");
       const path = new URL(request.url).pathname;
+      if (path.endsWith("/auth-files/fields") && request.body._tag === "Uint8Array") {
+        expect(request.method).toBe("PATCH");
+        fieldPatches.push(decodeJson(new TextDecoder().decode(request.body.body)));
+        return HttpClientResponse.fromWeb(request, Response.json({ status: "ok" }));
+      }
       const body =
         request.body._tag === "Uint8Array"
           ? decodeRequest(new TextDecoder().decode(request.body.body))
@@ -113,6 +122,7 @@ function fixture(
   );
   return {
     requests,
+    fieldPatches,
     api: makeCliproxyApi.pipe(
       Effect.provideService(HttpClient.HttpClient, http),
       Effect.provide(NodeCrypto.layer),
@@ -555,6 +565,69 @@ describe("CLIProxyAPI built-in management API", () => {
       const result = yield* api.consume(config, "missing.json", "credit").pipe(Effect.result);
       expect(result._tag).toBe("Failure");
       expect(test.requests).toHaveLength(1);
+    }),
+  );
+});
+
+describe("CLIProxyAPI routing priority", () => {
+  const ranked = [
+    { ...accounts[0]!, priority: 3 },
+    { ...accounts[1]!, priority: "high" },
+    { ...accounts[1]!, id: "third.json", auth_index: "c", priority: 1 },
+    {
+      ...accounts[0]!,
+      id: "claude.json",
+      auth_index: "d",
+      provider: "claude",
+      priority: 9,
+    },
+  ];
+
+  it.effect("reports a hand-edited non-integer priority as the hub default", () =>
+    Effect.gen(function* () {
+      const api = yield* fixture({ accounts: ranked.slice(0, 2) }).api;
+      const result = yield* api.readAccounts(config);
+      expect(result.map((account) => account.priority)).toEqual([3, 0]);
+    }),
+  );
+
+  it.effect("ranks listed accounts first and keeps unlisted ones below", () =>
+    Effect.gen(function* () {
+      const test = fixture({ accounts: ranked });
+      const api = yield* test.api;
+      const priorities = yield* api.setAccountOrder(config, ProviderDriverKind.make("codex"), [
+        "second.json",
+        "second.json",
+        "missing.json",
+      ]);
+      expect([...priorities]).toEqual([
+        ["second.json", 2],
+        ["first.json", 1],
+        ["third.json", 0],
+      ]);
+      expect(test.fieldPatches).toEqual(
+        expect.arrayContaining([
+          { name: "second.json", priority: 2 },
+          { name: "first.json", priority: 1 },
+          { name: "third.json", priority: 0 },
+        ]),
+      );
+      expect(test.fieldPatches).toHaveLength(3);
+    }),
+  );
+
+  it.effect("balances by resetting only the driver's prioritized accounts", () =>
+    Effect.gen(function* () {
+      const test = fixture({ accounts: ranked });
+      const api = yield* test.api;
+      yield* api.setAccountOrder(config, ProviderDriverKind.make("codex"), null);
+      expect(test.fieldPatches).toEqual(
+        expect.arrayContaining([
+          { name: "first.json", priority: 0 },
+          { name: "third.json", priority: 0 },
+        ]),
+      );
+      expect(test.fieldPatches).toHaveLength(2);
     }),
   );
 });

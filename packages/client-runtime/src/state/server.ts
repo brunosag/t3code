@@ -1402,6 +1402,15 @@ export function createServerEnvironmentAtoms<R, E>(
         key: ({ environmentId, input }) => JSON.stringify([environmentId, input]),
       },
     }),
+    setUsageLimitSourceAccountOrder: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:set-usage-limit-source-account-order",
+      tag: WS_METHODS.usageLimitSourceSetAccountOrder,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.sourceId, input.driver]),
+      },
+    }),
     refreshProviders: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:refresh-providers",
       tag: WS_METHODS.serverRefreshProviders,

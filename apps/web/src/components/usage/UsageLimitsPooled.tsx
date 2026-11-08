@@ -1,4 +1,22 @@
 import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  type CollisionDetection,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { restrictToParentElement, restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { useAtomValue } from "@effect/atom-react";
+import {
   CHATGPT_USAGE_URL,
   collectLimitAccounts,
   collectExternalUsageLinks,
@@ -9,7 +27,9 @@ import {
   formatDuration,
   type LimitAccount,
   type LimitPool,
+  type LimitPoolMember,
   type LimitPoolWindow,
+  limitRoutingKey,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
 import { limitRunway } from "@t3tools/shared/usageLimitRunway";
@@ -21,12 +41,17 @@ import {
   EllipsisIcon,
   EyeOffIcon,
   ExternalLinkIcon,
+  GripVerticalIcon,
   ListChecksIcon,
+  ScaleIcon,
 } from "lucide-react";
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 
 import { ensureLocalApi } from "../../localApi";
 import { cn } from "../../lib/utils";
+import { environmentAtomList, environmentIdsKey } from "../../state/environmentAtomList";
+import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { providerClients } from "../settings/providerDriverMeta";
 import { Button } from "../ui/button";
@@ -47,6 +72,23 @@ import { AccountChip } from "./AccountChip";
 import { ResetCredits, WindowBar, barColor } from "./UsageLimits";
 import { BalanceCard, RunwayCard } from "./UsageLimitRunway";
 import { moveProvider, PROVIDER_ORDER, usageProviderForDriver } from "./usageProviders";
+import {
+  type PendingRouting,
+  pendingRoutingSettled,
+  reorderedHubAccounts,
+  withPendingRouting,
+} from "./usageRouting";
+
+const reorderPermissionsAtom = environmentAtomList(
+  "web-usage-limit-routing-permissions",
+  serverEnvironment.setUsageLimitSourceAccountOrder.permissionAtom,
+);
+
+/** Reorders hub logins; null where the viewer may not change this pool's routing. */
+type RoutingReorder = {
+  readonly canReorder: (account: LimitAccount) => boolean;
+  readonly onReorder: (activeKey: string, overKey: string) => void;
+};
 
 function AccountName({
   account,
@@ -72,39 +114,128 @@ function AccountRows({
   pool,
   color,
   now,
+  routing,
 }: {
   readonly pool: LimitPoolWindow;
   readonly color: string;
   readonly now: number;
+  readonly routing: RoutingReorder | null;
 }) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   // Plan sizes only weigh the pool when every account's is known.
   const weighted = pool.members.every((member) => member.account.capacity !== undefined);
-  return (
+  const movable = routing
+    ? pool.members.flatMap(({ account }) => (routing.canReorder(account) ? [account.key] : []))
+    : [];
+  const hubOf = new Map(
+    pool.members.map(({ account }) => [account.key, limitRoutingKey(account)] as const),
+  );
+  // A login only trades places with others its own hub routes.
+  const sameHub: CollisionDetection = (args) =>
+    closestCenter({
+      ...args,
+      droppableContainers: args.droppableContainers.filter(
+        (container) => hubOf.get(String(container.id)) === hubOf.get(String(args.active.id)),
+      ),
+    });
+  const sortable = routing !== null && movable.length > 1;
+  const grid = (
     <div className="grid grid-cols-[minmax(0,9rem)_minmax(3rem,1fr)_auto] items-center gap-x-3 md:grid-cols-[11rem_minmax(0,1fr)_auto] md:gap-x-6">
-      {pool.members.map(({ account, window }) => {
-        const name =
-          account.displayName ??
-          account.email ??
-          providerClients.get(account.driver)?.label ??
-          String(account.driver);
-        const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
-        return (
-          <Fragment key={account.key}>
-            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-              <AccountChip email={account.email} image={account.image} />
-              <span className="min-w-0 truncate">{name}</span>
-              {weighted && account.capacity !== 1 ? (
-                <span className="shrink-0 opacity-60">×{account.capacity}</span>
-              ) : null}
-              <span className="ms-auto shrink-0 tabular-nums">{remainingPercent(window)}%</span>
-            </span>
-            <WindowBar thin color={color} window={window} now={now} label={name} />
-            <span className="text-end text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-              {resetsAt > now ? `in ${formatDuration(resetsAt - now)}` : null}
-            </span>
-          </Fragment>
-        );
-      })}
+      {pool.members.map((member) => (
+        <AccountRow
+          key={member.account.key}
+          member={member}
+          weighted={weighted}
+          color={color}
+          now={now}
+          grip={sortable ? (movable.includes(member.account.key) ? "handle" : "space") : "none"}
+        />
+      ))}
+    </div>
+  );
+  if (!sortable) return grid;
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={sameHub}
+      modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+      onDragEnd={(event) => {
+        if (event.over !== null) routing.onReorder(String(event.active.id), String(event.over.id));
+      }}
+    >
+      <SortableContext items={movable} strategy={verticalListSortingStrategy}>
+        {grid}
+      </SortableContext>
+    </DndContext>
+  );
+}
+
+function AccountRow({
+  member: { account, window },
+  weighted,
+  color,
+  now,
+  grip,
+}: {
+  readonly member: LimitPoolMember;
+  readonly weighted: boolean;
+  readonly color: string;
+  readonly now: number;
+  readonly grip: "handle" | "space" | "none";
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: account.key, disabled: grip !== "handle" });
+  const name =
+    account.displayName ??
+    account.email ??
+    providerClients.get(account.driver)?.label ??
+    String(account.driver);
+  const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn(
+        "col-span-3 grid grid-cols-subgrid items-center",
+        isDragging && "relative z-10 rounded-md bg-background shadow-md",
+      )}
+    >
+      <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+        {grip === "handle" ? (
+          <button
+            type="button"
+            ref={setActivatorNodeRef}
+            {...attributes}
+            {...listeners}
+            aria-label={`Drag to change ${name}'s hub routing priority`}
+            className="-ms-1 flex size-4 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground/60 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset active:cursor-grabbing"
+          >
+            <GripVerticalIcon className="size-3" />
+          </button>
+        ) : grip === "space" ? (
+          <span aria-hidden className="-ms-1 size-4 shrink-0" />
+        ) : null}
+        <AccountChip email={account.email} image={account.image} />
+        <span className="min-w-0 truncate">{name}</span>
+        {weighted && account.capacity !== 1 ? (
+          <span className="shrink-0 opacity-60">×{account.capacity}</span>
+        ) : null}
+        <span className="ms-auto shrink-0 tabular-nums">{remainingPercent(window)}%</span>
+      </span>
+      <WindowBar thin color={color} window={window} now={now} label={name} />
+      <span className="text-end text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+        {resetsAt > now ? `in ${formatDuration(resetsAt - now)}` : null}
+      </span>
     </div>
   );
 }
@@ -116,6 +247,7 @@ function PoolWindowCard({
   label,
   description,
   showAccounts,
+  routing,
 }: {
   readonly pool: LimitPoolWindow;
   readonly color: string;
@@ -123,9 +255,12 @@ function PoolWindowCard({
   readonly label: string;
   readonly description?: string | undefined;
   readonly showAccounts: boolean;
+  readonly routing: RoutingReorder | null;
 }) {
   const runway = limitRunway(pool, now);
-  const accounts = showAccounts ? <AccountRows pool={pool} color={color} now={now} /> : null;
+  const accounts = showAccounts ? (
+    <AccountRows pool={pool} color={color} now={now} routing={routing} />
+  ) : null;
   return runway?.paced ? (
     <RunwayCard
       pool={pool}
@@ -191,6 +326,7 @@ function PoolActions({
   accounts,
   onMoveUp,
   onMoveDown,
+  onBalance,
   onHide,
 }: {
   readonly label: string;
@@ -204,6 +340,8 @@ function PoolActions({
   readonly accounts: { readonly shown: boolean; readonly onToggle: () => void } | null;
   readonly onMoveUp: (() => void) | null;
   readonly onMoveDown: (() => void) | null;
+  /** Null unless the hub routes this pool's logins at different priorities. */
+  readonly onBalance: (() => void) | null;
   readonly onHide: () => void;
 }) {
   return (
@@ -252,6 +390,12 @@ function PoolActions({
             Show accounts
           </MenuCheckboxItem>
         ) : null}
+        {onBalance ? (
+          <MenuItem onClick={onBalance}>
+            <ScaleIcon aria-hidden />
+            Balance hub routing
+          </MenuItem>
+        ) : null}
         <MenuItem onClick={onHide}>
           <EyeOffIcon aria-hidden />
           Hide {label}
@@ -267,12 +411,14 @@ function PoolSection({
   actions,
   hiddenLimits,
   showAccounts,
+  routing,
 }: {
   readonly pool: LimitPool;
   readonly now: number;
   readonly actions: ReactNode;
   readonly hiddenLimits: ReadonlySet<string>;
   readonly showAccounts: boolean;
+  readonly routing: RoutingReorder | null;
 }) {
   const color = barColor(pool.driver);
   const label = providerClients.get(pool.driver)?.label ?? String(pool.driver);
@@ -305,6 +451,7 @@ function PoolSection({
             label={details?.label ?? window.label}
             description={details?.description}
             showAccounts={showAccounts}
+            routing={routing}
           />
         );
       })}
@@ -338,9 +485,81 @@ export function UsageLimitsPooled({
     const provider = usageProviderForDriver(pool.driver);
     return provider ? providerOrder.indexOf(provider) : providerOrder.length;
   };
-  const pools = collectLimitPools(collectLimitAccounts(presentations), now).toSorted(
+  const [pendingRouting, setPendingRouting] = useState<PendingRouting | null>(null);
+  const reported = collectLimitAccounts(presentations);
+  // Dropped during render so an optimistic order never outlives the hub report it was for.
+  if (pendingRouting !== null && pendingRoutingSettled(reported, pendingRouting)) {
+    setPendingRouting(null);
+  }
+  const pools = collectLimitPools(withPendingRouting(reported, pendingRouting), now).toSorted(
     (left, right) => rank(left) - rank(right),
   );
+  const environmentIds = [...presentations.keys()];
+  const reorderPermissions = useAtomValue(
+    reorderPermissionsAtom(environmentIdsKey(environmentIds)),
+  );
+  const canReorder = (account: LimitAccount) =>
+    account.routing !== null &&
+    reorderPermissions[environmentIds.indexOf(account.routing.environmentId)] === true;
+  const setAccountOrder = useAtomCommand(
+    serverEnvironment.setUsageLimitSourceAccountOrder,
+    "Change hub routing order",
+  );
+  // Each hub's logins in their new order, highest priority first; null ties them.
+  const sendOrder = (
+    pool: LimitPool,
+    hubs: ReadonlyArray<{ readonly accounts: readonly LimitAccount[]; readonly balance: boolean }>,
+  ) => {
+    const expected = new Map(
+      hubs.flatMap(({ accounts, balance }) =>
+        accounts.map((account, index) => [account.key, balance ? 0 : accounts.length - 1 - index]),
+      ),
+    );
+    setPendingRouting((previous) => new Map([...(previous ?? []), ...expected]));
+    for (const { accounts, balance } of hubs) {
+      const routing = accounts[0]?.routing;
+      if (!routing) continue;
+      void setAccountOrder({
+        environmentId: routing.environmentId,
+        input: {
+          sourceId: routing.sourceId,
+          driver: pool.driver,
+          accountIds: balance
+            ? null
+            : accounts.flatMap((account) => account.routing?.accountId ?? []),
+        },
+      }).then((result) => {
+        if (result._tag === "Failure") setPendingRouting(null);
+      });
+    }
+  };
+  const routingFor = (pool: LimitPool): RoutingReorder | null =>
+    pool.accounts.some(canReorder)
+      ? {
+          canReorder,
+          onReorder: (activeKey, overKey) => {
+            const accounts = reorderedHubAccounts(pool.accounts, activeKey, overKey);
+            if (accounts) sendOrder(pool, [{ accounts, balance: false }]);
+          },
+        }
+      : null;
+  const balanceFor = (pool: LimitPool) => {
+    const hubs = new Map<string | null, LimitAccount[]>();
+    for (const account of pool.accounts.filter(canReorder)) {
+      const hub = limitRoutingKey(account);
+      hubs.set(hub, [...(hubs.get(hub) ?? []), account]);
+    }
+    const uneven = [...hubs.values()].filter(
+      (accounts) => new Set(accounts.map((account) => account.routing?.priority)).size > 1,
+    );
+    return uneven.length === 0
+      ? null
+      : () =>
+          sendOrder(
+            pool,
+            uneven.map((accounts) => ({ accounts, balance: true })),
+          );
+  };
   const shownProviders = pools.flatMap((pool) => usageProviderForDriver(pool.driver) ?? []);
   const poolActions = (pool: LimitPool) => {
     const provider = usageProviderForDriver(pool.driver);
@@ -387,6 +606,7 @@ export function UsageLimitsPooled({
         }
         onMoveUp={index > 0 ? move(-1) : null}
         onMoveDown={index < shownProviders.length - 1 ? move(1) : null}
+        onBalance={balanceFor(pool)}
         onHide={() => onHideProvider(provider)}
       />
     );
@@ -412,6 +632,7 @@ export function UsageLimitsPooled({
             actions={poolActions(pool)}
             hiddenLimits={hiddenLimits}
             showAccounts={pool.accounts.length > 1 && !accountRowsHidden(pool)}
+            routing={routingFor(pool)}
           />
         </Fragment>
       ))}

@@ -30,6 +30,8 @@ const AuthFile = Schema.Struct({
   provider: Schema.String,
   email: Schema.optional(Schema.String),
   disabled: Schema.optional(Schema.Boolean),
+  // Unknown so an odd hand-edited value cannot break the Limits view.
+  priority: Schema.optional(Schema.Unknown),
   id_token: Schema.optional(
     Schema.Struct({
       chatgpt_account_id: Schema.optional(Schema.String),
@@ -134,6 +136,12 @@ const CreditList = Schema.Struct({
 });
 
 const decodeAuthFiles = Schema.decodeUnknownEffect(AuthFiles);
+const authPriority = (account: typeof AuthFile.Type) =>
+  typeof account.priority === "number" && Number.isSafeInteger(account.priority)
+    ? account.priority
+    : 0;
+const hubProvider = (driver: ProviderDriverKind) =>
+  driver === "codex" ? "codex" : driver === "claudeAgent" ? "claude" : undefined;
 const decodeAuthFileCooldowns = Schema.decodeUnknownEffect(AuthFileCooldowns);
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 const decodeApiResponse = Schema.decodeUnknownEffect(ApiResponse);
@@ -217,6 +225,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
     hub: CliproxyHub,
     path: string,
     body?: unknown,
+    method: "POST" | "PATCH" = "POST",
   ) {
     const url = yield* Effect.try({
       try: () => {
@@ -228,7 +237,11 @@ export const makeCliproxyApi = Effect.gen(function* () {
       catch: () => new UsageLimitSourceError({ detail: "The hub URL is not valid." }),
     });
     const request = (
-      body === undefined ? HttpClientRequest.get(url) : HttpClientRequest.post(url)
+      body === undefined
+        ? HttpClientRequest.get(url)
+        : method === "PATCH"
+          ? HttpClientRequest.patch(url)
+          : HttpClientRequest.post(url)
     ).pipe(HttpClientRequest.setHeader("Authorization", `Bearer ${hub.managementKey}`));
     const response = yield* client
       .execute(body === undefined ? request : request.pipe(HttpClientRequest.bodyJsonUnsafe(body)))
@@ -346,6 +359,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
     const base = {
       id: account.id,
       driver: ProviderDriverKind.make(account.provider === "codex" ? "codex" : "claudeAgent"),
+      priority: authPriority(account),
       ...(account.email ? { email: account.email } : {}),
       ...(account.id_token?.chatgpt_account_id?.trim()
         ? { workspaceId: account.id_token.chatgpt_account_id.trim() }
@@ -515,5 +529,51 @@ export const makeCliproxyApi = Effect.gen(function* () {
       ),
     );
   });
-  return { readAccounts, consume, claudeCooldownEnd };
+  /** Listed accounts first, then the driver's others by their current priority; null ties them all. */
+  const setAccountOrder = Effect.fn("CliproxyApi.setAccountOrder")(function* (
+    hub: CliproxyHub,
+    driver: ProviderDriverKind,
+    accountIds: ReadonlyArray<string> | null,
+  ): Effect.fn.Return<ReadonlyMap<string, number>, UsageLimitSourceError> {
+    const provider = hubProvider(driver);
+    if (provider === undefined) {
+      return yield* new UsageLimitSourceError({ detail: "The hub does not route this provider." });
+    }
+    const files = (yield* authFiles(hub).pipe(
+      Effect.mapError((error) =>
+        isUsageLimitSourceError(error)
+          ? error
+          : new UsageLimitSourceError({ detail: "The hub could not list accounts." }),
+      ),
+    )).filter((account) => account.provider === provider);
+    const listed = [...new Set(accountIds)].flatMap(
+      (id) => files.find((account) => account.id === id) ?? [],
+    );
+    const ordered = [
+      ...listed,
+      ...files
+        .filter((account) => !listed.includes(account))
+        .toSorted((left, right) => authPriority(right) - authPriority(left)),
+    ];
+    // The bottom keeps the hub default, so an account added later shares the last place.
+    const priorities = new Map(
+      ordered.map((account, index) => [
+        account.id,
+        accountIds === null ? 0 : ordered.length - 1 - index,
+      ]),
+    );
+    yield* Effect.forEach(
+      ordered.filter((account) => authPriority(account) !== priorities.get(account.id)),
+      (account) =>
+        management(
+          hub,
+          "auth-files/fields",
+          { name: account.id, priority: priorities.get(account.id) },
+          "PATCH",
+        ),
+      { concurrency: 4, discard: true },
+    );
+    return priorities;
+  });
+  return { readAccounts, consume, claudeCooldownEnd, setAccountOrder };
 });

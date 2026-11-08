@@ -13,6 +13,7 @@ import {
   type ServerProvider,
   type ServerProviderUsageLimits,
   type ServerProviderUsageWindow,
+  type UsageLimitSourceId,
   type UsageLimitSourceSnapshots,
 } from "@t3tools/contracts";
 
@@ -254,7 +255,19 @@ export interface LimitAccount {
     readonly environmentId: EnvironmentId;
     readonly input: ProviderConsumeResetCreditInput;
   } | null;
+  /** The hub login whose place in its pool sets the hub's routing priority. */
+  readonly routing: {
+    readonly environmentId: EnvironmentId;
+    readonly sourceId: UsageLimitSourceId;
+    readonly accountId: string;
+    readonly priority: number;
+  } | null;
   readonly limits: ServerProviderUsageLimits;
+}
+
+/** Accounts sharing a key are reordered together; null for accounts no hub routes. */
+export function limitRoutingKey(account: LimitAccount): string | null {
+  return account.routing ? `${account.routing.environmentId}:${account.routing.sourceId}` : null;
 }
 
 type UsageHistory = NonNullable<ServerProviderUsageWindow["history"]>;
@@ -366,6 +379,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
       image: previous.image ?? next.image,
       environments,
       sourceLabel: environments.length > 0 ? null : (previous.sourceLabel ?? next.sourceLabel),
+      routing: previous.routing ?? next.routing,
       redeem:
         hubRedeems.get(key)?.redeem ??
         (creditSource ? creditSource.redeem : (winner.redeem ?? previous.redeem ?? next.redeem)),
@@ -402,6 +416,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         environments: [{ environmentId, label }],
         sourceLabel: null,
         redeem: { environmentId, input: { instanceId: provider.instanceId } },
+        routing: null,
         limits: provider.usageLimits,
       });
     }
@@ -426,6 +441,15 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
           image: account.image,
           environments: [],
           sourceLabel,
+          routing:
+            account.priority === undefined
+              ? null
+              : {
+                  environmentId,
+                  sourceId: source.id,
+                  accountId: account.id,
+                  priority: account.priority,
+                },
           redeem: account.usageLimits.resetCredits?.nextCreditId
             ? {
                 environmentId,
@@ -551,12 +575,25 @@ export function collectLimitPools(
     };
     const sorted = [...members].sort(
       (left, right) =>
+        compareRouting(left, right) ||
         orderReset(left) - orderReset(right) ||
         accountSortName(left).localeCompare(accountSortName(right)) ||
         left.key.localeCompare(right.key),
     );
     return { driver, accounts: sorted, windows: poolWindows(sorted, now) };
   });
+}
+
+// Hub logins list in routing order, highest priority first, ahead of logins no hub routes.
+function compareRouting(left: LimitAccount, right: LimitAccount): number {
+  const leftHub = limitRoutingKey(left);
+  const rightHub = limitRoutingKey(right);
+  if (leftHub !== rightHub) {
+    if (leftHub === null) return 1;
+    if (rightHub === null) return -1;
+    return leftHub.localeCompare(rightHub);
+  }
+  return (right.routing?.priority ?? 0) - (left.routing?.priority ?? 0);
 }
 
 function accountSortName(account: LimitAccount): string {

@@ -36,6 +36,7 @@ vp test run \
   apps/web/src/components/settings/AddUsageLimitSourceDialog.logic.test.ts \
   apps/web/src/components/usage/usagePagePreferences.test.ts \
   apps/web/src/components/usage/usageProviders.test.ts \
+  apps/web/src/components/usage/usageRouting.test.ts \
   packages/contracts/src/settings.test.ts \
   apps/desktop/src/app/DesktopEnvironment.test.ts \
   apps/desktop/src/window/DesktopWindow.test.ts \

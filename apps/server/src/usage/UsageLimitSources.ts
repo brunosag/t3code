@@ -2,6 +2,7 @@ import {
   DEFAULT_PROVIDER_HEALTH_REFRESH_INTERVAL,
   UsageLimitSourceError,
   type UsageLimitSourceConsumeResetCreditInput,
+  type UsageLimitSourceSetAccountOrderInput,
   type ProviderConsumeResetCreditResult,
   type ServerSettings,
   UsageLimitSourceConfig,
@@ -38,6 +39,9 @@ export class UsageLimitSources extends Context.Service<
     readonly consumeResetCredit: (
       input: UsageLimitSourceConsumeResetCreditInput,
     ) => Effect.Effect<ProviderConsumeResetCreditResult, UsageLimitSourceError>;
+    readonly setAccountOrder: (
+      input: UsageLimitSourceSetAccountOrderInput,
+    ) => Effect.Effect<void, UsageLimitSourceError>;
     /** When a hub that refused a Claude model on every credential can route it again. */
     readonly claudeCooldownResetAt: (model: string) => Effect.Effect<string | undefined>;
   }
@@ -130,14 +134,13 @@ export const make = Effect.gen(function* () {
     yield* publish(snapshots);
   }).pipe(refreshLock.withPermits(1), Effect.ignoreCause({ log: true }));
 
-  // Shares the refresh lock so a stale in-flight read cannot overwrite a redemption.
-  const consumeResetCredit = Effect.fn("UsageLimitSources.consumeResetCredit")(function* (
-    input: UsageLimitSourceConsumeResetCreditInput,
+  const enabledHub = Effect.fn("UsageLimitSources.enabledHub")(function* (
+    sourceId: UsageLimitSourceId,
   ) {
     const settings = yield* settingsService.getSettings.pipe(
       Effect.mapError(() => new UsageLimitSourceError({ detail: "Could not read hub settings." })),
     );
-    const config = settings.usageLimitSources[input.sourceId];
+    const config = settings.usageLimitSources[sourceId];
     if (!config?.enabled) {
       return yield* new UsageLimitSourceError({
         detail: "The usage limit source is missing or disabled.",
@@ -147,15 +150,41 @@ export const make = Effect.gen(function* () {
     if (managementKey.length === 0) {
       return yield* new UsageLimitSourceError({ detail: missingManagementKey(config) });
     }
-    const result = yield* api.consume(
-      { url: config.url, managementKey },
-      input.accountId,
-      input.creditId,
-    );
+    return { config, hub: { url: config.url, managementKey } };
+  });
+
+  // Shares the refresh lock so a stale in-flight read cannot overwrite a redemption.
+  const consumeResetCredit = Effect.fn("UsageLimitSources.consumeResetCredit")(function* (
+    input: UsageLimitSourceConsumeResetCreditInput,
+  ) {
+    const { config, hub } = yield* enabledHub(input.sourceId);
+    const result = yield* api.consume(hub, input.accountId, input.creditId);
     const snapshot = yield* readSource(input.sourceId, config);
     const previous = yield* Ref.get(stateRef);
     yield* publish(previous.map((source) => (source.id === input.sourceId ? snapshot : source)));
     return result;
+  }, refreshLock.withPermits(1));
+
+  // Patches the published priorities in place: re-reading every account's usage takes seconds.
+  const setAccountOrder = Effect.fn("UsageLimitSources.setAccountOrder")(function* (
+    input: UsageLimitSourceSetAccountOrderInput,
+  ) {
+    const { hub } = yield* enabledHub(input.sourceId);
+    const priorities = yield* api.setAccountOrder(hub, input.driver, input.accountIds);
+    const previous = yield* Ref.get(stateRef);
+    yield* publish(
+      previous.map((source) =>
+        source.id === input.sourceId
+          ? {
+              ...source,
+              accounts: source.accounts.map((account) => {
+                const priority = priorities.get(account.id);
+                return priority === undefined ? account : { ...account, priority };
+              }),
+            }
+          : source,
+      ),
+    );
   }, refreshLock.withPermits(1));
 
   const claudeCooldownResetAt = Effect.fn("UsageLimitSources.claudeCooldownResetAt")(function* (
@@ -211,6 +240,7 @@ export const make = Effect.gen(function* () {
   return {
     current: Ref.get(stateRef),
     consumeResetCredit,
+    setAccountOrder,
     claudeCooldownResetAt,
     refresh,
     get streamChanges() {

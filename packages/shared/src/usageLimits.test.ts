@@ -969,6 +969,7 @@ describe("pools", () => {
           environments: [],
           sourceLabel: null,
           redeem: null,
+          routing: null,
           limits: {
             checkedAt,
             windows: [
@@ -1016,6 +1017,7 @@ describe("pooled account columns", () => {
     environments: [],
     sourceLabel: "Hub",
     redeem: null,
+    routing: null,
     limits: { checkedAt: "2026-09-03T11:00:00.000Z", windows },
   });
   const keys = (pool: ReturnType<typeof collectLimitPools>[number]) =>
@@ -1168,6 +1170,33 @@ describe("pooled account columns", () => {
     expect(pool!.windows[1]!.members.map((member) => member.account.key)).toEqual(["b", "c"]);
     expect(pool!.windows[1]!.remainingPercent).toBe(40);
     expect(pool!.windows[1]!.resets.map((reset) => reset.restoresPercent)).toEqual([40, 20]);
+  });
+
+  it("lists hub logins by routing priority, then by reset, ahead of logins no hub routes", () => {
+    const routed = (key: string, resetsAt: string, priority: number): LimitAccount => ({
+      ...account(key, [{ ...window, resetsAt }]),
+      routing: {
+        environmentId: EnvironmentId.make("env"),
+        sourceId: UsageLimitSourceId.make("hub"),
+        accountId: key,
+        priority,
+      },
+    });
+    const [pool] = collectLimitPools(
+      [
+        routed("later", "2026-09-03T15:00:00.000Z", 0),
+        account("native", [{ ...window, resetsAt: "2026-09-03T12:30:00.000Z" }]),
+        routed("sooner", "2026-09-03T13:00:00.000Z", 0),
+        routed("preferred", "2026-09-03T16:00:00.000Z", 2),
+      ],
+      now,
+    );
+    expect(pool!.accounts.map((member) => member.key)).toEqual([
+      "preferred",
+      "sooner",
+      "later",
+      "native",
+    ]);
   });
 
   it("falls back to weekly resets when no account reports a session", () => {
