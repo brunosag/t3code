@@ -30,8 +30,8 @@ const PACE: Record<LimitPace, { readonly label: string; readonly className: stri
   under: { label: "Room to spare", className: "text-success" },
 };
 
-function formatRate(perDay: number) {
-  return perDay > 0 && perDay < 1 ? "<1%" : `${Math.round(perDay)}%`;
+function formatRate(rate: number) {
+  return rate > 0 && rate < 1 ? "<1%" : `${Math.round(rate)}%`;
 }
 
 function Card({
@@ -68,7 +68,7 @@ function Headline({ label, remaining }: { readonly label: string; readonly remai
   );
 }
 
-/** Session-length windows burn in bursts, so they show what is left and when more arrives, without a pace. */
+/** Session-length windows burn in bursts, so they show the recent burn and where it leads, without a pace. */
 export function BalanceCard({
   pool,
   runway,
@@ -90,10 +90,32 @@ export function BalanceCard({
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
   const next = pool.resets.find((reset) => reset.restoresPercent > 0);
   const out = pool.remainingPercent === 0;
+  const burn = out ? null : (runway?.burnPerDay ?? null);
+  const runsOut = runway?.out ?? null;
   return (
     <Card description={description} accounts={accounts}>
       <div className="flex flex-col gap-1">
         <Headline label={label} remaining={pool.remainingPercent} />
+        {burn !== null ? (
+          <span className="mt-1 text-xs text-muted-foreground tabular-nums">
+            <span className="block">
+              Using <span className="font-medium text-foreground">{formatRate(burn / 24)}/h</span>
+            </span>
+            <span className="block">
+              {runsOut ? (
+                <>
+                  Runs out{" "}
+                  <span className="font-medium text-warning">
+                    {formatAt(runsOut.at, timestampFormat, now)}
+                  </span>{" "}
+                  at this rate
+                </>
+              ) : (
+                "Lasts at this rate"
+              )}
+            </span>
+          </span>
+        ) : null}
         {next ? (
           <span
             className={cn(
