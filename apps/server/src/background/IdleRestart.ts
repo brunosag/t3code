@@ -24,9 +24,10 @@ import { forkParked } from "../serverActivation.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { watchAgentWork } from "./SleepInhibitor.ts";
 
-const CHECK_INTERVAL = Duration.minutes(1);
-// Bridges the gap between a turn ending and its queued or follow-up turn starting.
-const IDLE_GRACE = Duration.minutes(2);
+// Two small file reads, so a deploy lands within seconds of agent work going idle.
+const CHECK_INTERVAL = Duration.seconds(5);
+// Queued runs are not agent work, so this bridges a finished turn and its queued follow-up starting.
+const IDLE_GRACE = Duration.seconds(5);
 // Agent work that never pauses still gets the new version eventually.
 const MAX_DEFERRAL = Duration.hours(12);
 

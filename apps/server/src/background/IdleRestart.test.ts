@@ -24,12 +24,11 @@ const start = Effect.fn(function* (initial: {
 });
 
 describe("IdleRestart", () => {
-  it.effect("restarts once agent work has been idle for two minutes", () =>
+  it.effect("restarts once agent work has settled for five seconds", () =>
     Effect.gen(function* () {
       const service = yield* start({ pending: "2.0.0", idleSince: 0 });
-      yield* TestClock.adjust(Duration.minutes(1));
       expect(yield* service.restarts).toBe(0);
-      yield* TestClock.adjust(Duration.minutes(1));
+      yield* TestClock.adjust(Duration.seconds(5));
       expect(yield* service.restarts).toBe(1);
       yield* TestClock.adjust(Duration.hours(1));
       expect(yield* service.restarts).toBe(1);
@@ -42,9 +41,9 @@ describe("IdleRestart", () => {
       yield* TestClock.adjust(Duration.minutes(10));
       expect(yield* service.restarts).toBe(0);
       yield* Ref.set(service.idleSince, Duration.toMillis(Duration.minutes(10)));
-      yield* TestClock.adjust(Duration.minutes(1));
+      yield* TestClock.adjust(Duration.seconds(4));
       expect(yield* service.restarts).toBe(0);
-      yield* TestClock.adjust(Duration.minutes(1));
+      yield* TestClock.adjust(Duration.seconds(6));
       expect(yield* service.restarts).toBe(1);
     }).pipe(Effect.scoped),
   );
@@ -53,11 +52,11 @@ describe("IdleRestart", () => {
     Effect.gen(function* () {
       const service = yield* start({ pending: undefined, idleSince: undefined });
       yield* TestClock.adjust(Duration.hours(1));
-      // First seen by the check at 1h01m, so the deadline is 13h01m, not 12h.
+      // First seen by the check at 1h00m05s, so the deadline is 13h00m05s, not 13h.
       yield* Ref.set(service.pending, "2.0.0");
       yield* TestClock.adjust(Duration.hours(12));
       expect(yield* service.restarts).toBe(0);
-      yield* TestClock.adjust(Duration.minutes(1));
+      yield* TestClock.adjust(Duration.seconds(5));
       expect(yield* service.restarts).toBe(1);
     }).pipe(Effect.scoped),
   );
