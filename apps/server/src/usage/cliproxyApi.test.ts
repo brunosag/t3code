@@ -68,7 +68,7 @@ function fixture(
     Effect.sync(() => {
       expect(request.headers.authorization).toBe("Bearer management-secret");
       const path = new URL(request.url).pathname;
-      if (path.endsWith("/auth-files/fields") && request.body._tag === "Uint8Array") {
+      if (/\/auth-files\/(fields|status)$/.test(path) && request.body._tag === "Uint8Array") {
         expect(request.method).toBe("PATCH");
         fieldPatches.push(decodeJson(new TextDecoder().decode(request.body.body)));
         return HttpClientResponse.fromWeb(request, Response.json({ status: "ok" }));
@@ -485,15 +485,27 @@ describe("CLIProxyAPI built-in management API", () => {
     }),
   );
 
-  it.effect("skips disabled accounts and rejects redemption on them", () =>
+  it.effect("reads disabled accounts as switched off and rejects redemption on them", () =>
     Effect.gen(function* () {
       const test = fixture({ accounts: [{ ...accounts[0]!, disabled: true }] });
       const api = yield* test.api;
-      expect(yield* api.readAccounts(config)).toEqual([]);
+      const [read] = yield* api.readAccounts(config);
+      expect(read?.disabled).toBe(true);
+      expect(read?.usageLimits.windows.map((window) => window.usedPercent)).toEqual([78]);
       expect((yield* api.consume(config, "first.json", "credit").pipe(Effect.result))._tag).toBe(
         "Failure",
       );
-      expect(test.requests.every((request) => request.path.endsWith("/auth-files"))).toBe(true);
+    }),
+  );
+
+  it.effect("switches a login in the hub and returns its fresh reading", () =>
+    Effect.gen(function* () {
+      const test = fixture();
+      const api = yield* test.api;
+      const account = yield* api.setAccountDisabled(config, "second.json", true);
+      expect(test.fieldPatches).toEqual([{ name: "second.json", disabled: true }]);
+      expect(account.id).toBe("second.json");
+      expect(account.usageLimits.windows).toHaveLength(1);
     }),
   );
 
@@ -613,21 +625,6 @@ describe("CLIProxyAPI routing priority", () => {
         ]),
       );
       expect(test.fieldPatches).toHaveLength(3);
-    }),
-  );
-
-  it.effect("balances by resetting only the driver's prioritized accounts", () =>
-    Effect.gen(function* () {
-      const test = fixture({ accounts: ranked });
-      const api = yield* test.api;
-      yield* api.setAccountOrder(config, ProviderDriverKind.make("codex"), null);
-      expect(test.fieldPatches).toEqual(
-        expect.arrayContaining([
-          { name: "first.json", priority: 0 },
-          { name: "third.json", priority: 0 },
-        ]),
-      );
-      expect(test.fieldPatches).toHaveLength(2);
     }),
   );
 });

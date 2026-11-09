@@ -18,6 +18,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useAtomValue } from "@effect/atom-react";
 import {
   CHATGPT_USAGE_URL,
+  collectHubLogins,
   collectLimitAccounts,
   collectExternalUsageLinks,
   collectLimitNotices,
@@ -25,6 +26,7 @@ import {
   cursorUsageWindowDetails,
   displayLimitWindows,
   formatDuration,
+  type HubLogin,
   type LimitAccount,
   type LimitPool,
   type LimitPoolMember,
@@ -43,7 +45,7 @@ import {
   ExternalLinkIcon,
   GripVerticalIcon,
   ListChecksIcon,
-  ScaleIcon,
+  UsersIcon,
 } from "lucide-react";
 import { Fragment, type ReactNode, useState } from "react";
 
@@ -60,6 +62,8 @@ import { Alert, AlertTitle } from "../ui/alert";
 import {
   Menu,
   MenuCheckboxItem,
+  MenuGroup,
+  MenuGroupLabel,
   MenuItem,
   MenuPopup,
   MenuSeparator,
@@ -82,6 +86,11 @@ import {
 const reorderPermissionsAtom = environmentAtomList(
   "web-usage-limit-routing-permissions",
   serverEnvironment.setUsageLimitSourceAccountOrder.permissionAtom,
+);
+
+const disablePermissionsAtom = environmentAtomList(
+  "web-usage-limit-disable-permissions",
+  serverEnvironment.setUsageLimitSourceAccountDisabled.permissionAtom,
 );
 
 /** Reorders hub logins; null where the viewer may not change this pool's routing. */
@@ -154,6 +163,17 @@ function AccountRows({
           grip={sortable ? (movable.includes(member.account.key) ? "handle" : "space") : "none"}
         />
       ))}
+      {pool.offMembers.map((member) => (
+        <AccountRow
+          key={member.account.key}
+          member={member}
+          weighted={weighted}
+          color={color}
+          now={now}
+          grip={sortable ? "space" : "none"}
+          off
+        />
+      ))}
     </div>
   );
   if (!sortable) return grid;
@@ -179,12 +199,14 @@ function AccountRow({
   color,
   now,
   grip,
+  off = false,
 }: {
-  readonly member: LimitPoolMember;
+  readonly member: Pick<LimitPoolMember, "account" | "window">;
   readonly weighted: boolean;
   readonly color: string;
   readonly now: number;
   readonly grip: "handle" | "space" | "none";
+  readonly off?: boolean;
 }) {
   const {
     attributes,
@@ -208,6 +230,7 @@ function AccountRow({
       className={cn(
         "col-span-3 grid grid-cols-subgrid items-center",
         isDragging && "relative z-10 rounded-md bg-background shadow-md",
+        off && "opacity-45",
       )}
     >
       <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -230,6 +253,7 @@ function AccountRow({
         {weighted && account.capacity !== 1 ? (
           <span className="shrink-0 opacity-60">×{account.capacity}</span>
         ) : null}
+        {off ? <span className="shrink-0">· off</span> : null}
         <span className="ms-auto shrink-0 tabular-nums">{remainingPercent(window)}%</span>
       </span>
       <WindowBar thin color={color} window={window} now={now} label={name} />
@@ -324,9 +348,9 @@ function PoolActions({
   label,
   limits,
   accounts,
+  hubs,
   onMoveUp,
   onMoveDown,
-  onBalance,
   onHide,
 }: {
   readonly label: string;
@@ -338,10 +362,13 @@ function PoolActions({
   }>;
   /** Null for a pool of one account. */
   readonly accounts: { readonly shown: boolean; readonly onToggle: () => void } | null;
+  /** Each hub's logins for this provider; empty where the viewer may not change them. */
+  readonly hubs: ReadonlyArray<{
+    readonly label: string;
+    readonly logins: ReadonlyArray<{ readonly login: HubLogin; readonly onToggle: () => void }>;
+  }>;
   readonly onMoveUp: (() => void) | null;
   readonly onMoveDown: (() => void) | null;
-  /** Null unless the hub routes this pool's logins at different priorities. */
-  readonly onBalance: (() => void) | null;
   readonly onHide: () => void;
 }) {
   return (
@@ -390,11 +417,31 @@ function PoolActions({
             Show accounts
           </MenuCheckboxItem>
         ) : null}
-        {onBalance ? (
-          <MenuItem onClick={onBalance}>
-            <ScaleIcon aria-hidden />
-            Balance hub routing
-          </MenuItem>
+        {hubs.length > 0 ? (
+          <MenuSub>
+            <MenuSubTrigger>
+              <UsersIcon aria-hidden />
+              Hub accounts
+            </MenuSubTrigger>
+            <MenuSubPopup>
+              {hubs.map((hub) => (
+                <MenuGroup key={hub.label}>
+                  <MenuGroupLabel>{hub.label}</MenuGroupLabel>
+                  {hub.logins.map(({ login, onToggle }) => (
+                    <MenuCheckboxItem
+                      key={login.key}
+                      checked={!login.disabled}
+                      closeOnClick={false}
+                      onCheckedChange={onToggle}
+                    >
+                      <AccountChip email={login.email} image={login.image} />
+                      <span className="min-w-0 truncate">{login.name ?? login.email}</span>
+                    </MenuCheckboxItem>
+                  ))}
+                </MenuGroup>
+              ))}
+            </MenuSubPopup>
+          </MenuSub>
         ) : null}
         <MenuItem onClick={onHide}>
           <EyeOffIcon aria-hidden />
@@ -412,10 +459,12 @@ function PoolSection({
   hiddenLimits,
   showAccounts,
   routing,
+  allOff,
 }: {
   readonly pool: LimitPool;
   readonly now: number;
   readonly actions: ReactNode;
+  readonly allOff: boolean;
   readonly hiddenLimits: ReadonlySet<string>;
   readonly showAccounts: boolean;
   readonly routing: RoutingReorder | null;
@@ -455,6 +504,9 @@ function PoolSection({
           />
         );
       })}
+      {pool.windows.length === 0 && allOff ? (
+        <p className="text-xs text-muted-foreground">Every hub account is off.</p>
+      ) : null}
       <ResetCreditRows pool={pool} now={now} />
     </section>
   );
@@ -486,12 +538,42 @@ export function UsageLimitsPooled({
     return provider ? providerOrder.indexOf(provider) : providerOrder.length;
   };
   const [pendingRouting, setPendingRouting] = useState<PendingRouting | null>(null);
-  const reported = collectLimitAccounts(presentations);
+  const [pendingDisabled, setPendingDisabled] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map(),
+  );
+  const reportedLogins = collectHubLogins(presentations);
+  const unsettledDisabled = new Map(
+    [...pendingDisabled].filter(([key, disabled]) =>
+      reportedLogins.some((login) => login.key === key && login.disabled !== disabled),
+    ),
+  );
+  // Dropped during render once the hub reports the change, or the login is gone.
+  if (unsettledDisabled.size !== pendingDisabled.size) setPendingDisabled(unsettledDisabled);
+  const hubLogins = reportedLogins.map((login) => ({
+    ...login,
+    disabled: unsettledDisabled.get(login.key) ?? login.disabled,
+  }));
+  const reported = collectLimitAccounts(presentations).map((account) => {
+    const disabled =
+      account.routing && account.environments.length === 0
+        ? unsettledDisabled.get(
+            `${account.routing.environmentId}:${account.routing.sourceId}:${account.routing.accountId}`,
+          )
+        : undefined;
+    return disabled === undefined ? account : { ...account, disabled };
+  });
   // Dropped during render so an optimistic order never outlives the hub report it was for.
   if (pendingRouting !== null && pendingRoutingSettled(reported, pendingRouting)) {
     setPendingRouting(null);
   }
-  const pools = collectLimitPools(withPendingRouting(reported, pendingRouting), now).toSorted(
+  const reportedPools = collectLimitPools(withPendingRouting(reported, pendingRouting), now);
+  // A provider with hub logins but no readings keeps its section, so its menu can turn one on.
+  const unreadPools = [...new Set(hubLogins.map((login) => login.driver))].flatMap((driver) =>
+    reportedPools.some((pool) => pool.driver === driver)
+      ? []
+      : [{ driver, accounts: [], windows: [] }],
+  );
+  const pools = [...reportedPools, ...unreadPools].toSorted(
     (left, right) => rank(left) - rank(right),
   );
   const environmentIds = [...presentations.keys()];
@@ -501,37 +583,72 @@ export function UsageLimitsPooled({
   const canReorder = (account: LimitAccount) =>
     account.routing !== null &&
     reorderPermissions[environmentIds.indexOf(account.routing.environmentId)] === true;
+  const disablePermissions = useAtomValue(
+    disablePermissionsAtom(environmentIdsKey(environmentIds)),
+  );
+  const setAccountDisabled = useAtomCommand(
+    serverEnvironment.setUsageLimitSourceAccountDisabled,
+    "Change hub account",
+  );
+  const hubsFor = (pool: LimitPool) => {
+    const hubs = new Map<string, { label: string; logins: HubLogin[] }>();
+    for (const login of hubLogins) {
+      if (
+        login.driver !== pool.driver ||
+        disablePermissions[environmentIds.indexOf(login.environmentId)] !== true
+      )
+        continue;
+      const key = `${login.environmentId}:${login.sourceId}`;
+      const hub = hubs.get(key) ?? { label: login.hubLabel, logins: [] };
+      hub.logins.push(login);
+      hubs.set(key, hub);
+    }
+    return [...hubs.values()].map((hub) => ({
+      label: hub.label,
+      logins: hub.logins.map((login) => ({
+        login,
+        onToggle: () => {
+          const disabled = !login.disabled;
+          setPendingDisabled((previous) => new Map([...previous, [login.key, disabled]]));
+          void setAccountDisabled({
+            environmentId: login.environmentId,
+            input: { sourceId: login.sourceId, accountId: login.accountId, disabled },
+          }).then((result) => {
+            if (result._tag === "Failure") {
+              setPendingDisabled(
+                (previous) => new Map([...previous].filter(([key]) => key !== login.key)),
+              );
+            }
+          });
+        },
+      })),
+    }));
+  };
   const setAccountOrder = useAtomCommand(
     serverEnvironment.setUsageLimitSourceAccountOrder,
     "Change hub routing order",
   );
-  // Each hub's logins in their new order, highest priority first; null ties them.
-  const sendOrder = (
-    pool: LimitPool,
-    hubs: ReadonlyArray<{ readonly accounts: readonly LimitAccount[]; readonly balance: boolean }>,
-  ) => {
-    const expected = new Map(
-      hubs.flatMap(({ accounts, balance }) =>
-        accounts.map((account, index) => [account.key, balance ? 0 : accounts.length - 1 - index]),
-      ),
+  // One hub's logins in their new order, highest priority first.
+  const sendOrder = (pool: LimitPool, accounts: readonly LimitAccount[]) => {
+    const routing = accounts[0]?.routing;
+    if (!routing) return;
+    setPendingRouting(
+      (previous) =>
+        new Map([
+          ...(previous ?? []),
+          ...accounts.map((account, index) => [account.key, accounts.length - 1 - index] as const),
+        ]),
     );
-    setPendingRouting((previous) => new Map([...(previous ?? []), ...expected]));
-    for (const { accounts, balance } of hubs) {
-      const routing = accounts[0]?.routing;
-      if (!routing) continue;
-      void setAccountOrder({
-        environmentId: routing.environmentId,
-        input: {
-          sourceId: routing.sourceId,
-          driver: pool.driver,
-          accountIds: balance
-            ? null
-            : accounts.flatMap((account) => account.routing?.accountId ?? []),
-        },
-      }).then((result) => {
-        if (result._tag === "Failure") setPendingRouting(null);
-      });
-    }
+    void setAccountOrder({
+      environmentId: routing.environmentId,
+      input: {
+        sourceId: routing.sourceId,
+        driver: pool.driver,
+        accountIds: accounts.flatMap((account) => account.routing?.accountId ?? []),
+      },
+    }).then((result) => {
+      if (result._tag === "Failure") setPendingRouting(null);
+    });
   };
   const routingFor = (pool: LimitPool): RoutingReorder | null =>
     pool.accounts.some(canReorder)
@@ -539,27 +656,10 @@ export function UsageLimitsPooled({
           canReorder,
           onReorder: (activeKey, overKey) => {
             const accounts = reorderedHubAccounts(pool.accounts, activeKey, overKey);
-            if (accounts) sendOrder(pool, [{ accounts, balance: false }]);
+            if (accounts) sendOrder(pool, accounts);
           },
         }
       : null;
-  const balanceFor = (pool: LimitPool) => {
-    const hubs = new Map<string | null, LimitAccount[]>();
-    for (const account of pool.accounts.filter(canReorder)) {
-      const hub = limitRoutingKey(account);
-      hubs.set(hub, [...(hubs.get(hub) ?? []), account]);
-    }
-    const uneven = [...hubs.values()].filter(
-      (accounts) => new Set(accounts.map((account) => account.routing?.priority)).size > 1,
-    );
-    return uneven.length === 0
-      ? null
-      : () =>
-          sendOrder(
-            pool,
-            uneven.map((accounts) => ({ accounts, balance: true })),
-          );
-  };
   const shownProviders = pools.flatMap((pool) => usageProviderForDriver(pool.driver) ?? []);
   const poolActions = (pool: LimitPool) => {
     const provider = usageProviderForDriver(pool.driver);
@@ -604,9 +704,9 @@ export function UsageLimitsPooled({
               }
             : null
         }
+        hubs={hubsFor(pool)}
         onMoveUp={index > 0 ? move(-1) : null}
         onMoveDown={index < shownProviders.length - 1 ? move(1) : null}
-        onBalance={balanceFor(pool)}
         onHide={() => onHideProvider(provider)}
       />
     );
@@ -633,6 +733,7 @@ export function UsageLimitsPooled({
             hiddenLimits={hiddenLimits}
             showAccounts={pool.accounts.length > 1 && !accountRowsHidden(pool)}
             routing={routingFor(pool)}
+            allOff={hubLogins.every((login) => login.driver !== pool.driver || login.disabled)}
           />
         </Fragment>
       ))}

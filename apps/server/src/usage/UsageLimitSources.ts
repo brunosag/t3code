@@ -3,6 +3,7 @@ import {
   UsageLimitSourceError,
   type UsageLimitSourceConsumeResetCreditInput,
   type UsageLimitSourceSetAccountOrderInput,
+  type UsageLimitSourceSetAccountDisabledInput,
   type ProviderConsumeResetCreditResult,
   type ServerSettings,
   UsageLimitSourceConfig,
@@ -41,6 +42,9 @@ export class UsageLimitSources extends Context.Service<
     ) => Effect.Effect<ProviderConsumeResetCreditResult, UsageLimitSourceError>;
     readonly setAccountOrder: (
       input: UsageLimitSourceSetAccountOrderInput,
+    ) => Effect.Effect<void, UsageLimitSourceError>;
+    readonly setAccountDisabled: (
+      input: UsageLimitSourceSetAccountDisabledInput,
     ) => Effect.Effect<void, UsageLimitSourceError>;
     /** When a hub that refused a Claude model on every credential can route it again. */
     readonly claudeCooldownResetAt: (model: string) => Effect.Effect<string | undefined>;
@@ -187,6 +191,29 @@ export const make = Effect.gen(function* () {
     );
   }, refreshLock.withPermits(1));
 
+  const setAccountDisabled = Effect.fn("UsageLimitSources.setAccountDisabled")(function* (
+    input: UsageLimitSourceSetAccountDisabledInput,
+  ) {
+    const { config, hub } = yield* enabledHub(input.sourceId);
+    const account = yield* api.setAccountDisabled(hub, input.accountId, input.disabled);
+    const labeled = { ...account, ...config.accounts?.[account.id] };
+    const previous = yield* Ref.get(stateRef);
+    yield* publish(
+      previous.map((source) =>
+        source.id === input.sourceId
+          ? {
+              ...source,
+              accounts: source.accounts.some((candidate) => candidate.id === account.id)
+                ? source.accounts.map((candidate) =>
+                    candidate.id === account.id ? labeled : candidate,
+                  )
+                : [...source.accounts, labeled],
+            }
+          : source,
+      ),
+    );
+  }, refreshLock.withPermits(1));
+
   const claudeCooldownResetAt = Effect.fn("UsageLimitSources.claudeCooldownResetAt")(function* (
     model: string,
   ) {
@@ -241,6 +268,7 @@ export const make = Effect.gen(function* () {
     current: Ref.get(stateRef),
     consumeResetCredit,
     setAccountOrder,
+    setAccountDisabled,
     claudeCooldownResetAt,
     refresh,
     get streamChanges() {

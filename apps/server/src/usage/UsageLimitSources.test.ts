@@ -101,8 +101,9 @@ const literalSecrets = Layer.succeed(SecretResolver.SecretResolver, {
 });
 
 const hubUsageReads = { count: 0 };
+const hubDisabled = new Set<string>();
 
-it.effect("labels hub accounts with their saved name and image and republishes a new order", () =>
+it.effect("labels hub accounts with their saved name and image and republishes changes", () =>
   Effect.gen(function* () {
     const sources = yield* UsageLimitSources.make;
     yield* sources.refresh;
@@ -130,6 +131,16 @@ it.effect("labels hub accounts with their saved name and image and republishes a
       { id: "plain.json", priority: 1 },
     ]);
     expect(hubUsageReads.count).toBe(reads);
+    yield* sources.setAccountDisabled({
+      sourceId: UsageLimitSourceId.make("hub"),
+      accountId: "named.json",
+      disabled: true,
+    });
+    const [switched] = yield* sources.current;
+    expect(switched?.accounts.map(({ id, name, disabled }) => ({ id, name, disabled }))).toEqual([
+      { id: "named.json", name: "Work", disabled: true },
+      { id: "plain.json", name: undefined, disabled: undefined },
+    ]);
   }).pipe(
     Effect.provide([
       literalSecrets,
@@ -152,9 +163,14 @@ it.effect("labels hub accounts with their saved name and image and republishes a
         HttpClient.make((request) =>
           Effect.sync(() => {
             if (request.url.endsWith("/api-call")) hubUsageReads.count += 1;
+            if (request.url.endsWith("/auth-files/status") && request.body._tag === "Uint8Array") {
+              const patch = JSON.parse(new TextDecoder().decode(request.body.body));
+              if (patch.disabled) hubDisabled.add(patch.name);
+              else hubDisabled.delete(patch.name);
+            }
             return HttpClientResponse.fromWeb(
               request,
-              request.url.endsWith("/auth-files/fields")
+              /\/auth-files\/(fields|status)$/.test(request.url)
                 ? Response.json({ status: "ok" })
                 : request.url.endsWith("/auth-files")
                   ? Response.json({
@@ -163,6 +179,7 @@ it.effect("labels hub accounts with their saved name and image and republishes a
                         auth_index: name,
                         provider: "codex",
                         email: `${name}@example.com`,
+                        disabled: hubDisabled.has(`${name}.json`),
                         id_token: { chatgpt_account_id: name },
                       })),
                     })

@@ -360,6 +360,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
       id: account.id,
       driver: ProviderDriverKind.make(account.provider === "codex" ? "codex" : "claudeAgent"),
       priority: authPriority(account),
+      ...(account.disabled ? { disabled: true } : {}),
       ...(account.email ? { email: account.email } : {}),
       ...(account.id_token?.chatgpt_account_id?.trim()
         ? { workspaceId: account.id_token.chatgpt_account_id.trim() }
@@ -457,24 +458,38 @@ export const makeCliproxyApi = Effect.gen(function* () {
     );
   });
 
-  const readAccounts = Effect.fn("CliproxyApi.readAccounts")(function* (
-    hub: CliproxyHub,
-  ): Effect.fn.Return<ReadonlyArray<UsageLimitSourceAccount>, UsageLimitSourceError> {
-    const accounts = yield* authFiles(hub).pipe(
+  const listAccounts = (hub: CliproxyHub) =>
+    authFiles(hub).pipe(
+      Effect.map((accounts) =>
+        accounts.filter((account) => account.provider === "codex" || account.provider === "claude"),
+      ),
       Effect.mapError((error) =>
         isUsageLimitSourceError(error)
           ? error
           : new UsageLimitSourceError({ detail: "The hub could not list accounts." }),
       ),
     );
-    return yield* Effect.forEach(
-      accounts.filter(
-        (account) =>
-          !account.disabled && (account.provider === "codex" || account.provider === "claude"),
-      ),
-      (account) => readAccount(hub, account),
-      { concurrency: 4 },
-    );
+
+  const readAccounts = Effect.fn("CliproxyApi.readAccounts")(function* (
+    hub: CliproxyHub,
+  ): Effect.fn.Return<ReadonlyArray<UsageLimitSourceAccount>, UsageLimitSourceError> {
+    return yield* Effect.forEach(yield* listAccounts(hub), (account) => readAccount(hub, account), {
+      concurrency: 4,
+    });
+  });
+
+  /** Returns the login with its usage as the hub now reports it. */
+  const setAccountDisabled = Effect.fn("CliproxyApi.setAccountDisabled")(function* (
+    hub: CliproxyHub,
+    accountId: string,
+    disabled: boolean,
+  ): Effect.fn.Return<UsageLimitSourceAccount, UsageLimitSourceError> {
+    yield* management(hub, "auth-files/status", { name: accountId, disabled }, "PATCH");
+    const account = (yield* listAccounts(hub)).find((candidate) => candidate.id === accountId);
+    if (!account) {
+      return yield* new UsageLimitSourceError({ detail: "The hub account is missing." });
+    }
+    return yield* readAccount(hub, account);
   });
 
   const consume = Effect.fn("CliproxyApi.consume")(function* (
@@ -529,11 +544,11 @@ export const makeCliproxyApi = Effect.gen(function* () {
       ),
     );
   });
-  /** Listed accounts first, then the driver's others by their current priority; null ties them all. */
+  /** Listed accounts first, then the driver's others by their current priority. */
   const setAccountOrder = Effect.fn("CliproxyApi.setAccountOrder")(function* (
     hub: CliproxyHub,
     driver: ProviderDriverKind,
-    accountIds: ReadonlyArray<string> | null,
+    accountIds: ReadonlyArray<string>,
   ): Effect.fn.Return<ReadonlyMap<string, number>, UsageLimitSourceError> {
     const provider = hubProvider(driver);
     if (provider === undefined) {
@@ -557,10 +572,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
     ];
     // The bottom keeps the hub default, so an account added later shares the last place.
     const priorities = new Map(
-      ordered.map((account, index) => [
-        account.id,
-        accountIds === null ? 0 : ordered.length - 1 - index,
-      ]),
+      ordered.map((account, index) => [account.id, ordered.length - 1 - index]),
     );
     yield* Effect.forEach(
       ordered.filter((account) => authPriority(account) !== priorities.get(account.id)),
@@ -575,5 +587,5 @@ export const makeCliproxyApi = Effect.gen(function* () {
     );
     return priorities;
   });
-  return { readAccounts, consume, claudeCooldownEnd, setAccountOrder };
+  return { readAccounts, consume, claudeCooldownEnd, setAccountOrder, setAccountDisabled };
 });

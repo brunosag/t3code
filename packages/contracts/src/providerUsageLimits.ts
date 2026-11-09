@@ -88,6 +88,8 @@ export const UsageLimitSourceAccount = Schema.Struct({
   workspaceId: Schema.optional(TrimmedNonEmptyString),
   /** Hub routing priority: the hub only routes to the highest priority with an available account. */
   priority: Schema.optional(Schema.Int),
+  /** The hub routes nothing to this login. */
+  disabled: Schema.optional(Schema.Boolean),
   usageLimits: ServerProviderUsageLimits,
 });
 export type UsageLimitSourceAccount = typeof UsageLimitSourceAccount.Type;
@@ -116,10 +118,18 @@ export type UsageLimitSourceConsumeResetCreditInput =
 export const UsageLimitSourceSetAccountOrderInput = Schema.Struct({
   sourceId: UsageLimitSourceId,
   driver: ProviderDriverKind,
-  /** Highest routing priority first; null gives every account of the driver the same priority. */
-  accountIds: Schema.NullOr(Schema.Array(TrimmedNonEmptyString)),
+  /** Highest routing priority first. */
+  accountIds: Schema.Array(TrimmedNonEmptyString),
 });
 export type UsageLimitSourceSetAccountOrderInput = typeof UsageLimitSourceSetAccountOrderInput.Type;
+
+export const UsageLimitSourceSetAccountDisabledInput = Schema.Struct({
+  sourceId: UsageLimitSourceId,
+  accountId: TrimmedNonEmptyString,
+  disabled: Schema.Boolean,
+});
+export type UsageLimitSourceSetAccountDisabledInput =
+  typeof UsageLimitSourceSetAccountDisabledInput.Type;
 
 export const ProviderConsumeResetCreditInput = Schema.Union([
   Schema.Struct({ instanceId: ProviderInstanceId }),

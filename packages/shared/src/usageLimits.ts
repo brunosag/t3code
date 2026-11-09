@@ -262,6 +262,8 @@ export interface LimitAccount {
     readonly accountId: string;
     readonly priority: number;
   } | null;
+  /** No hub routes to this login and no environment signs in with it, so pools leave it out. */
+  readonly disabled: boolean;
   readonly limits: ServerProviderUsageLimits;
 }
 
@@ -380,6 +382,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
       environments,
       sourceLabel: environments.length > 0 ? null : (previous.sourceLabel ?? next.sourceLabel),
       routing: previous.routing ?? next.routing,
+      disabled: previous.disabled && next.disabled,
       redeem:
         hubRedeems.get(key)?.redeem ??
         (creditSource ? creditSource.redeem : (winner.redeem ?? previous.redeem ?? next.redeem)),
@@ -417,6 +420,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         sourceLabel: null,
         redeem: { environmentId, input: { instanceId: provider.instanceId } },
         routing: null,
+        disabled: false,
         limits: provider.usageLimits,
       });
     }
@@ -450,6 +454,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
                   accountId: account.id,
                   priority: account.priority,
                 },
+          disabled: account.disabled === true,
           redeem: account.usageLimits.resetCredits?.nextCreditId
             ? {
                 environmentId,
@@ -466,6 +471,42 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
     }
   }
   return [...accounts.values()];
+}
+
+/** A login a hub can route, whether or not it routes it now. */
+export interface HubLogin {
+  readonly key: string;
+  readonly driver: ServerProvider["driver"];
+  readonly name: string | null;
+  readonly email: string | undefined;
+  readonly image: string | undefined;
+  readonly hubLabel: string;
+  readonly disabled: boolean;
+  readonly environmentId: EnvironmentId;
+  readonly sourceId: UsageLimitSourceId;
+  readonly accountId: string;
+}
+
+export function collectHubLogins(presentations: LimitPresentations): readonly HubLogin[] {
+  const labelEnvironment = presentations.size > 1;
+  return [...presentations].flatMap(([environmentId, presentation]) =>
+    (presentation.serverConfig?.usageLimitSources ?? []).flatMap((source) =>
+      source.accounts.map((account) => ({
+        key: `${environmentId}:${source.id}:${account.id}`,
+        driver: account.driver,
+        name: account.name ?? (account.email ? null : hubAccountName(account)),
+        email: account.email,
+        image: account.image,
+        hubLabel: labelEnvironment
+          ? `${presentation.entry.target.label} · ${source.label}`
+          : source.label,
+        disabled: account.disabled === true,
+        environmentId,
+        sourceId: source.id,
+        accountId: account.id,
+      })),
+    ),
+  );
 }
 
 export function collectLimitNotices(presentations: LimitPresentations): readonly string[] {
@@ -504,6 +545,8 @@ export interface LimitPoolWindow {
   readonly kind: ServerProviderUsageWindow["kind"];
   readonly label: string;
   readonly members: readonly LimitPoolMember[];
+  /** Switched-off logins' readings, shown beside the pool but left out of its totals. */
+  readonly offMembers: ReadonlyArray<Omit<LimitPoolMember, "share">>;
   readonly columns: ReadonlyArray<
     LimitPoolMember | { readonly account: LimitAccount; readonly window: null }
   >;
@@ -575,12 +618,30 @@ export function collectLimitPools(
     };
     const sorted = [...members].sort(
       (left, right) =>
+        Number(left.disabled) - Number(right.disabled) ||
         compareRouting(left, right) ||
         orderReset(left) - orderReset(right) ||
         accountSortName(left).localeCompare(accountSortName(right)) ||
         left.key.localeCompare(right.key),
     );
-    return { driver, accounts: sorted, windows: poolWindows(sorted, now) };
+    const off = sorted.filter((account) => account.disabled);
+    return {
+      driver,
+      accounts: sorted,
+      windows: poolWindows(
+        sorted.filter((account) => !account.disabled),
+        now,
+      ).map((pooled) => ({
+        ...pooled,
+        offMembers: off.flatMap((account) => {
+          const reported = account.limits.windows.find(
+            (window) =>
+              window.kind === pooled.kind && (driver === "codex" || window.id === pooled.id),
+          );
+          return reported ? [poolMember(account, reported, now)] : [];
+        }),
+      })),
+    };
   });
 }
 
@@ -714,6 +775,7 @@ function poolWindows(accounts: readonly LimitAccount[], now: number): readonly L
       kind: first.kind,
       label: first.label,
       members,
+      offMembers: [],
       columns: accounts.map(
         (account) => memberByAccount.get(account.key) ?? { account, window: null },
       ),

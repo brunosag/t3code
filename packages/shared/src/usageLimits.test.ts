@@ -970,6 +970,7 @@ describe("pools", () => {
           sourceLabel: null,
           redeem: null,
           routing: null,
+          disabled: false,
           limits: {
             checkedAt,
             windows: [
@@ -1018,6 +1019,7 @@ describe("pooled account columns", () => {
     sourceLabel: "Hub",
     redeem: null,
     routing: null,
+    disabled: false,
     limits: { checkedAt: "2026-09-03T11:00:00.000Z", windows },
   });
   const keys = (pool: ReturnType<typeof collectLimitPools>[number]) =>
@@ -1170,6 +1172,19 @@ describe("pooled account columns", () => {
     expect(pool!.windows[1]!.members.map((member) => member.account.key)).toEqual(["b", "c"]);
     expect(pool!.windows[1]!.remainingPercent).toBe(40);
     expect(pool!.windows[1]!.resets.map((reset) => reset.restoresPercent)).toEqual([40, 20]);
+  });
+
+  it("shows switched-off logins after the pool without counting them", () => {
+    const [pool] = collectLimitPools(
+      [
+        { ...account("off", [{ ...window, usedPercent: 100 }]), disabled: true },
+        account("on", [{ ...window, usedPercent: 20 }]),
+      ],
+      now,
+    );
+    expect(pool!.accounts.map((member) => member.key)).toEqual(["on", "off"]);
+    expect(pool!.windows[0]!.remainingPercent).toBe(80);
+    expect(pool!.windows[0]!.offMembers.map((member) => member.account.key)).toEqual(["off"]);
   });
 
   it("lists hub logins by routing priority, then by reset, ahead of logins no hub routes", () => {

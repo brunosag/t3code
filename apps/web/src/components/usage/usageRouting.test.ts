@@ -25,6 +25,7 @@ const account = (key: string, priority: number | null, sourceId = "hub"): LimitA
           accountId: key,
           priority,
         },
+  disabled: false,
   limits: { checkedAt: "2026-11-08T00:00:00.000Z", windows: [] },
 });
 
