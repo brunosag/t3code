@@ -12,6 +12,7 @@ import {
   type UsageLimitSourceSnapshot,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+import { compareSemverVersions } from "@t3tools/shared/semver";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -48,6 +49,8 @@ export class UsageLimitSources extends Context.Service<
     ) => Effect.Effect<void, UsageLimitSourceError>;
     /** When a hub that refused a Claude model on every credential can route it again. */
     readonly claudeCooldownResetAt: (model: string) => Effect.Effect<string | undefined>;
+    /** Claude offers reset grants only to a recent Claude Code, so hub reads present the newest installed. */
+    readonly reportClaudeVersion: (version: string) => Effect.Effect<void>;
   }
 >()("t3/usage/UsageLimitSources") {}
 
@@ -80,6 +83,7 @@ export const make = Effect.gen(function* () {
     return settingsSecretLiteral(resolved.managementKey);
   });
   const stateRef = yield* Ref.make<ReadonlyArray<UsageLimitSourceSnapshot>>([]);
+  const claudeVersion = yield* Ref.make<string | undefined>(undefined);
   const changes = yield* Effect.acquireRelease(
     PubSub.unbounded<ReadonlyArray<UsageLimitSourceSnapshot>>(),
     PubSub.shutdown,
@@ -96,7 +100,11 @@ export const make = Effect.gen(function* () {
       return { ...base, accounts: [], error: missingManagementKey(config) };
     }
     const accounts = yield* api
-      .readAccounts({ url: config.url, managementKey })
+      .readAccounts({
+        url: config.url,
+        managementKey,
+        claudeVersion: yield* Ref.get(claudeVersion),
+      })
       .pipe(Effect.result);
     if (accounts._tag === "Failure") {
       yield* Effect.logDebug("usage limit source read failed", { id, cause: accounts.failure });
@@ -154,7 +162,10 @@ export const make = Effect.gen(function* () {
     if (managementKey.length === 0) {
       return yield* new UsageLimitSourceError({ detail: missingManagementKey(config) });
     }
-    return { config, hub: { url: config.url, managementKey } };
+    return {
+      config,
+      hub: { url: config.url, managementKey, claudeVersion: yield* Ref.get(claudeVersion) },
+    };
   });
 
   // Shares the refresh lock so a stale in-flight read cannot overwrite a redemption.
@@ -239,6 +250,19 @@ export const make = Effect.gen(function* () {
     return Number.isFinite(soonest) ? DateTime.formatIso(DateTime.makeUnsafe(soonest)) : undefined;
   });
 
+  const scope = yield* Effect.scope;
+  // A newer version can unlock grants the last read missed, so it rereads the hubs.
+  const reportClaudeVersion = Effect.fn("UsageLimitSources.reportClaudeVersion")(function* (
+    version: string,
+  ) {
+    const raised = yield* Ref.modify(claudeVersion, (current) =>
+      current === undefined || compareSemverVersions(version, current) > 0
+        ? [true, version]
+        : [false, current],
+    );
+    if (raised) yield* refresh.pipe(Effect.forkIn(scope));
+  });
+
   yield* settingsService.streamChanges.pipe(
     Stream.map((settings) => settings.usageLimitSources),
     Stream.changes,
@@ -270,6 +294,7 @@ export const make = Effect.gen(function* () {
     setAccountOrder,
     setAccountDisabled,
     claudeCooldownResetAt,
+    reportClaudeVersion,
     refresh,
     get streamChanges() {
       return Stream.unwrap(

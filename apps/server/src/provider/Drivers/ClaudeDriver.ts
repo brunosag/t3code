@@ -265,6 +265,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv, Path.
               ? Cache.invalidateAll(capabilitiesProbeCache)
               : Effect.void,
           ),
+          Effect.tap((provider) =>
+            provider.version && Option.isSome(usageLimitSources)
+              ? usageLimitSources.value.reportClaudeVersion(provider.version)
+              : Effect.void,
+          ),
           Effect.map(stampIdentity),
         ),
       ),

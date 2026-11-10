@@ -95,10 +95,8 @@ const isFutureTimestamp = (value: string, nowMs: number) => {
   );
 };
 
-export function claudeResetCreditsToContract(
-  block: unknown,
-  nowMs: number,
-): ServerProviderResetCredits | undefined {
+/** Grants that can be claimed now, and the one Claude would spend next; undefined when ineligible. */
+export function liveClaudeGrants(block: unknown, nowMs: number) {
   const parsed = decodeCedarEmber(block);
   if (Option.isNone(parsed) || !parsed.value.eligible) return undefined;
   const live = (parsed.value.grants ?? [])
@@ -109,7 +107,16 @@ export function claudeResetCreditsToContract(
         grant.usable_now &&
         (grant.ends_at == null || isFutureTimestamp(grant.ends_at, nowMs)),
     );
-  const next = live.find((grant) => grant.id === parsed.value.next_grant_id);
+  return { live, next: live.find((grant) => grant.id === parsed.value.next_grant_id) };
+}
+
+export function claudeResetCreditsToContract(
+  block: unknown,
+  nowMs: number,
+): ServerProviderResetCredits | undefined {
+  const grants = liveClaudeGrants(block, nowMs);
+  if (!grants) return undefined;
+  const { live, next } = grants;
   const nextExpiresAt = next?.ends_at ? DateTime.make(next.ends_at) : Option.none();
   return {
     availableCount: next ? live.reduce((sum, grant) => sum + grant.resets_left, 0) : 0,
@@ -187,6 +194,32 @@ export const claudeAccountConfigPath = Effect.fn("claudeAccountConfigPath")(func
     : path.join(yield* HostProcess.HomeDirectory, ".claude.json");
 });
 
+/** Claude's grant-claim request body; requestId is the claim's idempotency key. */
+export const claudeResetClaim = (grantId: string, requestId: string) => ({
+  program: PROGRAM,
+  grant_id: grantId,
+  request_id: requestId,
+});
+
+export const claudeResetClaimUrl = (organization: string) =>
+  new URL(`/api/organizations/${encodeURIComponent(organization)}/reset_rate_limits`, API_BASE);
+
+/** Claude's claim answer as an outcome, or the reason it settled nothing. */
+export function claudeClaimOutcome(
+  result: (typeof ClaimResponse.Type)["result"],
+): ProviderConsumeResetCreditOutcome | "coolingDown" | "unconfirmed" {
+  if (result === "cooldown") return "coolingDown";
+  if (result === "unavailable") return "unconfirmed";
+  return CLAIM_OUTCOMES[result];
+}
+
+export const decodeClaudeClaimResponse = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(ClaimResponse),
+);
+
+export const claudeResetCreditFailure = (reason: keyof typeof RESET_CREDIT_FAILURES) =>
+  RESET_CREDIT_FAILURES[reason];
+
 const CLAIM_OUTCOMES = {
   reset: "reset",
   not_limited: "nothingToReset",
@@ -218,18 +251,9 @@ export const consumeClaudeResetCredit = Effect.fn("consumeClaudeResetCredit")(fu
   const client = yield* HttpClient.HttpClient;
   const response = yield* client
     .execute(
-      HttpClientRequest.post(
-        new URL(
-          `/api/organizations/${encodeURIComponent(organization)}/reset_rate_limits`,
-          API_BASE,
-        ),
-      ).pipe(
+      HttpClientRequest.post(claudeResetClaimUrl(organization)).pipe(
         withClaudeHeaders(token, input.version),
-        HttpClientRequest.bodyJsonUnsafe({
-          program: PROGRAM,
-          grant_id: input.grantId,
-          request_id: input.requestId,
-        }),
+        HttpClientRequest.bodyJsonUnsafe(claudeResetClaim(input.grantId, input.requestId)),
       ),
     )
     .pipe(
@@ -247,12 +271,10 @@ export const consumeClaudeResetCredit = Effect.fn("consumeClaudeResetCredit")(fu
     Effect.timeout("25 seconds"),
     Effect.mapError((cause) => new ClaudeResetCreditError({ reason: "requestFailed", cause })),
   );
-  if (body.result === "cooldown") {
-    return yield* new ClaudeResetCreditError({ reason: "coolingDown" });
+  const outcome = claudeClaimOutcome(body.result);
+  // An unconfirmed claim retains the request ID so retries address the same claim.
+  if (outcome === "coolingDown" || outcome === "unconfirmed") {
+    return yield* new ClaudeResetCreditError({ reason: outcome });
   }
-  // Unknown outcomes retain the request ID so retries address the same claim.
-  if (body.result === "unavailable") {
-    return yield* new ClaudeResetCreditError({ reason: "unconfirmed" });
-  }
-  return CLAIM_OUTCOMES[body.result];
+  return outcome;
 });

@@ -47,6 +47,16 @@ type RequestBody = typeof RequestBody.Type;
 const decodeRequest = Schema.decodeUnknownSync(Schema.fromJsonString(RequestBody));
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+const cedarEmber = (grants: ReadonlyArray<{ id: string; resets_left: number }>) => ({
+  eligible: true,
+  next_grant_id: grants[0]?.id ?? null,
+  grants: grants.map((grant) => ({
+    ...grant,
+    usable_now: true,
+    paused: false,
+    ends_at: "2099-03-09T07:59:00+00:00",
+  })),
+});
 
 function fixture(
   options: {
@@ -347,16 +357,18 @@ describe("CLIProxyAPI built-in management API", () => {
     }),
   );
 
-  it.effect("maps Claude scoped windows and plan size without a scheduler plugin", () =>
+  it.effect("maps Claude scoped windows, plan size and banked resets", () =>
     Effect.gen(function* () {
       const test = fixture({
         accounts: [{ ...accounts[0]!, provider: "claude" }],
-        // The usage endpoint answers 429 to requests without a Claude Code user agent.
+        // Claude only offers reset grants to the Claude Code version the hub presents.
         upstream: (request) => ({
-          status: request.header?.["User-Agent"]?.startsWith("claude-code/") ? 200 : 429,
+          status:
+            request.header?.["User-Agent"] === "claude-cli/2.1.400 (external, cli)" ? 200 : 429,
           body: request.url?.endsWith("/oauth/profile")
             ? { organization: { rate_limit_tier: "default_claude_max_5x" } }
             : {
+                cedar_ember: cedarEmber([{ id: "launch", resets_left: 1 }]),
                 five_hour: { utilization: 10, resets_at: null },
                 seven_day: { utilization: 50, resets_at: "2099-01-01T00:00:00Z" },
                 limits: [
@@ -371,8 +383,9 @@ describe("CLIProxyAPI built-in management API", () => {
         }),
       });
       const api = yield* test.api;
-      yield* api.readAccounts(config);
-      const result = yield* api.readAccounts(config);
+      const hub = { ...config, claudeVersion: "2.1.400" };
+      yield* api.readAccounts(hub);
+      const result = yield* api.readAccounts(hub);
       expect(
         result[0]?.usageLimits.windows.map((window) => [window.id, window.usedPercent]),
       ).toEqual([
@@ -381,6 +394,11 @@ describe("CLIProxyAPI built-in management API", () => {
         ["seven_day_fable", 80],
       ]);
       expect(result[0]).toMatchObject({ plan: "Claude Max 5x", capacity: 5 });
+      expect(result[0]?.usageLimits.resetCredits).toEqual({
+        availableCount: 1,
+        nextCreditId: "launch",
+        nextExpiresAt: "2099-03-09T07:59:00.000Z",
+      });
       expect(
         test.requests.filter((request) => request.body?.url?.endsWith("/oauth/profile")),
       ).toHaveLength(1);
@@ -473,6 +491,43 @@ describe("CLIProxyAPI built-in management API", () => {
           .filter((request) => request.path.endsWith("/reset-quota"))
           .map((request) => request.body?.auth_index),
       ).toEqual(["b", "b"]);
+    }),
+  );
+
+  it.effect("claims a Claude grant for the login's organization and keeps its claim id", () =>
+    Effect.gen(function* () {
+      let resetsLeft = 2;
+      const test = fixture({
+        accounts: [{ ...accounts[1]!, provider: "claude" }],
+        upstream: (request) => ({
+          status: 200,
+          body: request.url?.endsWith("/oauth/profile")
+            ? { organization: { uuid: "org-b" } }
+            : request.url?.endsWith("/reset_rate_limits")
+              ? { result: resetsLeft-- === 2 ? "reset" : "not_limited" }
+              : { cedar_ember: cedarEmber([{ id: "launch", resets_left: resetsLeft }]) },
+        }),
+      });
+      const api = yield* test.api;
+      expect(yield* api.consume(config, "second.json", "launch")).toEqual({ outcome: "reset" });
+      expect(yield* api.consume(config, "second.json", "launch")).toEqual({
+        outcome: "nothingToReset",
+      });
+      expect(yield* api.consume(config, "second.json", "gone")).toEqual({ outcome: "noCredit" });
+      const claims = test.requests.flatMap((request) =>
+        request.body?.url?.endsWith("/reset_rate_limits") ? [request.body] : [],
+      );
+      expect(claims.map((claim) => claim.url)).toEqual([
+        "https://api.anthropic.com/api/organizations/org-b/reset_rate_limits",
+        "https://api.anthropic.com/api/organizations/org-b/reset_rate_limits",
+      ]);
+      const [first, second] = claims.map((claim) => decodeJson(claim.data));
+      expect(first).toMatchObject({ program: "cedar_ember", grant_id: "launch" });
+      // A spent reset changes the claim, so the next one is not a replay of the first.
+      expect(first).not.toEqual(second);
+      expect(test.requests.filter((request) => request.path.endsWith("/reset-quota"))).toHaveLength(
+        1,
+      );
     }),
   );
 
