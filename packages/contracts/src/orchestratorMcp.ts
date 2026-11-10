@@ -687,9 +687,14 @@ export const OrchestratorMcpScheduleTaskInput = Schema.Struct({
 });
 export type OrchestratorMcpScheduleTaskInput = typeof OrchestratorMcpScheduleTaskInput.Type;
 
-const OrchestratorMcpScheduledTaskTarget = OrchestratorMcpTarget.annotate({
+// A task stays in its project and environment, so only the model fields apply.
+const OrchestratorMcpScheduledTaskTarget = Schema.Struct({
+  providerInstanceId: OrchestratorMcpTarget.fields.providerInstanceId,
+  model: OrchestratorMcpTarget.fields.model,
+  options: OrchestratorMcpTarget.fields.options,
+}).annotate({
   description:
-    "Provider instance, model and options for later runs, from orchestrator_capabilities. An omitted instance keeps the task's; with the task's current instance and model, options override individual stored values, and [] or {} clears them.",
+    "Model and options for later runs that start a new thread; runs in a bound thread use its current model. Omitted fields keep the task's.",
 });
 
 /** `schedule_task` creates a task, or updates one when `scheduledTaskId` is given. */
