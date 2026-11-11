@@ -308,6 +308,23 @@ function PoolWindowCard({
   );
 }
 
+/** Pools keep a login's earlier reading when the hub's last read of it failed. */
+function StaleReadings({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
+  const stale = pool.accounts.filter((account) => account.stale && !account.disabled);
+  if (stale.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1 px-1 text-xs text-muted-foreground">
+      {stale.map((account) => (
+        <span key={account.key} className="flex flex-wrap items-center gap-x-1.5">
+          <AccountName account={account} className="font-medium text-foreground" />
+          couldn't be read just now; showing its reading from{" "}
+          {formatDuration(Math.max(0, now - Date.parse(account.limits.checkedAt)))} ago.
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /** Credits belong to one login, so they list by account even with account rows hidden. */
 function ResetCreditRows({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
   const banked = pool.accounts.flatMap((account) =>
@@ -507,6 +524,7 @@ function PoolSection({
       {pool.windows.length === 0 && allOff ? (
         <p className="text-xs text-muted-foreground">Every hub account is off.</p>
       ) : null}
+      <StaleReadings pool={pool} now={now} />
       <ResetCreditRows pool={pool} now={now} />
     </section>
   );

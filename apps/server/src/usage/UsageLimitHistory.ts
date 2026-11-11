@@ -44,7 +44,9 @@ const windowKey = (sourceId: string, accountId: string, windowId: string) =>
 function trackedWindows(snapshots: ReadonlyArray<UsageLimitSourceSnapshot>) {
   return snapshots.flatMap((source) =>
     source.accounts.flatMap((account) =>
-      account.usageLimits.unavailable
+      // A reading older than its source's read was carried over from a failed read.
+      account.usageLimits.unavailable ||
+      Date.parse(account.usageLimits.checkedAt) < Date.parse(source.checkedAt)
         ? []
         : account.usageLimits.windows.flatMap((window) =>
             (window.windowDurationMins ?? 0) > 0

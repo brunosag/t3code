@@ -265,6 +265,8 @@ export interface LimitAccount {
   } | null;
   /** No hub routes to this login and no environment signs in with it, so pools leave it out. */
   readonly disabled: boolean;
+  /** The hub's last read of this login failed, so `limits` is an earlier reading. */
+  readonly stale: boolean;
   readonly limits: ServerProviderUsageLimits;
 }
 
@@ -384,6 +386,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
       sourceLabel: environments.length > 0 ? null : (previous.sourceLabel ?? next.sourceLabel),
       routing: previous.routing ?? next.routing,
       disabled: previous.disabled && next.disabled,
+      stale: winner.stale,
       redeem:
         hubRedeems.get(key)?.redeem ??
         (creditSource ? creditSource.redeem : (winner.redeem ?? previous.redeem ?? next.redeem)),
@@ -422,6 +425,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
         redeem: { environmentId, input: { instanceId: provider.instanceId } },
         routing: null,
         disabled: false,
+        stale: false,
         limits: provider.usageLimits,
       });
     }
@@ -456,6 +460,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
                   priority: account.priority,
                 },
           disabled: account.disabled === true,
+          stale: Date.parse(account.usageLimits.checkedAt) < Date.parse(source.checkedAt),
           redeem: account.usageLimits.resetCredits?.nextCreditId
             ? {
                 environmentId,

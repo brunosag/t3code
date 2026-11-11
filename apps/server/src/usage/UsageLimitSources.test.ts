@@ -94,6 +94,75 @@ it.effect("keeps malformed source URLs encodable for config subscribers", () =>
   ),
 );
 
+it.effect("keeps a login's last good reading through failed reads for an hour", () =>
+  Effect.gen(function* () {
+    let refused = false;
+    const sources = yield* UsageLimitSources.make.pipe(
+      Effect.provide(
+        Layer.succeed(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.sync(() =>
+              HttpClientResponse.fromWeb(
+                request,
+                request.url.endsWith("/auth-files")
+                  ? Response.json({
+                      files: [
+                        { id: "a.json", auth_index: "a", provider: "codex", email: "a@x.test" },
+                      ],
+                    })
+                  : Response.json({
+                      status_code: refused ? 429 : 200,
+                      body: JSON.stringify({
+                        plan_type: "pro",
+                        rate_limit: {
+                          primary_window: { used_percent: 40, limit_window_seconds: 18000 },
+                        },
+                      }),
+                    }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    yield* sources.refresh;
+    const [good] = yield* sources.current;
+    const reading = good?.accounts[0]?.usageLimits;
+    expect(reading?.windows.map((window) => window.usedPercent)).toEqual([40]);
+
+    refused = true;
+    yield* TestClock.adjust("30 minutes");
+    yield* sources.refresh;
+    const [carried] = yield* sources.current;
+    expect(carried?.accounts[0]).toMatchObject({
+      plan: good?.accounts[0]?.plan,
+      usageLimits: reading,
+    });
+
+    yield* TestClock.adjust("31 minutes");
+    yield* sources.refresh;
+    const [expired] = yield* sources.current;
+    expect(expired?.accounts[0]?.usageLimits.unavailable?.reason).toBe("probeFailed");
+  }).pipe(
+    Effect.provide([
+      literalSecrets,
+      ServerSettings.layerTest({
+        usageLimitSources: {
+          [UsageLimitSourceId.make("hub")]: {
+            kind: "cliproxy",
+            url: "http://hub.test:8317",
+            managementKey: "management-secret",
+            enabled: true,
+          },
+        },
+      }),
+      NodeCrypto.layer,
+    ]),
+    Effect.scoped,
+  ),
+);
+
 const literalSecrets = Layer.succeed(SecretResolver.SecretResolver, {
   read: (references) => Effect.succeed(references.map(() => undefined)),
   invalidate: () => Effect.void,

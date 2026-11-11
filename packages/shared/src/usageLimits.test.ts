@@ -549,13 +549,14 @@ describe("pools", () => {
     expect(account?.redeem).toEqual({ environmentId: "env-b", input: { instanceId: "codex" } });
   });
 
-  it("keeps distinct hub accounts redeemable through their own source", () => {
+  it("keeps distinct hub accounts redeemable through their own source, flagging carried readings", () => {
     const hubAccounts = ["first", "second"].map((id) => ({
       id,
       driver: ProviderDriverKind.make("codex"),
       email: `${id}@example.com`,
       usageLimits: {
-        checkedAt,
+        // The hub's read of the second login failed, so it carries an earlier reading.
+        checkedAt: id === "second" ? "2026-09-03T10:40:00.000Z" : checkedAt,
         windows: [window],
         resetCredits: { availableCount: 2, nextCreditId: `${id}-credit` },
       },
@@ -578,6 +579,7 @@ describe("pools", () => {
         input: { sourceId: "hub", accountId: account.id, creditId: `${account.id}-credit` },
       })),
     );
+    expect(collectLimitAccounts(input).map((account) => account.stale)).toEqual([false, true]);
   });
 
   it("does not give old credits the timestamp of a newer window-only read", () => {
@@ -1011,6 +1013,7 @@ describe("pools", () => {
           redeem: null,
           routing: null,
           disabled: false,
+          stale: false,
           limits: {
             checkedAt,
             windows: [
@@ -1060,6 +1063,7 @@ describe("pooled account columns", () => {
     redeem: null,
     routing: null,
     disabled: false,
+    stale: false,
     limits: { checkedAt: "2026-09-03T11:00:00.000Z", windows },
   });
   const keys = (pool: ReturnType<typeof collectLimitPools>[number]) =>

@@ -72,6 +72,12 @@ it("keeps each step's last reading: weekly hourly for two days, session by ten m
     stepMins: 60,
     usedPercent: [12, null, 15],
   });
+  // A reading older than its source's read was carried over from a failed read, not taken now.
+  const carried = snapshot(99).map((source) => ({
+    ...source,
+    checkedAt: "2026-11-02T13:00:00.000Z",
+  }));
+  expect(UsageLimitHistory.recordReadings(readings, carried, start + 3 * HOUR)).toEqual(readings);
 
   const later = UsageLimitHistory.recordReadings(readings, snapshot(30), start + 49 * HOUR);
   const [laterSession, laterWeekly] = windows(UsageLimitHistory.attachHistory(later, snapshot(30)));

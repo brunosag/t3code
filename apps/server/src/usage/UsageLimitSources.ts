@@ -64,6 +64,9 @@ function sourceLabel(id: string, config: UsageLimitSourceConfig): string {
   }
 }
 
+// Anthropic's usage endpoint answers 429 to close reads, so one failure keeps the last good reading.
+const CARRY_READING_FOR_MS = 60 * 60 * 1000;
+
 function missingManagementKey(config: UsageLimitSourceConfig): string {
   return typeof config.managementKey === "string"
     ? "No management key configured."
@@ -110,12 +113,33 @@ export const make = Effect.gen(function* () {
       yield* Effect.logDebug("usage limit source read failed", { id, cause: accounts.failure });
       return { ...base, accounts: [], error: accounts.failure.detail };
     }
+    const previous = (yield* Ref.get(stateRef)).find((source) => source.id === id)?.accounts;
+    const carryFrom = Date.parse(checkedAt) - CARRY_READING_FOR_MS;
     return {
       ...base,
-      accounts: accounts.success.map((account) => ({
-        ...account,
-        ...config.accounts?.[account.id],
-      })),
+      accounts: accounts.success.map((account) => {
+        const kept =
+          account.usageLimits.unavailable?.reason === "probeFailed"
+            ? previous?.find(
+                (candidate) =>
+                  candidate.id === account.id &&
+                  !candidate.usageLimits.unavailable &&
+                  candidate.usageLimits.windows.length > 0 &&
+                  Date.parse(candidate.usageLimits.checkedAt) > carryFrom,
+              )
+            : undefined;
+        return {
+          ...account,
+          ...(kept
+            ? {
+                plan: account.plan ?? kept.plan,
+                capacity: account.capacity ?? kept.capacity,
+                usageLimits: kept.usageLimits,
+              }
+            : {}),
+          ...config.accounts?.[account.id],
+        };
+      }),
     };
   });
 
