@@ -5,14 +5,21 @@ import {
   type UsageLimitSourceAccount,
   type UsageLimitSourceConfig,
 } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 
+import {
+  GROK_USAGE_URL,
+  GrokUsageResponse,
+  grokUsageResponseToLimits,
+} from "@t3tools/provider-grok/server";
 import { codexPlanLabel } from "../provider/CodexProvider.ts";
 import { codexRateLimitsToLimits } from "../provider/codexUsageLimits.ts";
 import {
@@ -25,7 +32,15 @@ import {
   liveClaudeGrants,
 } from "../provider/claudeResetCredits.ts";
 import { claudeUsageResponseToLimits } from "../provider/claudeUsageLimits.ts";
-import { makeUnavailableUsageLimits } from "@t3tools/provider-core/server/usageLimits";
+import {
+  antigravityAccountFingerprint,
+  antigravitySummaryWindows,
+  antigravityUserAgent,
+} from "../provider/antigravityUsageLimits.ts";
+import {
+  makeUnavailableUsageLimits,
+  makeUsageLimits,
+} from "@t3tools/provider-core/server/usageLimits";
 
 /** A hub with its management key already read from wherever the setting keeps it. */
 export interface CliproxyHub {
@@ -46,6 +61,7 @@ const AuthFile = Schema.Struct({
   disabled: Schema.optional(Schema.Boolean),
   // Unknown so an odd hand-edited value cannot break the Limits view.
   priority: Schema.optional(Schema.Unknown),
+  project_id: Schema.optional(Schema.String),
   id_token: Schema.optional(
     Schema.Struct({
       chatgpt_account_id: Schema.optional(Schema.String),
@@ -142,6 +158,7 @@ const CLAUDE_TIERS: Record<string, { readonly plan: string; readonly capacity: n
   default_claude_max_5x: { plan: "Claude Max 5x", capacity: 5 },
   default_claude_max_20x: { plan: "Claude Max 20x", capacity: 20 },
 };
+type ClaudeTier = (typeof CLAUDE_TIERS)[string];
 const CreditList = Schema.Struct({
   credits: Schema.Array(
     Schema.Struct({
@@ -154,12 +171,10 @@ const CreditList = Schema.Struct({
 });
 
 const decodeAuthFiles = Schema.decodeUnknownEffect(AuthFiles);
-const authPriority = (account: typeof AuthFile.Type) =>
+const authPriority = (account: AuthFile) =>
   typeof account.priority === "number" && Number.isSafeInteger(account.priority)
     ? account.priority
     : 0;
-const hubProvider = (driver: ProviderDriverKind) =>
-  driver === "codex" ? "codex" : driver === "claudeAgent" ? "claude" : undefined;
 const decodeAuthFileCooldowns = Schema.decodeUnknownEffect(AuthFileCooldowns);
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 const decodeApiResponse = Schema.decodeUnknownEffect(ApiResponse);
@@ -167,6 +182,8 @@ const decodeCreditList = Schema.decodeUnknownEffect(Schema.fromJsonString(Credit
 const decodeClaudeUsage = Schema.decodeUnknownEffect(Schema.fromJsonString(ClaudeUsage));
 const decodeClaudeProfile = Schema.decodeUnknownEffect(Schema.fromJsonString(ClaudeProfile));
 const decodeCodexUsage = Schema.decodeUnknownEffect(Schema.fromJsonString(CodexUsage));
+const decodeGrokUsage = Schema.decodeUnknownEffect(Schema.fromJsonString(GrokUsageResponse));
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const isUsageLimitSourceError = Schema.is(UsageLimitSourceError);
 
 // Extra CAs can fix untrusted chains; expiry/hostname failures report codes only.
@@ -237,9 +254,240 @@ const creditRedeemRequestId = Effect.fn("CliproxyApi.creditRedeemRequestId")(fun
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 });
 
+type AuthFile = typeof AuthFile.Type;
+/** Sends one upstream request with the account's token, as GET or as a JSON POST of `data`. */
+type HubCall = (
+  url: string,
+  data?: unknown,
+) => Effect.Effect<string, UsageLimitSourceError | Schema.SchemaError>;
+type HubReading = Omit<UsageLimitSourceAccount, "id" | "driver">;
+interface HubProvider {
+  readonly driver: ProviderDriverKind;
+  readonly header: (
+    account: AuthFile,
+    platform: NodeJS.Platform,
+    architecture: NodeJS.Architecture,
+    hub: CliproxyHub,
+  ) => Record<string, string>;
+  readonly read: (input: {
+    readonly account: AuthFile;
+    readonly call: HubCall;
+    readonly checkedAt: string;
+    readonly claudeTiers: Map<string, ClaudeTier>;
+  }) => Effect.Effect<HubReading, UsageLimitSourceError | Schema.SchemaError, Digest.Digest>;
+}
+
+const listedIdentity = (account: AuthFile) => ({
+  ...(account.email ? { email: account.email } : {}),
+  ...(account.id_token?.chatgpt_account_id?.trim()
+    ? { workspaceId: account.id_token.chatgpt_account_id.trim() }
+    : {}),
+});
+
+const credits = Effect.fn("CliproxyApi.credits")(function* (call: HubCall) {
+  const response = yield* decodeCreditList(yield* call(CREDIT_URL));
+  const now = DateTime.toEpochMillis(yield* DateTime.now);
+  return response.credits
+    .filter(
+      (credit) =>
+        credit.reset_type === "codex_rate_limits" &&
+        credit.status === "available" &&
+        Date.parse(credit.expires_at) > now,
+    )
+    .toSorted((a, b) => Date.parse(a.expires_at) - Date.parse(b.expires_at));
+});
+
+const CODEX_HUB: HubProvider = {
+  driver: ProviderDriverKind.make("codex"),
+  header: (account) => ({
+    Authorization: "Bearer $TOKEN$",
+    "Content-Type": "application/json",
+    "OpenAI-Beta": "codex-1",
+    Originator: "Codex Desktop",
+    ...(account.id_token?.chatgpt_account_id
+      ? { "Chatgpt-Account-Id": account.id_token.chatgpt_account_id }
+      : {}),
+  }),
+  read: Effect.fnUntraced(function* ({ account, call, checkedAt }) {
+    const usage = yield* decodeCodexUsage(yield* call(`${CODEX_BASE}/usage`));
+    const toWindow = (window: typeof CodexWindow.Type | null | undefined) =>
+      window
+        ? {
+            usedPercent: window.used_percent,
+            resetsAt: window.reset_at ?? null,
+            ...(window.limit_window_seconds === undefined
+              ? {}
+              : { windowDurationMins: window.limit_window_seconds / 60 }),
+          }
+        : null;
+    const available = yield* credits(call).pipe(Effect.orElseSucceed(() => undefined));
+    const next = available?.[0];
+    const planType =
+      usage.plan_type ?? account.id_token?.plan_type ?? account.id_token?.chatgpt_plan_type;
+    return {
+      ...listedIdentity(account),
+      plan: codexPlanLabel(planType),
+      usageLimits: {
+        ...codexRateLimitsToLimits({
+          checkedAt,
+          snapshot: {
+            planType: planType ?? null,
+            primary: toWindow(usage.rate_limit?.primary_window),
+            secondary: toWindow(usage.rate_limit?.secondary_window),
+          },
+        }),
+        ...(available
+          ? {
+              resetCredits: {
+                availableCount: available.length,
+                ...(next
+                  ? {
+                      nextCreditId: next.id,
+                      nextExpiresAt: DateTime.formatIso(DateTime.makeUnsafe(next.expires_at)),
+                    }
+                  : {}),
+              },
+            }
+          : {}),
+      },
+    };
+  }),
+};
+
+// A plan rarely changes, so each account's is read once per process.
+const claudeTier = Effect.fnUntraced(function* (
+  cache: Map<string, ClaudeTier>,
+  account: AuthFile,
+  call: HubCall,
+) {
+  const known = cache.get(account.id);
+  if (known) return known;
+  const profile = yield* decodeClaudeProfile(yield* call(CLAUDE_PROFILE_URL));
+  const tier = CLAUDE_TIERS[profile.organization?.rate_limit_tier ?? ""];
+  if (tier) cache.set(account.id, tier);
+  return tier;
+});
+
+const CLAUDE_HUB: HubProvider = {
+  driver: ProviderDriverKind.make("claudeAgent"),
+  header: (_account, _platform, _architecture, hub) => ({
+    Authorization: "Bearer $TOKEN$",
+    "anthropic-beta": "oauth-2025-04-20",
+    // The OAuth usage endpoint can return 429 without a Claude Code user agent.
+    "User-Agent": `claude-cli/${hub.claudeVersion ?? FALLBACK_CLAUDE_VERSION} (external, cli)`,
+  }),
+  read: Effect.fnUntraced(function* ({ account, call, checkedAt, claudeTiers }) {
+    const usage = yield* decodeClaudeUsage(yield* call(CLAUDE_USAGE_URL));
+    const resetCredits = claudeResetCreditsToContract(
+      usage.cedar_ember,
+      DateTime.toEpochMillis(yield* DateTime.now),
+    );
+    const model_scoped = (usage.limits ?? []).flatMap((limit) =>
+      limit.kind === "weekly_scoped" && limit.scope?.model && typeof limit.percent === "number"
+        ? [
+            {
+              display_name: limit.scope.model.display_name,
+              utilization: limit.percent,
+              resets_at: limit.resets_at ?? null,
+            },
+          ]
+        : [],
+    );
+    const rateLimits = {
+      five_hour: usage.five_hour ?? null,
+      seven_day: usage.seven_day ?? null,
+      model_scoped,
+      spend: usage.spend,
+      extra_usage: usage.extra_usage ?? null,
+    };
+    const tier = yield* claudeTier(claudeTiers, account, call).pipe(
+      Effect.orElseSucceed(() => undefined),
+    );
+    return {
+      ...listedIdentity(account),
+      plan: tier?.plan ?? "Claude Subscription",
+      ...(tier ? { capacity: tier.capacity } : {}),
+      usageLimits: {
+        ...claudeUsageResponseToLimits({
+          checkedAt,
+          response: { rate_limits_available: true, rate_limits: rateLimits },
+        }).limits,
+        ...(resetCredits ? { resetCredits } : {}),
+      },
+    };
+  }),
+};
+
+const GROK_CLI_VERSION = "1.0.77";
+const ANTIGRAVITY_SUMMARY_URL =
+  "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary";
+
+// Keyed by the auth-files `provider`; accounts of any other provider are skipped.
+const HUB_PROVIDERS = new Map<string, HubProvider>([
+  ["codex", CODEX_HUB],
+  ["claude", CLAUDE_HUB],
+  [
+    "xai",
+    {
+      driver: ProviderDriverKind.make("grok"),
+      header: () => ({
+        Authorization: "Bearer $TOKEN$",
+        "x-xai-token-auth": "xai-grok-cli",
+        "x-grok-client-version": GROK_CLI_VERSION,
+        "User-Agent": `grok-cli/${GROK_CLI_VERSION}`,
+      }),
+      read: Effect.fnUntraced(function* ({ account, call, checkedAt }) {
+        const usage = yield* decodeGrokUsage(yield* call(GROK_USAGE_URL));
+        return {
+          ...listedIdentity(account),
+          usageLimits: grokUsageResponseToLimits(usage, checkedAt),
+        };
+      }),
+    },
+  ],
+  [
+    "antigravity",
+    {
+      driver: ProviderDriverKind.make("antigravity"),
+      header: (_account, platform, architecture) => ({
+        Authorization: "Bearer $TOKEN$",
+        "Content-Type": "application/json",
+        "User-Agent": antigravityUserAgent(platform, architecture),
+      }),
+      read: Effect.fnUntraced(function* ({ account, call, checkedAt }) {
+        const project = account.project_id?.trim();
+        if (!project) {
+          return yield* new UsageLimitSourceError({ detail: "No Antigravity project reported." });
+        }
+        const requestedAt = DateTime.toEpochMillis(yield* DateTime.now);
+        const summary = yield* call(ANTIGRAVITY_SUMMARY_URL, { project });
+        const windows = yield* antigravitySummaryWindows(yield* decodeJson(summary), requestedAt);
+        if (windows.length === 0) {
+          return yield* new UsageLimitSourceError({ detail: "No Antigravity quota reported." });
+        }
+        // Local Antigravity reports no e-mail, so the Google account fingerprint is what pools the two.
+        const fingerprint = yield* call("https://www.googleapis.com/oauth2/v2/userinfo").pipe(
+          Effect.flatMap(decodeJson),
+          Effect.flatMap(antigravityAccountFingerprint),
+          Effect.option,
+        );
+        const usageLimits = makeUsageLimits({ checkedAt, windows });
+        return Option.match(fingerprint, {
+          onNone: () => ({ ...listedIdentity(account), usageLimits }),
+          onSome: (credentialFingerprint) => ({
+            usageLimits: { ...usageLimits, credentialFingerprint },
+          }),
+        });
+      }),
+    },
+  ],
+]);
+
 export const makeCliproxyApi = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient;
   const digest = yield* Digest.Digest;
+  const platform = yield* HostProcess.Platform;
+  const architecture = yield* HostProcess.Architecture;
 
   const management = Effect.fn("CliproxyApi.management")(function* (
     hub: CliproxyHub,
@@ -301,33 +549,19 @@ export const makeCliproxyApi = Effect.gen(function* () {
 
   const apiCall = Effect.fn("CliproxyApi.apiCall")(function* (
     hub: CliproxyHub,
-    account: typeof AuthFile.Type,
+    account: AuthFile,
+    header: Record<string, string>,
     url: string,
     data?: unknown,
   ) {
-    const header =
-      account.provider === "codex"
-        ? {
-            Authorization: "Bearer $TOKEN$",
-            "Content-Type": "application/json",
-            "OpenAI-Beta": "codex-1",
-            Originator: "Codex Desktop",
-            ...(account.id_token?.chatgpt_account_id
-              ? { "Chatgpt-Account-Id": account.id_token.chatgpt_account_id }
-              : {}),
-          }
-        : {
-            Authorization: "Bearer $TOKEN$",
-            "anthropic-beta": "oauth-2025-04-20",
-            // The OAuth usage endpoint can return 429 without a Claude Code user agent.
-            "User-Agent": `claude-cli/${hub.claudeVersion ?? FALLBACK_CLAUDE_VERSION} (external, cli)`,
-            ...(data === undefined ? {} : { "Content-Type": "application/json" }),
-          };
     const raw = yield* management(hub, "api-call", {
       auth_index: account.auth_index,
       method: data === undefined ? "GET" : "POST",
       url,
-      header,
+      header:
+        data === undefined || "Content-Type" in header
+          ? header
+          : { ...header, "Content-Type": "application/json" },
       ...(data === undefined ? {} : { data: yield* encodeJson(data) }),
     });
     const response = yield* decodeApiResponse(raw);
@@ -339,142 +573,23 @@ export const makeCliproxyApi = Effect.gen(function* () {
     return response.body;
   });
 
-  const credits = Effect.fn("CliproxyApi.credits")(function* (
-    hub: CliproxyHub,
-    account: typeof AuthFile.Type,
-  ) {
-    const body = yield* apiCall(hub, account, CREDIT_URL);
-    const response = yield* decodeCreditList(body);
-    const now = DateTime.toEpochMillis(yield* DateTime.now);
-    return response.credits
-      .filter(
-        (credit) =>
-          credit.reset_type === "codex_rate_limits" &&
-          credit.status === "available" &&
-          Date.parse(credit.expires_at) > now,
-      )
-      .toSorted((a, b) => Date.parse(a.expires_at) - Date.parse(b.expires_at));
-  });
-
-  // A plan rarely changes, so each account's is read once per process.
-  const claudeTiers = new Map<string, (typeof CLAUDE_TIERS)[string]>();
-  const claudeTier = Effect.fn("CliproxyApi.claudeTier")(function* (
-    hub: CliproxyHub,
-    account: typeof AuthFile.Type,
-  ) {
-    const known = claudeTiers.get(account.id);
-    if (known) return known;
-    const profile = yield* decodeClaudeProfile(yield* apiCall(hub, account, CLAUDE_PROFILE_URL));
-    const tier = CLAUDE_TIERS[profile.organization?.rate_limit_tier ?? ""];
-    if (tier) claudeTiers.set(account.id, tier);
-    return tier;
-  });
+  const hubCall =
+    (hub: CliproxyHub, account: AuthFile, provider: HubProvider): HubCall =>
+    (url, data) =>
+      apiCall(hub, account, provider.header(account, platform, architecture, hub), url, data);
+  const claudeTiers = new Map<string, ClaudeTier>();
 
   const readAccount = Effect.fn("CliproxyApi.readAccount")(function* (
     hub: CliproxyHub,
-    account: typeof AuthFile.Type,
+    account: AuthFile,
+    provider: HubProvider,
   ) {
     const checkedAt = DateTime.formatIso(yield* DateTime.now);
-    const base = {
-      id: account.id,
-      driver: ProviderDriverKind.make(account.provider === "codex" ? "codex" : "claudeAgent"),
-      priority: authPriority(account),
-      ...(account.disabled ? { disabled: true } : {}),
-      ...(account.email ? { email: account.email } : {}),
-      ...(account.id_token?.chatgpt_account_id?.trim()
-        ? { workspaceId: account.id_token.chatgpt_account_id.trim() }
-        : {}),
-    };
-    const read = Effect.gen(function* () {
-      if (account.provider === "claude") {
-        const body = yield* apiCall(hub, account, CLAUDE_USAGE_URL);
-        const usage = yield* decodeClaudeUsage(body);
-        const resetCredits = claudeResetCreditsToContract(
-          usage.cedar_ember,
-          DateTime.toEpochMillis(yield* DateTime.now),
-        );
-        const model_scoped = (usage.limits ?? []).flatMap((limit) =>
-          limit.kind === "weekly_scoped" && limit.scope?.model && typeof limit.percent === "number"
-            ? [
-                {
-                  display_name: limit.scope.model.display_name,
-                  utilization: limit.percent,
-                  resets_at: limit.resets_at ?? null,
-                },
-              ]
-            : [],
-        );
-        const rateLimits = {
-          five_hour: usage.five_hour ?? null,
-          seven_day: usage.seven_day ?? null,
-          model_scoped,
-          spend: usage.spend,
-          extra_usage: usage.extra_usage ?? null,
-        };
-        const tier = yield* claudeTier(hub, account).pipe(Effect.orElseSucceed(() => undefined));
-        return {
-          ...base,
-          plan: tier?.plan ?? "Claude Subscription",
-          ...(tier ? { capacity: tier.capacity } : {}),
-          usageLimits: {
-            ...claudeUsageResponseToLimits({
-              checkedAt,
-              response: {
-                rate_limits_available: true,
-                rate_limits: rateLimits,
-              },
-            }).limits,
-            ...(resetCredits ? { resetCredits } : {}),
-          },
-        };
-      }
-      const body = yield* apiCall(hub, account, `${CODEX_BASE}/usage`);
-      const usage = yield* decodeCodexUsage(body);
-      const toWindow = (window: typeof CodexWindow.Type | null | undefined) =>
-        window
-          ? {
-              usedPercent: window.used_percent,
-              resetsAt: window.reset_at ?? null,
-              ...(window.limit_window_seconds === undefined
-                ? {}
-                : { windowDurationMins: window.limit_window_seconds / 60 }),
-            }
-          : null;
-      const available = yield* credits(hub, account).pipe(Effect.orElseSucceed(() => undefined));
-      const next = available?.[0];
-      const planType =
-        usage.plan_type ?? account.id_token?.plan_type ?? account.id_token?.chatgpt_plan_type;
-      return {
-        ...base,
-        plan: codexPlanLabel(planType),
-        usageLimits: {
-          ...codexRateLimitsToLimits({
-            checkedAt,
-            snapshot: {
-              planType: planType ?? null,
-              primary: toWindow(usage.rate_limit?.primary_window),
-              secondary: toWindow(usage.rate_limit?.secondary_window),
-            },
-          }),
-          ...(available
-            ? {
-                resetCredits: {
-                  availableCount: available.length,
-                  ...(next
-                    ? {
-                        nextCreditId: next.id,
-                        nextExpiresAt: DateTime.formatIso(DateTime.makeUnsafe(next.expires_at)),
-                      }
-                    : {}),
-                },
-              }
-            : {}),
-        },
-      };
-    });
-    return yield* read.pipe(
+    const call = hubCall(hub, account, provider);
+    const reading = yield* provider.read({ account, call, checkedAt, claudeTiers }).pipe(
+      Effect.provideService(Digest.Digest, digest),
       Effect.orElseSucceed(() => ({
-        ...base,
+        ...listedIdentity(account),
         usageLimits: makeUnavailableUsageLimits({
           checkedAt,
           reason: "probeFailed",
@@ -482,12 +597,23 @@ export const makeCliproxyApi = Effect.gen(function* () {
         }),
       })),
     );
+    return {
+      id: account.id,
+      driver: provider.driver,
+      priority: authPriority(account),
+      ...(account.disabled ? { disabled: true } : {}),
+      ...reading,
+    };
   });
 
+  // Disabled logins stay listed so the Limits view can show them dimmed and switch them back on.
   const listAccounts = (hub: CliproxyHub) =>
     authFiles(hub).pipe(
       Effect.map((accounts) =>
-        accounts.filter((account) => account.provider === "codex" || account.provider === "claude"),
+        accounts.flatMap((account) => {
+          const provider = HUB_PROVIDERS.get(account.provider);
+          return provider ? [{ account, provider }] : [];
+        }),
       ),
       Effect.mapError((error) =>
         isUsageLimitSourceError(error)
@@ -499,9 +625,11 @@ export const makeCliproxyApi = Effect.gen(function* () {
   const readAccounts = Effect.fn("CliproxyApi.readAccounts")(function* (
     hub: CliproxyHub,
   ): Effect.fn.Return<ReadonlyArray<UsageLimitSourceAccount>, UsageLimitSourceError> {
-    return yield* Effect.forEach(yield* listAccounts(hub), (account) => readAccount(hub, account), {
-      concurrency: 4,
-    });
+    return yield* Effect.forEach(
+      yield* listAccounts(hub),
+      ({ account, provider }) => readAccount(hub, account, provider),
+      { concurrency: 4 },
+    );
   });
 
   /** Returns the login with its usage as the hub now reports it. */
@@ -511,19 +639,23 @@ export const makeCliproxyApi = Effect.gen(function* () {
     disabled: boolean,
   ): Effect.fn.Return<UsageLimitSourceAccount, UsageLimitSourceError> {
     yield* management(hub, "auth-files/status", { name: accountId, disabled }, "PATCH");
-    const account = (yield* listAccounts(hub)).find((candidate) => candidate.id === accountId);
-    if (!account) {
+    const listed = (yield* listAccounts(hub)).find(({ account }) => account.id === accountId);
+    if (!listed) {
       return yield* new UsageLimitSourceError({ detail: "The hub account is missing." });
     }
-    return yield* readAccount(hub, account);
+    return yield* readAccount(hub, listed.account, listed.provider);
   });
 
   const consumeCodex = Effect.fn("CliproxyApi.consumeCodex")(function* (
     hub: CliproxyHub,
-    account: typeof AuthFile.Type,
+    account: AuthFile,
     creditId: string,
   ) {
-    const body = yield* apiCall(hub, account, `${CREDIT_URL}/consume`, {
+    const body = yield* hubCall(
+      hub,
+      account,
+      CODEX_HUB,
+    )(`${CREDIT_URL}/consume`, {
       redeem_request_id: yield* creditRedeemRequestId(
         account.id_token?.chatgpt_account_id ?? account.id,
         creditId,
@@ -543,16 +675,17 @@ export const makeCliproxyApi = Effect.gen(function* () {
 
   const consumeClaude = Effect.fn("CliproxyApi.consumeClaude")(function* (
     hub: CliproxyHub,
-    account: typeof AuthFile.Type,
+    account: AuthFile,
     grantId: string,
   ) {
-    const usage = yield* decodeClaudeUsage(yield* apiCall(hub, account, CLAUDE_USAGE_URL));
+    const call = hubCall(hub, account, CLAUDE_HUB);
+    const usage = yield* decodeClaudeUsage(yield* call(CLAUDE_USAGE_URL));
     const grant = liveClaudeGrants(
       usage.cedar_ember,
       DateTime.toEpochMillis(yield* DateTime.now),
     )?.live.find((candidate) => candidate.id === grantId);
     if (!grant) return "noCredit" as const;
-    const profile = yield* decodeClaudeProfile(yield* apiCall(hub, account, CLAUDE_PROFILE_URL));
+    const profile = yield* decodeClaudeProfile(yield* call(CLAUDE_PROFILE_URL));
     const organization = profile.organization?.uuid?.trim();
     if (!organization) {
       return yield* new UsageLimitSourceError({ detail: claudeResetCreditFailure("signedOut") });
@@ -563,9 +696,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
       `${grantId}:${grant.resets_left}`,
     ).pipe(Effect.provideService(Digest.Digest, digest));
     const answer = yield* decodeClaudeClaimResponse(
-      yield* apiCall(
-        hub,
-        account,
+      yield* call(
         claudeResetClaimUrl(organization).toString(),
         claudeResetClaim(grantId, requestId),
       ),
@@ -627,17 +758,12 @@ export const makeCliproxyApi = Effect.gen(function* () {
     driver: ProviderDriverKind,
     accountIds: ReadonlyArray<string>,
   ): Effect.fn.Return<ReadonlyMap<string, number>, UsageLimitSourceError> {
-    const provider = hubProvider(driver);
-    if (provider === undefined) {
+    if (![...HUB_PROVIDERS.values()].some((provider) => provider.driver === driver)) {
       return yield* new UsageLimitSourceError({ detail: "The hub does not route this provider." });
     }
-    const files = (yield* authFiles(hub).pipe(
-      Effect.mapError((error) =>
-        isUsageLimitSourceError(error)
-          ? error
-          : new UsageLimitSourceError({ detail: "The hub could not list accounts." }),
-      ),
-    )).filter((account) => account.provider === provider);
+    const files = (yield* listAccounts(hub))
+      .filter(({ provider }) => provider.driver === driver)
+      .map(({ account }) => account);
     const listed = [...new Set(accountIds)].flatMap(
       (id) => files.find((account) => account.id === id) ?? [],
     );
