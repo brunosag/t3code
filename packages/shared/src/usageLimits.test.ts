@@ -23,6 +23,7 @@ import {
   paceRemainingPercent,
   usesChatGptSharing,
   resolveNewThreadModelSelection,
+  resetCreditChoices,
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
@@ -1262,6 +1263,42 @@ describe("pooled account columns", () => {
       now,
     );
     expect(keys(pool!)).toEqual([["b", "a"]]);
+  });
+});
+
+describe("reset credit choices", () => {
+  it("offers each kind of banked reset on its own, for hub logins as for local instances", () => {
+    const credits = {
+      availableCount: 3,
+      nextCreditId: "weekly-1",
+      options: [
+        {
+          creditId: "weekly-1",
+          label: "Weekly reset",
+          description: "Refills your weekly limit.",
+          availableCount: 2,
+        },
+        {
+          creditId: "fable-1",
+          label: "Fable reset",
+          description: "Refills Fable.",
+          availableCount: 1,
+        },
+      ],
+    };
+    const hub = {
+      sourceId: UsageLimitSourceId.make("hub"),
+      accountId: "a.json",
+      creditId: "weekly-1",
+    };
+    for (const input of [hub, { instanceId: ProviderInstanceId.make("claude") }]) {
+      expect(
+        resetCreditChoices(credits, input, now).map((choice) => [choice.summary, choice.input]),
+      ).toEqual([
+        ["Weekly reset · 2 left", { ...input, creditId: "weekly-1" }],
+        ["Fable reset · 1 left", { ...input, creditId: "fable-1" }],
+      ]);
+    }
   });
 });
 
