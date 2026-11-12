@@ -56,10 +56,17 @@ function Card({
   );
 }
 
-function Headline({ label, remaining }: { readonly label: string; readonly remaining: number }) {
+/** A null label leaves the provider heading to name a pool's only figure. */
+function Headline({
+  label,
+  remaining,
+}: {
+  readonly label: string | null;
+  readonly remaining: number;
+}) {
   return (
     <>
-      <span className="text-sm font-medium text-foreground">{label}</span>
+      {label !== null ? <span className="text-sm font-medium text-foreground">{label}</span> : null}
       <span className="flex items-baseline gap-2">
         <span className="text-3xl font-semibold text-foreground tabular-nums">{remaining}%</span>
         <span className="text-sm text-muted-foreground">left</span>
@@ -80,7 +87,7 @@ export function BalanceCard({
 }: {
   readonly pool: LimitPoolWindow;
   readonly runway: LimitRunway | null;
-  readonly label: string;
+  readonly label: string | null;
   readonly description: string | undefined;
   /** Each account's own reading, under the pooled figure. */
   readonly accounts?: ReactNode;
@@ -129,7 +136,9 @@ export function BalanceCard({
           </span>
         ) : null}
       </div>
-      {runway ? <RunwayChart runway={runway} color={color} now={now} label={label} /> : null}
+      {runway ? (
+        <RunwayChart runway={runway} color={color} now={now} label={label ?? pool.label} />
+      ) : null}
     </Card>
   );
 }
@@ -145,7 +154,7 @@ export function RunwayCard({
 }: {
   readonly pool: LimitPoolWindow;
   readonly runway: LimitRunway;
-  readonly label: string;
+  readonly label: string | null;
   readonly description: string | undefined;
   /** Each account's own reading, under the pooled figure. */
   readonly accounts?: ReactNode;
@@ -188,7 +197,7 @@ export function RunwayCard({
           </span>
         ) : null}
       </div>
-      <RunwayChart runway={runway} color={color} now={now} label={label} />
+      <RunwayChart runway={runway} color={color} now={now} label={label ?? pool.label} />
     </Card>
   );
 }

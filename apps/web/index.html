@@ -7,7 +7,7 @@
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <meta name="theme-color" content="#000000" />
-    <link rel="icon" href="/favicon.ico?v=black" sizes="48x48" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <script>
@@ -668,6 +668,13 @@
         white-space: nowrap;
       }
     </style>
+    <script>
+      // Desktop's preload injects branding before page scripts. Titling before the <title> below
+      // parses keeps Electron from reporting the web build's channel to the window first.
+      const desktopDisplayName = window.desktopBridge?.getAppBranding?.()?.displayName;
+      if (desktopDisplayName) document.title = desktopDisplayName;
+    </script>
+    <!-- vite.config.ts stamps the web build's channel into this title. -->
     <title>T3 Code</title>
   </head>
   <body>

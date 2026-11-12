@@ -431,6 +431,7 @@ it.effect("an interval run that fires late or by hand keeps its original slot", 
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
           Layer.mock(ThreadManagementService.ThreadManagementService)({
             getThreadShell: () => Effect.succeed(threadShell(ProjectId.make("project:test"))),
+            getThreadRecords: () => Effect.succeed({ runs: [], messages: [] } as never),
             sendToThread: () => Effect.succeed({} as never),
           }),
           Layer.mock(SecretRequests.SecretRequests)({}),

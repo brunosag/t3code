@@ -104,9 +104,10 @@ proof outranks a native-layout match: `~/.local/bin/claude` is both the native i
 directory and the bin shim of an npm `--prefix ~/.local` install (common on NixOS, where npm's
 default prefix is the read-only store), and the native updater there runs bare `npm install -g`
 against that store prefix and fails; only a mise install is checked earlier. When
-nothing is proven, the provider's own updater (`claude update`, `codex update`, `opencode upgrade`,
-`pi update --self`, `grok update`) runs instead, because each one detects its installer itself;
-the runner's version check catches an updater that exits 0 without updating. Mise is checked
+nothing is proven, Pi's and Grok's own updaters (`pi update --self`, `grok update`) run instead,
+because each detects its installer itself; the runner's version check catches an updater that exits
+0 without updating. Claude, Codex, and OpenCode updaters only act on their own native layout, so
+those providers stay manual-only unless that layout is proven. Mise is checked
 first, since a `mise x` wrapper can sit at a native installer's path, and `MISE_DATA_DIR` can put
 installs anywhere, so `mise which` is asked whenever mise is on `PATH`. Each driver names its fixed
 mise tool; mise must resolve the binary and list it in an active install of that tool requested as
@@ -114,7 +115,7 @@ mise tool; mise must resolve the binary and list it in an active install of that
 path must be a shim or under the tool's `latest` link, which the upgrade repoints: a version
 directory (including one `mise activate` put on `PATH`) would keep running the old binary until mise
 prunes it. Everything else mise touches (fixed version paths, pinned tools, wrappers, OpenCode 1.x,
-whose mise tool crosses into 2.x) stays manual-only, so T3 Code never edits mise config. `mise latest` supplies the version, because settings such as
+whose mise tool crosses into 2.x) stays manual-only, so T3 Code never edits mise config. Nix store installs stay manual-only too, since the store is read-only. `mise latest` supplies the version, because settings such as
 `minimum_release_age` can hold mise behind npm. A Grok cask whose Homebrew prefix
 cannot be verified also stays manual-only: `grok update` would install a second copy. npm updates pin `--prefix` because the
 `npm` on `PATH` can belong to a different Node than the one that owns the provider. Homebrew

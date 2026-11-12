@@ -276,7 +276,7 @@ function PoolWindowCard({
   readonly pool: LimitPoolWindow;
   readonly color: string;
   readonly now: number;
-  readonly label: string;
+  readonly label: string | null;
   readonly description?: string | undefined;
   readonly showAccounts: boolean;
   readonly routing: RoutingReorder | null;
@@ -352,7 +352,7 @@ function ResetCreditRows({ pool, now }: { readonly pool: LimitPool; readonly now
 
 function windowLabel(pool: LimitPool, window: LimitPoolWindow) {
   return (
-    (pool.driver === "cursor" ? cursorUsageWindowDetails(window.id)?.label : undefined) ??
+    (pool.driver === "cursor" ? cursorUsageWindowDetails(window.id, pool)?.label : undefined) ??
     window.label
   );
 }
@@ -507,14 +507,15 @@ function PoolSection({
         {actions}
       </div>
       {windows.map((window) => {
-        const details = pool.driver === "cursor" ? cursorUsageWindowDetails(window.id) : undefined;
+        const details =
+          pool.driver === "cursor" ? cursorUsageWindowDetails(window.id, pool) : undefined;
         return (
           <PoolWindowCard
             key={`${window.kind}:${window.id}`}
             pool={window}
             color={color}
             now={now}
-            label={details?.label ?? window.label}
+            label={details ? details.label : window.label}
             description={details?.description}
             showAccounts={showAccounts}
             routing={routing}
