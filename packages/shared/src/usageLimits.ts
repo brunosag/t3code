@@ -33,6 +33,10 @@ export function exhaustedUsageWindow(
   const exhausted = windows.filter(
     (window) =>
       (window.usedPercent ?? 0) >= 100 &&
+      (model === undefined || window.modelIds === undefined || window.modelIds.includes(model)) &&
+      (model === undefined ||
+        window.providerIds === undefined ||
+        window.providerIds.includes(model.split("/")[0] ?? "")) &&
       (!window.resetsAt ||
         !Number.isFinite(Date.parse(window.resetsAt)) ||
         Date.parse(window.resetsAt) > now),
@@ -699,6 +703,25 @@ function accountSortName(account: LimitAccount): string {
   return (account.displayName ?? account.email ?? account.key).toLowerCase();
 }
 
+const CODEX_PLAN_CAPACITY: Record<string, number> = {
+  "ChatGPT Plus Subscription": 1,
+  "ChatGPT Pro 100 Subscription": 5,
+  "ChatGPT Pro 200 Subscription": 20,
+};
+// Claude's published plan multipliers describe the session allowance only.
+const CLAUDE_SESSION_CAPACITY: Record<string, number> = { Pro: 1, Max: 5, Ultra: 20 };
+
+function planCapacity(account: LimitAccount, kind: ServerProviderUsageWindow["kind"]) {
+  if (!account.plan) return undefined;
+  if (account.driver === "codex" && (kind === "session" || kind === "weekly")) {
+    return CODEX_PLAN_CAPACITY[account.plan];
+  }
+  if (account.driver === "claudeAgent" && kind === "session") {
+    return CLAUDE_SESSION_CAPACITY[account.plan];
+  }
+  return undefined;
+}
+
 // Codex ids name slots, so pool by kind; other drivers' ids identify distinct allowances.
 function poolKey(driver: ServerProvider["driver"], window: ServerProviderUsageWindow): string {
   return driver === "codex" ? window.kind : `${window.kind}:${window.id}`;
@@ -769,13 +792,15 @@ function poolWindows(accounts: readonly LimitAccount[], now: number): readonly L
   }
   const pools = [...byKey].map(([key, unweighted]): LimitPoolWindow => {
     // Equal shares unless every account's plan size is known.
-    const capacities = unweighted.map((member) => member.account.capacity);
+    const capacities = unweighted.map(
+      (member) => member.account.capacity ?? planCapacity(member.account, member.window.kind),
+    );
     const total = capacities.every((capacity) => capacity !== undefined)
       ? capacities.reduce((sum, capacity) => sum + capacity, 0)
       : null;
-    const members = unweighted.map((member): LimitPoolMember => ({
+    const members = unweighted.map((member, index): LimitPoolMember => ({
       ...member,
-      share: total === null ? 1 / unweighted.length : (member.account.capacity ?? 0) / total,
+      share: total === null ? 1 / unweighted.length : (capacities[index] ?? 0) / total,
     }));
     const memberByAccount = new Map(members.map((member) => [member.account.key, member]));
     const first = members[0]!.window;

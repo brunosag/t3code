@@ -311,6 +311,7 @@ describe("buildProjectGroups", () => {
     expect(groups[1]?.label).toBe("julius/t3code-fork");
   });
 
+  // regression: #15049 a rename to the repository name snapped back to the display path
   it("applies a physical-project override without dropping its siblings", () => {
     const first = makeProject("t3code", "/work/t3code");
     const second = makeProject("t3code-2", "/work/t3code-2");

@@ -4,6 +4,7 @@ import {
   isProviderWorkspaceSnapshotPending,
   ProviderDriverKind,
   type ProviderInstanceId,
+  type SecretReference,
   type ServerProvider,
   type ServerProviderUpdateState,
 } from "@t3tools/contracts";
@@ -72,6 +73,12 @@ export class ProviderRegistry extends Context.Service<
       instanceId?: ProviderInstanceId,
     ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
+    /** Rebuilds and refreshes only the instances that read a secret, with the value the caller just read. */
+    readonly applySecretAndRefresh: (
+      reference: SecretReference,
+      value: string,
+    ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+
     /** Only refreshed instances can verify an update; the published list still includes every row. */
     readonly refreshAfterUpdate: (
       provider: ProviderDriverKind,
@@ -113,6 +120,7 @@ export class ProviderRegistry extends Context.Service<
       readonly instanceId: ProviderInstanceId;
       readonly action: ProviderMaintenanceActionKind;
       readonly state: ServerProviderUpdateState | null;
+      readonly targetVersion?: string | undefined;
     }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
     readonly streamChanges: Stream.Stream<ReadonlyArray<ServerProvider>>;
@@ -497,7 +505,10 @@ export const layer = Layer.effect(
       ReadonlyMap<ProviderInstance, ReadonlyMap<string, Deferred.Deferred<void>>>
     >(new Map());
     const maintenanceActionStatesRef = yield* Ref.make<
-      ReadonlyMap<ProviderInstanceId, { readonly update?: ServerProviderUpdateState | undefined }>
+      ReadonlyMap<
+        ProviderInstanceId,
+        { readonly update?: ServerProviderUpdateState; readonly targetVersion?: string | undefined }
+      >
     >(new Map());
 
     const liveSubsRef = yield* Ref.make<ReadonlyMap<ProviderInstanceId, ProviderInstance>>(
@@ -617,6 +628,21 @@ export const layer = Layer.effect(
         readonly publish?: boolean;
       },
     ) {
+      // Latest-version status cannot resolve a failed recommended-version install.
+      if (provider.versionAdvisory?.status === "current") {
+        yield* Ref.update(maintenanceActionStatesRef, (previous) => {
+          const action = previous.get(provider.instanceId);
+          if (
+            action?.targetVersion !== undefined ||
+            (action?.update?.status !== "unchanged" && action?.update?.status !== "failed")
+          ) {
+            return previous;
+          }
+          const next = new Map(previous);
+          next.delete(provider.instanceId);
+          return next;
+        });
+      }
       const providers = yield* upsertProviders([provider], options);
       yield* refreshCompatibility;
       return providers;
@@ -627,21 +653,14 @@ export const layer = Layer.effect(
         readonly instanceId: ProviderInstanceId;
         readonly action: "update";
         readonly state: ServerProviderUpdateState | null;
+        readonly targetVersion?: string | undefined;
       }) {
         yield* Ref.update(maintenanceActionStatesRef, (previous) => {
-          const previousActions = previous.get(input.instanceId);
-          const nextActions = { ...previousActions };
-          if (input.state === null || input.state.status === "idle") {
-            delete nextActions[input.action];
-          } else {
-            nextActions[input.action] = input.state;
-          }
-
           const next = new Map(previous);
-          if (Object.keys(nextActions).length === 0) {
+          if (input.state === null || input.state.status === "idle") {
             next.delete(input.instanceId);
           } else {
-            next.set(input.instanceId, nextActions);
+            next.set(input.instanceId, { update: input.state, targetVersion: input.targetVersion });
           }
           return next;
         });
@@ -764,6 +783,15 @@ export const layer = Layer.effect(
       return yield* instanceId === undefined ? refresh() : refreshInstance(instanceId);
     });
 
+    const applySecretAndRefresh = Effect.fn("applySecretAndRefresh")(function* (
+      reference: SecretReference,
+      value: string,
+    ) {
+      const instanceIds = yield* instanceRegistryMutator.applySecret(reference, value);
+      yield* Effect.forEach(instanceIds, refreshInstance, { discard: true });
+      return yield* Ref.get(providersRef);
+    });
+
     const refreshAfterUpdate = Effect.fn("refreshAfterUpdate")(function* (
       provider: ProviderDriverKind,
       selectedInstanceId: ProviderInstanceId,
@@ -796,6 +824,23 @@ export const layer = Layer.effect(
           ),
         );
       });
+      // Instances can share the replaced service, so none may invalidate before it restarts.
+      const selectedInstance = instances.find(
+        (instance) => instance.instanceId === selectedInstanceId,
+      );
+      if (selectedInstance?.afterUpdate !== undefined) {
+        // The probe below reports what is running, so a failed hook needs no status of its own.
+        yield* selectedInstance.afterUpdate.pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.interrupt
+              : Effect.logError("provider post-update hook failed", {
+                  instanceId: selectedInstance.instanceId,
+                  cause: Cause.pretty(cause),
+                }),
+          ),
+        );
+      }
       // Accounts can share an installation, but discovery must use each
       // instance's own executable, environment, and credentials.
       yield* Effect.forEach(
@@ -1204,6 +1249,11 @@ export const layer = Layer.effect(
         ),
       reloadSecretsAndRefresh: (instanceId?: ProviderInstanceId) =>
         reloadSecretsAndRefresh(instanceId).pipe(
+          Effect.catchCause(recoverRefreshFailure),
+          Effect.flatMap(publishable),
+        ),
+      applySecretAndRefresh: (reference: SecretReference, value: string) =>
+        applySecretAndRefresh(reference, value).pipe(
           Effect.catchCause(recoverRefreshFailure),
           Effect.flatMap(publishable),
         ),

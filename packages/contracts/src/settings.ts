@@ -569,6 +569,7 @@ export const ClientSettingsSchema = Schema.Struct({
   screenReaderAnnouncements: ScreenReaderAnnouncements.pipe(
     Schema.withDecodingDefault(Effect.succeed("status" as const)),
   ),
+  screenReaderWindowTitle: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Retired Labs toggle. Still read as the default for the Usage item in threadDetailsItems.
   threadDetailsUsageEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Sparse show/hide overrides for thread details card items. Missing ids use the client's
@@ -1419,6 +1420,8 @@ export const ServerSettings = Schema.Struct({
    * clients and agents, and strips it from turns that already selected it.
    */
   disableFastMode: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** Holds an OS sleep inhibitor while any run is active; closing a laptop lid still sleeps it. */
+  keepAwakeWhileAgentsWork: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   cloudSpeechCredentials: CloudSpeechCredentials.pipe(
@@ -1591,6 +1594,10 @@ export const ServerSettings = Schema.Struct({
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   sourceControlHosts: Schema.Record(Schema.String, SourceControlHostSettings).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  /** Hosts the add and publish project pickers offer, by kind. An unset host is off, except the default one. */
+  offeredSourceControlProviders: Schema.Record(Schema.String, Schema.Boolean).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   // User-chosen ids preserve rows across edits; undecodable entries round-trip untouched.
@@ -1869,6 +1876,7 @@ export const ServerSettingsPatch = Schema.Struct({
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
+  keepAwakeWhileAgentsWork: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   cloudSpeechCredentials: Schema.optionalKey(
     Schema.Struct({
@@ -1975,6 +1983,7 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   /** Merges per host, replacing patched fields whole; redaction markers retain secrets, empty secrets remove them. A non-empty token map keeps the saved tokens of hosts it omits; an empty map clears them all. */
   sourceControlHosts: Schema.optionalKey(Schema.Record(Schema.String, SourceControlHostSettings)),
+  offeredSourceControlProviders: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   // Replace whole maps to avoid half-merged driver configs.
   providerInstances: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderInstanceConfig)),
   // Merge per source to avoid racing other edits; null removes an entry.
@@ -2099,6 +2108,7 @@ export const ClientSettingsPatch = Schema.Struct({
   boringSidebarMultilineRows: Schema.optionalKey(Schema.Boolean),
   toolCallVisibility: Schema.optionalKey(ToolCallVisibility),
   screenReaderAnnouncements: Schema.optionalKey(ScreenReaderAnnouncements),
+  screenReaderWindowTitle: Schema.optionalKey(Schema.Boolean),
   threadDetailsUsageEnabled: Schema.optionalKey(Schema.Boolean),
   threadDetailsItems: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   sidebarWorkingShelfEnabled: Schema.optionalKey(Schema.Boolean),

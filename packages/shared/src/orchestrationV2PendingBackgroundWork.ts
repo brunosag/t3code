@@ -18,17 +18,10 @@ const BACKGROUND_TURN_ITEM_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
   "subagent",
 ]);
 
-const PULL_REQUEST_WATCH_TASK_PREFIX = "pull-request-watch:";
-
 export function isBackgroundTurnItem(item: Pick<OrchestrationV2TurnItem, "type">): boolean {
   return BACKGROUND_TURN_ITEM_TYPES.has(item.type);
 }
 
-export function isPullRequestWatchTask(
-  task: Pick<OrchestrationV2PendingBackgroundTask, "kind" | "taskId">,
-): boolean {
-  return task.kind === "monitor" && task.taskId.startsWith(PULL_REQUEST_WATCH_TASK_PREFIX);
-}
 // Plans and text streams can stay open across tool calls without executing work.
 const EXECUTION_TURN_ITEM_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
   ...BACKGROUND_TURN_ITEM_TYPES,
@@ -119,13 +112,23 @@ function backgroundWorkKindHoldsCompletion(kind: PendingBackgroundWorkTask["kind
   }
 }
 
-/** A monitor wakes the agent once per line, so a progress wake run's completion waits for the monitor to end. */
+const PULL_REQUEST_WATCH_TASK_ID = "pull-request-watch:";
+
+export const isPullRequestWatchTask = (task: Pick<PendingBackgroundWorkTask, "taskId">) =>
+  task.taskId.startsWith(PULL_REQUEST_WATCH_TASK_ID);
+
+/**
+ * A monitor wakes the agent once per line, so a progress wake run's completion waits for the
+ * monitor to end. A pull request watch wakes only on news and holds while its checks run.
+ */
 export function monitorHoldsWakeCompletion(
   thread: Pick<OrchestrationV2ThreadShell, "latestRunBackgroundWake" | "pendingBackgroundTasks">,
 ): boolean {
   return (
     thread.latestRunBackgroundWake === true &&
-    (thread.pendingBackgroundTasks ?? []).some((task) => task.kind === "monitor")
+    (thread.pendingBackgroundTasks ?? []).some(
+      (task) => task.kind === "monitor" && !isPullRequestWatchTask(task),
+    )
   );
 }
 
@@ -322,10 +325,13 @@ function pullRequestWatchTasks(
       ? []
       : [
           {
-            taskId: `${PULL_REQUEST_WATCH_TASK_PREFIX}${link.host.toLowerCase()}/${link.repository.toLowerCase()}#${link.number}`,
+            // Links store their normalized identity, and this id only has to be unique within the
+            // thread, so it reads those fields instead of parsing the URL.
+            taskId: `${PULL_REQUEST_WATCH_TASK_ID}${link.host.toLowerCase()}/${link.repository.toLowerCase()}#${link.number}`,
             description: `Watching pull request #${link.number}`,
             kind: "monitor" as const,
-            awaited: true as const,
+            // Once every check finished, a person moves the PR next: the watch stays on but holds nothing.
+            ...(link.watch.checksPending === false ? {} : { awaited: true as const }),
           },
         ],
   );

@@ -243,6 +243,7 @@ export const make = Effect.gen(function* () {
       storageCleanupRun: true,
       databaseStorage: true,
       otlpEndpointCheck: true,
+      secretSourceCheck: true,
       projectWorktreeCleanup: true,
       settledWorktreeCleanup: true,
       worktreesDirectory: true,
@@ -297,6 +298,8 @@ export const make = Effect.gen(function* () {
       linkFence: true,
       mcpApprovalCodes: true,
       mcpHostedApproval: true,
+      shellThreadFamilies: true,
+      shellOlderSettled: true,
     },
   };
 

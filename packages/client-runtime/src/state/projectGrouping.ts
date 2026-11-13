@@ -200,7 +200,9 @@ export function resolveScratchProjectScopeKey(
 
 export function deriveProjectGroupLabel(input: {
   readonly representative: Pick<EnvironmentProject, "title" | "repositoryIdentity">;
-  readonly members: ReadonlyArray<Pick<EnvironmentProject, "title" | "repositoryIdentity">>;
+  readonly members: ReadonlyArray<
+    Pick<EnvironmentProject, "title" | "hasCustomTitle" | "repositoryIdentity">
+  >;
 }): string {
   // A title every member shares names the group, even when it happens to
   // equal the repository name; owner-qualified fallbacks only disambiguate

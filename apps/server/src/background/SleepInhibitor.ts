@@ -20,6 +20,7 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { forkParked } from "../serverActivation.ts";
+import * as Settings from "../serverSettings.ts";
 
 const SYSTEMD_INHIBIT_ARGS = [
   "--what=sleep:idle:handle-lid-switch",
@@ -146,9 +147,30 @@ export const layer = Layer.effectDiscard(
       return;
     }
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const settings = yield* Settings.ServerSettingsService;
+    // Upstream's keep-awake setting switches this lock; KeepAwake stands down on Linux.
+    const enabled = Stream.unwrap(
+      Effect.gen(function* () {
+        const changes = yield* settings.subscribeChanges;
+        const current = yield* settings.getSettings.pipe(
+          Effect.map((value) => value.keepAwakeWhileAgentsWork),
+          Effect.orElseSucceed(() => true),
+        );
+        return Stream.concat(
+          Stream.succeed(current),
+          Stream.map(changes, (value) => value.keepAwakeWhileAgentsWork),
+        );
+      }),
+    );
     yield* watchAgentWork(
       "sleep inhibitor",
-      holdSystemdInhibitLock.pipe(
+      enabled.pipe(
+        Stream.changes,
+        Stream.switchMap((on) =>
+          on ? Stream.fromEffect(Effect.scoped(holdSystemdInhibitLock)) : Stream.empty,
+        ),
+        Stream.runDrain,
+        Effect.andThen(Effect.never),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       ),
     );
