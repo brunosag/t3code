@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as FiberMap from "effect/FiberMap";
 import * as Stream from "effect/Stream";
 
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { idleCompactionWindow } from "./IdleCompaction.ts";
@@ -29,6 +30,7 @@ export const make = Effect.gen(function* () {
   const orchestrator = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const settings = yield* ServerSettings.ServerSettingsService;
+  const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
 
   const compactWhenDue = Effect.fn("IdleCompactionService.compactWhenDue")(
     function* (threadId: ThreadId, completedRunId: RunId) {
@@ -100,7 +102,11 @@ export const make = Effect.gen(function* () {
           continue;
         }
         const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
-        const window = idleCompactionWindow(records, nowMs);
+        const window = idleCompactionWindow(
+          records,
+          nowMs,
+          yield* scheduledTasks.continuesThread(threadId),
+        );
         if (window?.runId !== runId) return;
         if (nowMs < window.startMs) {
           yield* Effect.sleep(Duration.millis(window.startMs - nowMs));
@@ -128,8 +134,8 @@ export const make = Effect.gen(function* () {
       ),
   );
 
-  // An agent settles its own thread after its run completes, which can lower
-  // the threshold that run's timer already checked, so the settle re-arms it.
+  // A settle or snooze after the run completed can lower the threshold that
+  // run's timer already checked, so it re-arms the timer.
   const compactLatestRunWhenDue = Effect.fn("IdleCompactionService.compactLatestRunWhenDue")(
     function* (threadId: ThreadId) {
       const { runs } = yield* projections.getThreadRecords(threadId, ["runs"]);
@@ -152,7 +158,7 @@ export const make = Effect.gen(function* () {
       Stream.runForEach(orchestrator.streamDomainEvents, (event) =>
         event.type === "run.updated" && event.payload.status === "completed"
           ? FiberMap.run(timers, event.threadId, compactWhenDue(event.threadId, event.payload.id))
-          : event.type === "thread.settled" && event.payload.settledByOwnAgent === true
+          : event.type === "thread.settled" || event.type === "thread.snoozed"
             ? FiberMap.run(timers, event.threadId, compactLatestRunWhenDue(event.threadId))
             : Effect.void,
       ),

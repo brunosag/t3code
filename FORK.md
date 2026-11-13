@@ -34,7 +34,7 @@ A push to `bsag` runs `.github/workflows/deploy-fork-vps.yml`: it runs the fork 
 
 - **Claude thinking quotes:** no quoting on Claude thinking items; the Claude adapter strips saved thinking citations but keeps user comments.
 - **Question drafts:** written answers to agent questions survive reloads; choosing an option moves the answer into the thread draft.
-- **Compaction:** a thread its own agent settled still gets idle compaction (from 100K tokens) and stays settled through it; a running `delegate_task` child doesn't hold off its parent's compaction.
+- **Compaction:** a snoozed thread, and a settled one that its own agent settled or an enabled `continue` schedule will resume, still gets idle compaction (from 100K tokens) and stays settled or snoozed through it; a running `delegate_task` child doesn't hold off its parent's compaction.
 - **Schedules:** a late or manual interval run keeps the previous grid; a used-up `once` schedule deletes its task after success; missed runs of every type run late once (upstream skips fixed-time runs missed by over 10 minutes); `schedule_task` updates take a `delegate_task`-style `target`, and the web editor sets options with the traits picker.
 - **Fast Mode switch:** the server can disable Fast Mode, saved selections and delegated tasks included.
 - **Read aloud:** local speech synthesis with a player above the composer that survives thread switches; a running turn's latest finished message can be read from its hover row (upstream reverted that row; tested in `MessagesTimeline.logic.test.ts`). No speech controls for guests.

@@ -267,6 +267,8 @@ export class ScheduledTaskService extends Context.Service<
     ) => Effect.Effect<ScheduledTaskDeleteResult, ScheduledTaskError>;
     /** Deletes only tasks that still target this thread, including their webhook deliveries. */
     readonly deleteForThread: (threadId: ThreadId) => Effect.Effect<void, ScheduledTaskError>;
+    /** Whether an enabled task runs its next occurrence in this thread's own conversation. */
+    readonly continuesThread: (threadId: ThreadId) => Effect.Effect<boolean, ScheduledTaskError>;
     /** Points tasks bound to these threads at the project the threads moved to. */
     readonly moveThreadTasks: (input: {
       readonly threadIds: ReadonlyArray<ThreadId>;
@@ -1685,6 +1687,22 @@ export const layer = Layer.effect(
       if (removed.length > 0) yield* notifyChanged;
     });
 
+    const continuesThread: ScheduledTaskService["Service"]["continuesThread"] = Effect.fn(
+      "ScheduledTaskService.continuesThread",
+    )(function* (threadId) {
+      const rows = yield* sql`
+        SELECT 1 FROM scheduled_tasks
+        WHERE thread_id = ${threadId} AND enabled = 1 AND thread_mode = 'continue'
+        LIMIT 1
+      `.pipe(
+        NodeSqliteClient.readOnly,
+        Effect.mapError((cause) =>
+          taskError("Could not read the thread's schedule tasks.", { cause }),
+        ),
+      );
+      return rows.length > 0;
+    });
+
     const moveThreadTasks: ScheduledTaskService["Service"]["moveThreadTasks"] = Effect.fn(
       "ScheduledTaskService.moveThreadTasks",
     )(function* (input) {
@@ -2632,6 +2650,7 @@ export const layer = Layer.effect(
       setEnabled,
       delete: deleteTask,
       deleteForThread,
+      continuesThread,
       moveThreadTasks,
       runNow,
       rotateWebhookToken,

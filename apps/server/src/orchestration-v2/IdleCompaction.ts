@@ -7,10 +7,10 @@ import * as DateTime from "effect/DateTime";
 // that a cold re-read is cheap, so compacting mostly loses context for little
 // saving.
 const MIN_CONTEXT_TOKENS = COMPACTION_SUGGESTION_MIN_TOKENS;
-// A thread its own agent settled waits for its next event (a message, a
-// reminder) and is read again then, usually long after the cache expired, so
-// it compacts from Claude Code's own floor.
-const OWN_AGENT_SETTLED_MIN_CONTEXT_TOKENS = 100_000;
+// A snoozed thread, or a settled one its own agent settled or a scheduled run
+// continues, is read again at its next event, usually long after the cache
+// expired, so it compacts from Claude Code's own floor.
+const DEFERRED_MIN_CONTEXT_TOKENS = 100_000;
 // Start this long before the cache expires: enough for the session to resume
 // and send the compaction while the cache is still warm.
 const LEAD_MS = 2 * 60_000;
@@ -45,6 +45,7 @@ export function idleCompactionWindow(
     contextTransfers,
   }: IdleCompactionRecords,
   nowMs: number,
+  scheduledContinuation = false,
 ): {
   readonly runId: (typeof runs)[number]["id"];
   readonly startMs: number;
@@ -52,9 +53,9 @@ export function idleCompactionWindow(
 } | null {
   if (thread.deletedAt !== null || thread.archivedAt !== null) return null;
   const settled = thread.settledAt !== null || thread.settledOverride === "settled";
-  if (settled && thread.settledByOwnAgent !== true) return null;
-  if (thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > nowMs)
-    return null;
+  if (settled && thread.settledByOwnAgent !== true && !scheduledContinuation) return null;
+  const deferred =
+    settled || (thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > nowMs);
   if (!isListedThreadLineage(thread.lineage)) return null;
   // A removed or steered queued message leaves a cancelled run that never started.
   const latestRun = runs
@@ -104,7 +105,7 @@ export function idleCompactionWindow(
     .filter((turn) => turn.providerThreadId === providerThread.id && turn.tokenUsage !== undefined)
     .map((turn) => turn.tokenUsage!)
     .toSorted((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
-  const minTokens = settled ? OWN_AGENT_SETTLED_MIN_CONTEXT_TOKENS : MIN_CONTEXT_TOKENS;
+  const minTokens = deferred ? DEFERRED_MIN_CONTEXT_TOKENS : MIN_CONTEXT_TOKENS;
   if ((usages[0]?.usedTokens ?? 0) < minTokens) return null;
   // A request served fully from cache creates no cache entry and reports no
   // TTL, but it still refreshes the cache. Treat it as unknown and skip.

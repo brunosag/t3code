@@ -767,6 +767,9 @@ it.effect("a bound run follows its thread when promotion moves it mid-send", () 
         [promoted, scratch, promoted],
       );
       assert.equal(new Set(attempts.map((attempt) => attempt.commandId)).size, 1);
+      assert.isTrue(yield* service.continuesThread(threadId));
+      yield* service.setEnabled({ id: task.id, enabled: false });
+      assert.isFalse(yield* service.continuesThread(threadId));
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
@@ -824,6 +827,7 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
       yield* service.upsert({ ...input, threadMode: "fresh_session" });
 
       assert.equal((yield* service.runNow({ id: input.id })).threadId, launched);
+      assert.isFalse(yield* service.continuesThread(launched));
       // A form opened before the first run saves no thread; the binding stays.
       const { task } = yield* service.upsert({
         ...input,

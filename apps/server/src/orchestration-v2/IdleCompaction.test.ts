@@ -22,6 +22,7 @@ import * as Stream from "effect/Stream";
 import * as Tracer from "effect/Tracer";
 import * as TestClock from "effect/testing/TestClock";
 
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as IdleCompactionService from "./IdleCompactionService.ts";
 import * as Orchestrator from "./Orchestrator.ts";
@@ -192,7 +193,7 @@ describe("idleCompactionWindow", () => {
     expect(idleCompactionWindow(sideChat, NOW_MS)).toBeNull();
   });
 
-  it("compacts a thread its own agent settled from 100K, and no other settled thread", () => {
+  it("compacts snoozed threads, and settled threads their own agent settled or a schedule continues, from 100K", () => {
     const cache = { cacheExpiresInMs: 60 * MINUTE_MS };
     const settled = (usedTokens: number, settledByOwnAgent?: boolean) => {
       const value = records({ ...cache, usedTokens });
@@ -212,7 +213,19 @@ describe("idleCompactionWindow", () => {
     expect(idleCompactionWindow(settled(99_999, true), NOW_MS)).toBeNull();
     expect(idleCompactionWindow(settled(250_000, false), NOW_MS)).toBeNull();
     expect(idleCompactionWindow(settled(250_000), NOW_MS)).toBeNull();
+    expect(idleCompactionWindow(settled(100_000, false), NOW_MS, true)?.runId).toBe(runId);
+    expect(idleCompactionWindow(settled(99_999, false), NOW_MS, true)).toBeNull();
     expect(idleCompactionWindow(records({ ...cache, usedTokens: 150_000 }), NOW_MS)).toBeNull();
+    expect(
+      idleCompactionWindow(records({ ...cache, usedTokens: 150_000 }), NOW_MS, true),
+    ).toBeNull();
+    const snoozed = (snoozedUntilMs: number) => {
+      const value = records({ ...cache, usedTokens: 150_000 });
+      value.thread = { ...value.thread, snoozedUntil: at(snoozedUntilMs), snoozedAt: at() };
+      return value;
+    };
+    expect(idleCompactionWindow(snoozed(24 * 60 * MINUTE_MS), NOW_MS)?.runId).toBe(runId);
+    expect(idleCompactionWindow(snoozed(-MINUTE_MS), NOW_MS)).toBeNull();
   });
 
   it("waits for Claude's own background subagents but not for T3 delegates", () => {
@@ -328,6 +341,9 @@ describe("IdleCompactionService", () => {
           },
         });
         const dependencies = Layer.mergeAll(
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({
+            continuesThread: () => Effect.succeed(false),
+          }),
           Layer.mock(Orchestrator.OrchestratorV2)({
             streamDomainEvents: Stream.make({
               id: EventId.make("idle-completed"),
@@ -437,6 +453,9 @@ describe("IdleCompactionService", () => {
       const dispatched: Array<string> = [];
       const streamDone = yield* Deferred.make<void>();
       const dependencies = Layer.mergeAll(
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({
+          continuesThread: () => Effect.succeed(false),
+        }),
         Layer.mock(Orchestrator.OrchestratorV2)({
           // A delegated completion on the earlier run lands after the later run completed.
           streamDomainEvents: Stream.make(completed(laterRun), completed(earlierRun)).pipe(
