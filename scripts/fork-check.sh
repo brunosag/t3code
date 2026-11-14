@@ -39,6 +39,7 @@ vp test run \
   apps/web/src/pendingUserInput.test.ts \
   apps/web/src/components/chat/MessagesTimeline.logic.test.ts \
   packages/client-runtime/src/modelSearch.test.ts \
+  packages/client-runtime/src/state/sharedProviderSettings.test.ts \
   apps/web/src/versionSkew.test.ts \
   apps/web/src/components/settings/AddUsageLimitSourceDialog.logic.test.ts \
   apps/web/src/components/usage/usagePagePreferences.test.ts \

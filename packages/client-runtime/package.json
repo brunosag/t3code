@@ -319,6 +319,10 @@
       "types": "./src/state/sharedSettings.ts",
       "default": "./src/state/sharedSettings.ts"
     },
+    "./state/shared-provider-settings": {
+      "types": "./src/state/sharedProviderSettings.ts",
+      "default": "./src/state/sharedProviderSettings.ts"
+    },
     "./state/shell": {
       "types": "./src/state/shell.ts",
       "default": "./src/state/shell.ts"

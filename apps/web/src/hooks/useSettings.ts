@@ -3,6 +3,7 @@ import { useSyncExternalStoreWithSelector } from "use-sync-external-store/with-s
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
   DEFAULT_SERVER_SETTINGS,
+  AuthProvidersManageScope,
   AuthSettingsWriteScope,
   requiredScopesForServerSettingsPatch,
   type EnvironmentId,
@@ -30,6 +31,12 @@ import {
   splitSharedServerPatch,
   supportsSharedSettingsSync,
 } from "@t3tools/client-runtime/state/shared-settings";
+import {
+  providerSettingsInSync,
+  providerSettingsSync,
+  shareProviderInstanceMutation,
+  shareProviderSettingsPatch,
+} from "@t3tools/client-runtime/state/shared-provider-settings";
 import { ensureLocalApi } from "~/localApi";
 import { subscribeBrowserClientSettingsWrites } from "~/clientPersistenceStorage";
 import {
@@ -455,8 +462,10 @@ export function useUpdateEnvironmentModelPreferences(environmentId: EnvironmentI
     environmentId ? serverEnvironment.settingsValueAtom(environmentId) : noEnvironmentSettingsAtom,
   );
   const save = useAtomCommand(serverEnvironment.updateSettings, "model preferences update");
+  const shareProviderWrite = useShareProviderWrite(environmentId);
   return async (patch: ServerSettingsPatch) => {
     if (!environmentId || !settings) return;
+    shareProviderWrite(patch);
     let prepared: ServerSettingsPatch;
     try {
       prepared = await prepareModelPreferencesPatch(settings, patch);
@@ -553,15 +562,129 @@ export function useEnvironmentSettings<T = UnifiedSettings>(
   return useMergedSettings(serverSettings ?? DEFAULT_SERVER_SETTINGS, selector);
 }
 
-export function usePersistEnvironmentProviderInstanceMutation(environmentId: EnvironmentId) {
+/** Onboarding keeps a machine's first setup on that machine; settings share edits with the others. */
+export function usePersistEnvironmentProviderInstanceMutation(
+  environmentId: EnvironmentId,
+  options?: { readonly shared?: boolean },
+) {
   const mutateProviderInstance = useAtomCommand(serverEnvironment.mutateProviderInstance, {
     reportFailure: false,
   });
-  return (providerInstanceMutation: ProviderInstanceMutation, patch: ServerSettingsPatch = {}) =>
-    mutateProviderInstance({
+  const shareProviderWrite = useShareProviderWrite(environmentId);
+  return (providerInstanceMutation: ProviderInstanceMutation, patch: ServerSettingsPatch = {}) => {
+    if (options?.shared) shareProviderWrite(patch, providerInstanceMutation);
+    return mutateProviderInstance({
       environmentId,
       input: { patch, providerInstanceMutation },
     });
+  };
+}
+
+const SHARED_MODEL_PREFERENCE_KEYS = [
+  "setModelFavorites",
+  "setModelsHidden",
+  "setProviderModelOrder",
+] as const satisfies ReadonlyArray<keyof ServerSettingsPatch>;
+
+/** Copies a provider, hub or model preference change to the other connected machines. */
+function useShareProviderWrite(environmentId: EnvironmentId | null) {
+  const { environments } = useEnvironments();
+  const targetIds = useSharedSettingsSyncTargetIds();
+  const persist = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "shared provider settings update",
+    reportFailure: false,
+  });
+  return (patch: ServerSettingsPatch, mutation?: ProviderInstanceMutation) => {
+    const source = environments.find((candidate) => candidate.environmentId === environmentId)
+      ?.serverConfig?.settings;
+    if (!source) return;
+    for (const targetId of targetIds) {
+      if (targetId === environmentId) continue;
+      const target = environments.find((candidate) => candidate.environmentId === targetId);
+      const settings = target?.serverConfig?.settings;
+      if (!target || !settings) continue;
+      const providerInstanceMutation =
+        mutation === undefined ? null : shareProviderInstanceMutation(mutation, source, settings);
+      const sharedPatch = shareProviderSettingsPatch(patch, source, settings);
+      if (providerInstanceMutation === null && Object.keys(sharedPatch).length === 0) continue;
+      const scopes = requiredScopesForServerSettingsPatch(
+        providerInstanceMutation === null ? sharedPatch : { ...sharedPatch, providerInstances: {} },
+      );
+      if (!scopes.every((scope) => readEnvironmentScope(targetId, scope))) continue;
+      void (async () => {
+        const result = await persist({
+          environmentId: targetId,
+          input: {
+            patch: SHARED_MODEL_PREFERENCE_KEYS.some((key) => key in sharedPatch)
+              ? await prepareModelPreferencesPatch(settings, sharedPatch)
+              : sharedPatch,
+            ...(providerInstanceMutation === null ? {} : { providerInstanceMutation }),
+          },
+        });
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: `Not copied to ${target.label}`,
+            description: error instanceof Error ? error.message : "The save failed.",
+          });
+        }
+      })().catch(() => {
+        toastManager.add({
+          type: "error",
+          title: `Not copied to ${target.label}`,
+          description: "Could not load its saved model preferences. Try again.",
+        });
+      });
+    }
+  };
+}
+
+/** Connected machines whose shared provider settings differ from this one's, and the copy there. */
+export function useProviderSettingsSync(environmentId: EnvironmentId) {
+  const { environments } = useEnvironments();
+  const targetIds = useSharedSettingsSyncTargetIds();
+  const persist = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "provider settings copy",
+    reportFailure: false,
+  });
+  const source = environments.find((candidate) => candidate.environmentId === environmentId)
+    ?.serverConfig?.settings;
+  const targets = targetIds.flatMap((targetId) => {
+    const target = environments.find((candidate) => candidate.environmentId === targetId);
+    const settings = target?.serverConfig?.settings;
+    if (!source || !target || !settings || targetId === environmentId) return [];
+    if (!readEnvironmentScope(targetId, AuthProvidersManageScope)) return [];
+    const sync = providerSettingsSync(source, settings);
+    return providerSettingsInSync(sync)
+      ? []
+      : [{ environmentId: targetId, label: target.label, sync }];
+  });
+  const copy = async () => {
+    for (const target of targets) {
+      const writes = [
+        ...target.sync.mutations.map((providerInstanceMutation) => ({
+          patch: {},
+          providerInstanceMutation,
+        })),
+        ...(Object.keys(target.sync.patch).length > 0 ? [{ patch: target.sync.patch }] : []),
+      ];
+      for (const input of writes) {
+        const result = await persist({ environmentId: target.environmentId, input });
+        if (result._tag === "Success") continue;
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: `Not copied to ${target.label}`,
+            description: error instanceof Error ? error.message : "The save failed.",
+          });
+        }
+        break;
+      }
+    }
+  };
+  return { targets, copy };
 }
 
 export function usePrimarySettings<T = UnifiedSettings>(
@@ -626,6 +749,7 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
     return result;
   };
   const sharedSettingsSyncTargetIds = useSharedSettingsSyncTargetIds(true);
+  const shareProviderWrite = useShareProviderWrite(environmentId);
   const updateSettings = (
     patch: UnifiedSettingsPatch,
     options?: { readonly onFailed?: () => void; readonly onSaved?: () => void },
@@ -658,6 +782,7 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
       };
       if (Object.keys(localPatch).length > 0) {
         if (environmentId) {
+          shareProviderWrite(localPatch);
           void persistServerSettings(
             { environmentId, input: { patch: localPatch } },
             options?.onFailed,

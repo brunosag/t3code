@@ -36,13 +36,14 @@ import {
 import * as Arr from "effect/Array";
 import * as Duration from "effect/Duration";
 import * as Result from "effect/Result";
-import { PlusIcon } from "lucide-react";
+import { CopyIcon, PlusIcon } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 
 import { isDesktopLocalConnectionTarget } from "../../connection/desktopLocal";
 import {
   useEnvironmentSettings,
   usePersistEnvironmentProviderInstanceMutation,
+  useProviderSettingsSync,
   useUpdateEnvironmentSettings,
   useUpdateEnvironmentModelPreferences,
   useToggleEnvironmentModelFavorite,
@@ -529,6 +530,38 @@ function AccessGatedProviderSettings({
   );
 }
 
+function ProviderSettingsCopyAction({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const { targets, copy } = useProviderSettingsSync(environmentId);
+  const [copying, setCopying] = useState(false);
+  if (targets.length === 0) return null;
+  const labels = targets.map((target) => target.label).join(", ");
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="xs"
+            variant="ghost-muted"
+            disabled={copying}
+            aria-busy={copying}
+            onClick={() => {
+              setCopying(true);
+              void copy().finally(() => setCopying(false));
+            }}
+          >
+            <CopyIcon />
+            <span className="max-w-40 truncate">Copy to {labels}</span>
+          </Button>
+        }
+      />
+      <TooltipPopup side="top" className="max-w-72">
+        Copies names, models, favorites and hub accounts. Paths, keys and environment variables stay
+        as they are.
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
 const NO_PROJECT_IDS: readonly ProjectId[] = [];
 const NO_FAVORITES: UnifiedSettings["favorites"] = [];
 
@@ -557,7 +590,9 @@ export function EnvironmentProviderSettings({
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const updateModelPreferences = useUpdateEnvironmentModelPreferences(environmentId);
   const toggleModelFavorite = useToggleEnvironmentModelFavorite(environmentId);
-  const persistProviderInstance = usePersistEnvironmentProviderInstanceMutation(environmentId);
+  const persistProviderInstance = usePersistEnvironmentProviderInstanceMutation(environmentId, {
+    shared: true,
+  });
   const serverProviders = useAtomValue(providersIgnoringCheckedAtAtom(environmentId));
   // Hide overrides on older servers that silently ignore providerInstances patches.
   const supportsProjectProviderOverrides = useAtomValue(
@@ -1027,7 +1062,10 @@ export function EnvironmentProviderSettings({
         }
       >
         {deviceTabs ? (
-          <div className="flex min-h-11 min-w-0 items-center gap-2 px-3 sm:px-4">{deviceTabs}</div>
+          <div className="flex min-h-11 min-w-0 items-center gap-2 px-3 sm:px-4">
+            {deviceTabs}
+            {readOnly ? null : <ProviderSettingsCopyAction environmentId={environmentId} />}
+          </div>
         ) : null}
         {readOnly ? (
           <SettingsGroup divided={false} className="overflow-hidden">

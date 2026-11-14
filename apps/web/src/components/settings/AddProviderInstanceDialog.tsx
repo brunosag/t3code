@@ -155,7 +155,9 @@ export function AddProviderInstanceDialog({
 }: AddProviderInstanceDialogProps) {
   const settings = useEnvironmentSettings(environmentId);
   const secretSources = useSecretSources(environmentId);
-  const persistProviderInstance = usePersistEnvironmentProviderInstanceMutation(environmentId);
+  const persistProviderInstance = usePersistEnvironmentProviderInstanceMutation(environmentId, {
+    shared: true,
+  });
   const canManageProviders = useEnvironmentScope(environmentId, AuthProvidersManageScope);
 
   const [wizardStep, setWizardStep] = useState(0);

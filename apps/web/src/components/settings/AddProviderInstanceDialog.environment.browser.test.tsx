@@ -273,7 +273,7 @@ describe("AddProviderInstanceDialog environment routing", () => {
     await type("#add-provider-label", "Deepseek Harness");
     await click("Add instance");
 
-    expect(settingsHooks.useMutation).toHaveBeenCalledWith(remoteEnvironmentId);
+    expect(settingsHooks.useMutation).toHaveBeenCalledWith(remoteEnvironmentId, { shared: true });
     expect(settingsHooks.mutate).toHaveBeenCalledWith({
       operation: "create",
       instanceId: "acpRegistry_deepseek_harness",
