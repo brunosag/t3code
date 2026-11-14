@@ -9,7 +9,10 @@ const subscribeToWindowZoom = (onChange: () => void) => {
 };
 const readWindowZoomFactor = () => window.desktopBridge?.getWindowZoomFactor() ?? 1;
 
+export function useWindowZoomFactor() {
+  return useSyncExternalStore(subscribeToWindowZoom, readWindowZoomFactor);
+}
+
 export function useBrowserLayoutZoomFactor(previewZoomFactor: number) {
-  const windowZoomFactor = useSyncExternalStore(subscribeToWindowZoom, readWindowZoomFactor);
-  return resolveBrowserLayoutZoomFactor(previewZoomFactor, windowZoomFactor);
+  return resolveBrowserLayoutZoomFactor(previewZoomFactor, useWindowZoomFactor());
 }

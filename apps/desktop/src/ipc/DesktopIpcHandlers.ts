@@ -49,6 +49,7 @@ import {
   pasteAsText,
   probeRemoteEditors,
   revealWindow,
+  resetWindowZoom,
   pickFolder,
   toLocalBackendPath,
   pickProjectFavicon,
@@ -159,6 +160,7 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(checkSystemPermission);
   yield* ipc.handle(pasteAsText);
   yield* ipc.handle(revealWindow);
+  yield* ipc.handle(resetWindowZoom);
   yield* ipc.handle(syncHtmlFullscreen);
   yield* ipc.handle(probeRemoteEditors);
   yield* ipc.handle(getUpdateState);

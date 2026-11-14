@@ -5,7 +5,7 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useAtomValue } from "@effect/atom-react";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
-import { shortcutLabelForCommand } from "../../keybindings";
+import { formatShortcutLabel, shortcutLabelForCommand } from "../../keybindings";
 import {
   navigateHistory,
   useCanNavigateHistory,
@@ -39,6 +39,7 @@ import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
+import { useWindowZoomFactor } from "~/browser/useBrowserLayoutZoomFactor";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -78,6 +79,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
             <div className="hidden items-center md:flex">
               <HistoryNavigationButton direction="back" onBackdrop={backdropVariant !== null} />
               <HistoryNavigationButton direction="forward" onBackdrop={backdropVariant !== null} />
+              <WindowZoomIndicator onBackdrop={backdropVariant !== null} />
             </div>
           ) : null}
         </div>
@@ -157,6 +159,43 @@ function HistoryNavigationButton({
       <TooltipPopup side="bottom">
         {label}
         {shortcutLabel ? ` (${shortcutLabel})` : ""}
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
+const RESET_ZOOM_SHORTCUT = {
+  key: "0",
+  metaKey: false,
+  ctrlKey: false,
+  shiftKey: false,
+  altKey: false,
+  modKey: true,
+} as const;
+
+function WindowZoomIndicator({ onBackdrop }: { onBackdrop: boolean }) {
+  const percent = Math.round(useWindowZoomFactor() * 100);
+  if (percent === 100) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            aria-label={`Zoom ${percent}%, reset to 100%`}
+            className={cn(
+              "[-webkit-app-region:no-drag]",
+              onBackdrop && "relative top-auto translate-y-0",
+            )}
+            onClick={() => void window.desktopBridge?.resetWindowZoom()}
+            size="micro"
+            variant={onBackdrop ? "media-navigation" : "ghost-muted"}
+          />
+        }
+      >
+        <span className="tabular-nums">{percent}%</span>
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">
+        Reset zoom ({formatShortcutLabel(RESET_ZOOM_SHORTCUT)})
       </TooltipPopup>
     </Tooltip>
   );

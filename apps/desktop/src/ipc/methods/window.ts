@@ -40,6 +40,7 @@ import * as ElectronMenu from "../../electron/ElectronMenu.ts";
 import * as ElectronShell from "../../electron/ElectronShell.ts";
 import * as ElectronTheme from "../../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
+import * as DesktopWindow from "../../window/DesktopWindow.ts";
 import * as Electron from "electron";
 import * as MacPermissions from "../../permissions/MacPermissions.ts";
 import { safariPermissionCheck } from "../../preview/BrowserImport/SafariPermission.ts";
@@ -482,6 +483,15 @@ export const revealWindow = DesktopIpc.makeIpcMethod({
       return;
     }
     yield* electronWindow.reveal(window.value);
+  }),
+});
+
+export const resetWindowZoom = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.RESET_WINDOW_ZOOM_CHANNEL,
+  payload: Schema.Undefined,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.resetWindowZoom")(function* () {
+    yield* (yield* DesktopWindow.DesktopWindow).zoomMain("reset");
   }),
 });
 
