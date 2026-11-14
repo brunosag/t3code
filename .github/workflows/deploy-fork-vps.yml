@@ -171,6 +171,7 @@ jobs:
 
           ssh_opts=(-i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
           scp "${ssh_opts[@]}" "$TGZ" "$VPS_USER@$VPS_HOST:local/t3-pi/releases/"
+          scp "${ssh_opts[@]}" "patches/@ff-labs__fff-node@0.11.0.patch" "$VPS_USER@$VPS_HOST:local/t3-pi/releases/t3-$VERSION.fff-node.patch"
 
           # Installs into runtime/versions/<version> with the preseed sentinel, then
           # hands off to the fork CLI. --allow-downgrade is required here: the
@@ -227,6 +228,11 @@ jobs:
           # onnxruntime-node (read aloud) ships its CPU binaries; without this its
           # postinstall downloads CUDA libraries on Linux x64 if npm runs it.
           ONNXRUNTIME_NODE_INSTALL_CUDA=skip timeout --kill-after=30s 900s npm install --prefix "$RUNTIME" --no-fund --no-audit "$BASE/releases/t3-$VERSION.tgz"
+          # fff-node is loaded from disk, and npm skips pnpm patches; the search index calls the
+          # patched async methods, so without this every file search fails on the host.
+          patch -p1 --forward --batch -d "$RUNTIME/node_modules/@ff-labs/fff-node" < "$BASE/releases/t3-$VERSION.fff-node.patch"
+          grep -q fileSearchAsync "$RUNTIME/node_modules/@ff-labs/fff-node/dist/index.js"
+          rm -f -- "$BASE/releases/t3-$VERSION.fff-node.patch"
           node "$RUNTIME/node_modules/t3/dist/bin.mjs" --version
           # The merged CLI's pinned runtime is the archive layout: it looks for the
           # executable at runtime/versions/<version>/t3, treats a tree without it as

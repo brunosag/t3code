@@ -4,6 +4,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# The deploy patches the npm-installed fff-node with this file; a version bump must move it too.
+fff_patch="patches/@ff-labs__fff-node@$(node -p 'require("./apps/server/package.json").dependencies["@ff-labs/fff-node"]').patch"
+test -f "$fff_patch" && grep -qF "\"$fff_patch\"" .github/workflows/deploy-fork-vps.yml || {
+  echo "fork-check: deploy-fork-vps.yml must apply $fff_patch to the host's fff-node" >&2
+  exit 1
+}
+
 vp test run \
   apps/server/src/provider/ProviderRegistry.test.ts \
   apps/server/src/scheduledTasks/Schedule.test.ts \
