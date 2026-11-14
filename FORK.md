@@ -17,7 +17,7 @@ The user's fork of upstream T3 Code. Where this file and `AGENTS.md` differ, thi
 - The live installation is `~/local/t3-pi` on `vps`; preserve its `userdata` and keep development state separate. Back up its database before deploying a migration; reverting the executable is not a database rollback.
 - `t3 service restart` on the host interrupts running agents; otherwise the server switches to a deployed version by itself once agents are idle.
 - Enable `SERVER_RELEASES_PUBLISHED` (`apps/server/src/cloud/selfUpdate.ts`) only when matching release artifacts exist; fork server releases are not published.
-- The npm-installed server loads `@ff-labs/fff-node` through an ESM import (upstream's single-executable path needs a patched CommonJS export the npm package lacks); changing that import means changing the installation layout too. npm skips pnpm patches, so the deploy applies `patches/@ff-labs__fff-node@<version>.patch` to the host's copy (the search index calls its async methods); `scripts/fork-check.sh` fails when a version bump leaves the workflow naming a missing patch.
+- The npm-installed server loads `@ff-labs/fff-node` through an ESM import (upstream's single-executable path needs a patched CommonJS export the npm package lacks); changing that import means changing the installation layout too. npm skips pnpm patches, so the deploy applies the fff-node and `@cursor/sdk` patches to the host's copies (the search index calls fff-node's patched async methods) and fails when npm installed a version a patch wasn't written for; `scripts/fork-check.sh` fails when a version bump leaves the workflow naming a missing patch. node-pty's patch is Windows-only, and npm resolves its caret range past the pnpm pin.
 
 ## Deployment
 
