@@ -51,6 +51,7 @@ vp test run \
   apps/desktop/src/app/DesktopEnvironment.test.ts \
   apps/desktop/src/window/DesktopWindow.test.ts \
   apps/desktop/src/app/DesktopApp.test.ts \
+  apps/desktop/src/electron/ElectronUpdater.test.ts \
   apps/server/src/process/agentScope.test.ts \
   apps/server/src/cli/config.test.ts \
   apps/desktop/src/backend/DesktopBackendConfiguration.test.ts \

@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Intercepts the spawn electron-updater requires natively.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -39,6 +39,7 @@ vi.hoisted(() => {
 import * as ElectronUpdater from "./ElectronUpdater.ts";
 
 const childProcess = NodeModule.createRequire(import.meta.url)("node:child_process") as {
+  execFileSync: (command: string, args: ReadonlyArray<string>) => Buffer;
   spawn: (
     command: string,
     args: ReadonlyArray<string>,
@@ -49,23 +50,41 @@ const childProcess = NodeModule.createRequire(import.meta.url)("node:child_proce
 describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
   "ElectronUpdater AppImage install",
   () => {
-    it.live("relaunches the installed AppImage without the updating process's descriptors", () =>
+    it.live("relaunches the installed AppImage after the updater exits, without its fds", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-appimage-install-" });
         const appImagePath = path.join(dir, "T3-Code.AppImage");
         const stagedPath = path.join(dir, "T3-Code-1.0.1.AppImage");
-        const fdReportPath = path.join(dir, "relaunched-fds.txt");
+        const reportPath = path.join(dir, "relaunch-report");
+        yield* Effect.sync(() => childProcess.execFileSync("mkfifo", [reportPath]));
+        // Stands in for the quitting app. Only a relaunch that waits for it runs `sleep`, whose
+        // stand-in on PATH ends it, so an AppImage started any earlier finds it still alive.
+        const updatingApp = yield* Effect.acquireRelease(
+          Effect.sync(() => childProcess.spawn("bash", ["-c", "read -r _"], { stdio: "pipe" })),
+          (child) => Effect.sync(() => child.kill()),
+        );
+        const binDir = path.join(dir, "bin");
+        yield* fileSystem.makeDirectory(binDir);
+        yield* fileSystem.writeFileString(
+          path.join(binDir, "sleep"),
+          `#!/bin/sh\nkill ${updatingApp.pid} 2>/dev/null\n`,
+        );
+        yield* fileSystem.chmod(path.join(binDir, "sleep"), 0o755);
         yield* fileSystem.writeFileString(appImagePath, "old AppImage");
         yield* fileSystem.writeFileString(
           stagedPath,
-          `#!/bin/sh\nls /proc/self/fd > '${fdReportPath}'\n`,
+          `#!/bin/sh\n{ ls /proc/self/fd; kill -0 ${updatingApp.pid} 2>/dev/null && echo updater-alive; } > '${reportPath}'\n`,
         );
         yield* fileSystem.chmod(stagedPath, 0o755);
 
+        const hostEnvironment = yield* HostProcess.Environment;
         yield* Effect.acquireRelease(
-          Effect.sync(() => vi.stubEnv("APPIMAGE", appImagePath)),
+          Effect.sync(() => {
+            vi.stubEnv("APPIMAGE", appImagePath);
+            vi.stubEnv("PATH", `${binDir}:${hostEnvironment.PATH}`);
+          }),
           () => Effect.sync(() => vi.unstubAllEnvs()),
         );
 
@@ -77,22 +96,24 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
           },
         });
 
+        const realPid = Object.getOwnPropertyDescriptor(process, "pid");
+        yield* Effect.acquireRelease(
+          Effect.sync(() => Object.defineProperty(process, "pid", { value: updatingApp.pid })),
+          () => Effect.sync(() => realPid && Object.defineProperty(process, "pid", realPid)),
+        );
+
         // Electron's main process holds the AppImage runtime's keepalive pipe and some
         // Chromium files without O_CLOEXEC. Node cannot hold such a descriptor, so the
         // relaunch runs with fd 7 opened that way to stand in for them.
-        const relaunched = yield* Deferred.make<void>();
         const realSpawn = childProcess.spawn;
         yield* Effect.acquireRelease(
           Effect.sync(() => {
-            childProcess.spawn = (command, args, options) => {
-              const child = realSpawn(
+            childProcess.spawn = (command, args, options) =>
+              realSpawn(
                 "bash",
                 ["-c", 'exec 7</dev/null; exec "$@"', "leaky-parent", command, ...args],
                 options,
               );
-              child.once("exit", () => Deferred.doneUnsafe(relaunched, Effect.void));
-              return child;
-            };
             NodeModule.syncBuiltinESMExports();
           }),
           () =>
@@ -104,13 +125,18 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
 
         const electronUpdater = yield* ElectronUpdater.ElectronUpdater;
         yield* electronUpdater.quitAndInstall({ isSilent: true, isForceRunAfter: true });
-        yield* Deferred.await(relaunched);
+        const report = yield* Effect.forkScoped(fileSystem.readFileString(reportPath));
 
-        const descriptors = (yield* fileSystem.readFileString(fdReportPath)).trim().split("\n");
+        const lines = (yield* Fiber.join(report)).trim().split("\n");
         assert.notInclude(
-          descriptors,
+          lines,
+          "updater-alive",
+          "AppImage relaunched before the updating app exited",
+        );
+        assert.notInclude(
+          lines,
           "7",
-          `relaunched AppImage inherited the updating process's fd 7 (open fds: ${descriptors.join(" ")})`,
+          `relaunched AppImage inherited the updating process's fd 7 (open fds: ${lines.join(" ")})`,
         );
       }).pipe(Effect.provide([ElectronUpdater.layer, NodeServices.layer])),
     );

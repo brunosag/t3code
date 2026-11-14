@@ -14,7 +14,7 @@ type SpawnLog = (cmd: string, args?: Array<string>, ...rest: Array<unknown>) => 
 // already needs it; dash cannot close multi-digit fds) closes them before exec'ing the AppImage.
 // -p skips BASH_ENV and exported functions in the helper only; the AppImage still receives both.
 const CLOSE_INHERITED_FDS_THEN_EXEC =
-  'for fd in /proc/self/fd/*; do fd=${fd##*/}; case $fd in *[!0-9]*|[012]) ;; *) eval "exec $fd>&-" ;; esac; done; exec "$@"';
+  'for fd in /proc/self/fd/*; do fd=${fd##*/}; case $fd in *[!0-9]*|[012]) ;; *) eval "exec $fd>&-" ;; esac; done; while kill -0 "$1" 2>/dev/null; do sleep 0.1; done; shift; exec "$@"';
 
 const relaunchWithoutInheritedDescriptors = (updater: AppImageUpdater) => {
   const spawnLog = (AppImageUpdater.prototype as unknown as { spawnLog: SpawnLog }).spawnLog;
@@ -22,7 +22,8 @@ const relaunchWithoutInheritedDescriptors = (updater: AppImageUpdater) => {
     return spawnLog.call(
       this,
       "bash",
-      ["-p", "-c", CLOSE_INHERITED_FDS_THEN_EXEC, cmd, cmd, ...args],
+      // Waits for this pid: appimage-run's bwrap dies with its parent, which holds the app's lock.
+      ["-p", "-c", CLOSE_INHERITED_FDS_THEN_EXEC, cmd, String(process.pid), cmd, ...args],
       ...rest,
     );
   };

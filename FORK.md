@@ -51,6 +51,7 @@ A push to `bsag` runs `.github/workflows/deploy-fork-vps.yml`: it runs the fork 
 - **Agent memory on small hosts:** `T3CODE_AGENT_MEMORY_HIGH`, `_MAX` and `_SWAP_MAX` override the agents slice's limits; `check:changed` runs its steps one at a time under 6 GB free.
 - **Orphaned desktop backends exit:** the backend gets the desktop's pid at bootstrap and exits if it dies (an AppImage update under `appimage-run` does this).
 - **No swipe navigation:** horizontal wheel input never moves through threads; upstream's `HistorySwipeNavigation` is deleted, so a merge that edits or mounts it conflicts or fails the fork check's typecheck.
+- **AppImage updates restart under appimage-run:** the relaunch helper waits for the updating app's pid to exit before running the new AppImage, since appimage-run's bubblewrap (`--die-with-parent`) kills a new instance started as the old app's child; tested in `ElectronUpdater.test.ts`.
 - **Hidden desktop start:** `--hidden` (the laptop's login autostart) loads the window without showing it; tested in `DesktopWindow.test.ts`.
 - **Installation and desktop fixes:** provider updates recognize npm ownership before native-looking layouts; Linux desktop entries need the `--class` switch upstream dropped; development can omit Electron, reuse the last server build (`dev:desktop:lean`), open DevTools explicitly and exit when its window closes; desktop dev origins stay out of the server's embedded web client.
 
