@@ -978,6 +978,8 @@ export const UsageLimitSourceConfig = Schema.Struct({
   ),
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   accounts: Schema.optional(Schema.Record(TrimmedNonEmptyString, UsageLimitSourceAccountProfile)),
+  /** Providers whose logins the server keeps routed in order of their longest limit's reset, soonest first. */
+  routeByReset: Schema.optional(Schema.Array(ProviderDriverKind)),
 });
 export type UsageLimitSourceConfig = typeof UsageLimitSourceConfig.Type;
 

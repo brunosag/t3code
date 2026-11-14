@@ -2631,6 +2631,8 @@ export const layerWsRpc = (
           usageLimitSources.setAccountOrder(input),
         [WS_METHODS.usageLimitSourceSetAccountDisabled]: (input) =>
           usageLimitSources.setAccountDisabled(input),
+        [WS_METHODS.usageLimitSourceSetRouteByReset]: (input) =>
+          usageLimitSources.setRouteByReset(input),
         [WS_METHODS.providerAuthStart]: (input) => providerAuth.start(input, currentSessionId),
         [WS_METHODS.providerAuthRespond]: (input) =>
           Effect.annotateCurrentSpan({ instanceId: input.instanceId }).pipe(

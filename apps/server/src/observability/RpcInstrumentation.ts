@@ -44,6 +44,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.providerConsumeResetCredit]: "provider",
   [WS_METHODS.usageLimitSourceSetAccountOrder]: "provider",
   [WS_METHODS.usageLimitSourceSetAccountDisabled]: "provider",
+  [WS_METHODS.usageLimitSourceSetRouteByReset]: "provider",
   [WS_METHODS.providerAuthComplete]: "provider",
   [WS_METHODS.chatGptReconnectProfile]: "provider",
   [WS_METHODS.chatGptImportProfile]: "provider",

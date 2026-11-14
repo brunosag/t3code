@@ -1383,6 +1383,7 @@ describe("pooled account columns", () => {
         sourceId: UsageLimitSourceId.make("hub"),
         accountId: key,
         priority,
+        byReset: false,
       },
     });
     const [pool] = collectLimitPools(

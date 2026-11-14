@@ -365,6 +365,7 @@ function PoolActions({
   label,
   limits,
   accounts,
+  routeByReset,
   hubs,
   onMoveUp,
   onMoveDown,
@@ -379,6 +380,8 @@ function PoolActions({
   }>;
   /** Null for a pool of one account. */
   readonly accounts: { readonly shown: boolean; readonly onToggle: () => void } | null;
+  /** Null where no hub this viewer manages routes more than one of the provider's logins. */
+  readonly routeByReset: { readonly on: boolean; readonly onToggle: () => void } | null;
   /** Each hub's logins for this provider; empty where the viewer may not change them. */
   readonly hubs: ReadonlyArray<{
     readonly label: string;
@@ -432,6 +435,15 @@ function PoolActions({
             onCheckedChange={accounts.onToggle}
           >
             Show accounts
+          </MenuCheckboxItem>
+        ) : null}
+        {routeByReset ? (
+          <MenuCheckboxItem
+            checked={routeByReset.on}
+            closeOnClick={false}
+            onCheckedChange={routeByReset.onToggle}
+          >
+            Route by earliest reset
           </MenuCheckboxItem>
         ) : null}
         {hubs.length > 0 ? (
@@ -560,6 +572,9 @@ export function UsageLimitsPooled({
   const [pendingDisabled, setPendingDisabled] = useState<ReadonlyMap<string, boolean>>(
     () => new Map(),
   );
+  const [pendingByReset, setPendingByReset] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map(),
+  );
   const reportedLogins = collectHubLogins(presentations);
   const unsettledDisabled = new Map(
     [...pendingDisabled].filter(([key, disabled]) =>
@@ -572,14 +587,31 @@ export function UsageLimitsPooled({
     ...login,
     disabled: unsettledDisabled.get(login.key) ?? login.disabled,
   }));
-  const reported = collectLimitAccounts(presentations).map((account) => {
+  const byResetKey = (account: LimitAccount) => `${account.driver}\n${limitRoutingKey(account)}`;
+  const collected = collectLimitAccounts(presentations);
+  const unsettledByReset = new Map(
+    [...pendingByReset].filter(([key, byReset]) =>
+      collected.some(
+        (account) => byResetKey(account) === key && account.routing?.byReset !== byReset,
+      ),
+    ),
+  );
+  if (unsettledByReset.size !== pendingByReset.size) setPendingByReset(unsettledByReset);
+  const reported = collected.map((account) => {
     const disabled =
       account.routing && account.environments.length === 0
         ? unsettledDisabled.get(
             `${account.routing.environmentId}:${account.routing.sourceId}:${account.routing.accountId}`,
           )
         : undefined;
-    return disabled === undefined ? account : { ...account, disabled };
+    const byReset = unsettledByReset.get(byResetKey(account));
+    const routing =
+      byReset === undefined || account.routing === null
+        ? account.routing
+        : { ...account.routing, byReset };
+    return disabled === undefined && routing === account.routing
+      ? account
+      : { ...account, routing, disabled: disabled ?? account.disabled };
   });
   // Dropped during render so an optimistic order never outlives the hub report it was for.
   if (pendingRouting !== null && pendingRoutingSettled(reported, pendingRouting)) {
@@ -599,9 +631,40 @@ export function UsageLimitsPooled({
   const reorderPermissions = useAtomValue(
     reorderPermissionsAtom(environmentIdsKey(environmentIds)),
   );
-  const canReorder = (account: LimitAccount) =>
+  const mayRoute = (account: LimitAccount) =>
     account.routing !== null &&
     reorderPermissions[environmentIds.indexOf(account.routing.environmentId)] === true;
+  const canReorder = (account: LimitAccount) => mayRoute(account) && !account.routing?.byReset;
+  const setRouteByReset = useAtomCommand(
+    serverEnvironment.setUsageLimitSourceRouteByReset,
+    "Change hub routing",
+  );
+  const routeByResetFor = (pool: LimitPool) => {
+    const routable = pool.accounts.flatMap((account) =>
+      account.routing && mayRoute(account) ? [[byResetKey(account), account.routing] as const] : [],
+    );
+    if (routable.length < 2) return null;
+    const hubs = new Map(routable);
+    const on = [...hubs.values()].every((routing) => routing.byReset);
+    return {
+      on,
+      onToggle: () => {
+        for (const [key, routing] of hubs) {
+          setPendingByReset((previous) => new Map([...previous, [key, !on]]));
+          void setRouteByReset({
+            environmentId: routing.environmentId,
+            input: { sourceId: routing.sourceId, driver: pool.driver, enabled: !on },
+          }).then((result) => {
+            if (result._tag === "Failure") {
+              setPendingByReset(
+                (previous) => new Map([...previous].filter(([entry]) => entry !== key)),
+              );
+            }
+          });
+        }
+      },
+    };
+  };
   const disablePermissions = useAtomValue(
     disablePermissionsAtom(environmentIdsKey(environmentIds)),
   );
@@ -723,6 +786,7 @@ export function UsageLimitsPooled({
               }
             : null
         }
+        routeByReset={routeByResetFor(pool)}
         hubs={hubsFor(pool)}
         onMoveUp={index > 0 ? move(-1) : null}
         onMoveDown={index < shownProviders.length - 1 ? move(1) : null}

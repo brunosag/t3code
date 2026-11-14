@@ -362,6 +362,7 @@ import {
   ProviderConsumeResetCreditResult,
   UsageLimitSourceSetAccountOrderInput,
   UsageLimitSourceSetAccountDisabledInput,
+  UsageLimitSourceSetRouteByResetInput,
 } from "./providerUsageLimits.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import {
@@ -454,6 +455,7 @@ export const WS_METHODS = {
   providerConsumeResetCredit: "provider.consumeResetCredit",
   usageLimitSourceSetAccountOrder: "usageLimitSource.setAccountOrder",
   usageLimitSourceSetAccountDisabled: "usageLimitSource.setAccountDisabled",
+  usageLimitSourceSetRouteByReset: "usageLimitSource.setRouteByReset",
   providerAuthComplete: "provider.auth.complete",
   chatGptReconnectProfile: "provider.chatgpt.reconnect-profile",
   chatGptImportProfile: "provider.chatgpt.import-profile",
@@ -732,6 +734,11 @@ const WsUsageLimitSourceSetAccountDisabledRpc = Rpc.make(
     error: Schema.Union([UsageLimitSourceError, EnvironmentAuthorizationError]),
   },
 );
+
+const WsUsageLimitSourceSetRouteByResetRpc = Rpc.make(WS_METHODS.usageLimitSourceSetRouteByReset, {
+  payload: UsageLimitSourceSetRouteByResetInput,
+  error: Schema.Union([UsageLimitSourceError, EnvironmentAuthorizationError]),
+});
 
 const WsProviderAuthStartRpc = Rpc.make(WS_METHODS.providerAuthStart, {
   payload: ProviderAuthStartInput,
@@ -2144,6 +2151,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProviderConsumeResetCreditRpc,
   WsUsageLimitSourceSetAccountOrderRpc,
   WsUsageLimitSourceSetAccountDisabledRpc,
+  WsUsageLimitSourceSetRouteByResetRpc,
   WsProviderAuthStartRpc,
   WsProviderAuthCompleteRpc,
   WsChatGptReconnectProfileRpc,

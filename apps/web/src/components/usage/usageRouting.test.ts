@@ -24,6 +24,7 @@ const account = (key: string, priority: number | null, sourceId = "hub"): LimitA
           sourceId: UsageLimitSourceId.make(sourceId),
           accountId: key,
           priority,
+          byReset: false,
         },
   disabled: false,
   stale: false,

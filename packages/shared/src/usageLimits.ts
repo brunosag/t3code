@@ -278,6 +278,8 @@ export interface LimitAccount {
     readonly sourceId: UsageLimitSourceId;
     readonly accountId: string;
     readonly priority: number;
+    /** The server keeps this hub's logins for the driver in earliest-reset order. */
+    readonly byReset: boolean;
   } | null;
   /** No hub routes to this login and no environment signs in with it, so pools leave it out. */
   readonly disabled: boolean;
@@ -474,6 +476,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
                   sourceId: source.id,
                   accountId: account.id,
                   priority: account.priority,
+                  byReset: source.routeByReset?.includes(account.driver) === true,
                 },
           disabled: account.disabled === true,
           stale: Date.parse(account.usageLimits.checkedAt) < Date.parse(source.checkedAt),

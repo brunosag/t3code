@@ -1588,6 +1588,15 @@ export function createServerEnvironmentAtoms<R, E>(
           JSON.stringify([environmentId, input.sourceId, input.driver]),
       },
     }),
+    setUsageLimitSourceRouteByReset: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:set-usage-limit-source-route-by-reset",
+      tag: WS_METHODS.usageLimitSourceSetRouteByReset,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.sourceId, input.driver]),
+      },
+    }),
     setUsageLimitSourceAccountDisabled: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:set-usage-limit-source-account-disabled",
       tag: WS_METHODS.usageLimitSourceSetAccountDisabled,

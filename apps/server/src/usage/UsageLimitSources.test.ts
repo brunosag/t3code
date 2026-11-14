@@ -274,6 +274,155 @@ it.effect("labels hub accounts with their saved name and image and republishes c
   ),
 );
 
+const DAY_SECONDS = 24 * 60 * 60;
+
+it.effect("routes a provider's logins by their weekly reset while the hub is set to", () => {
+  const hubId = UsageLimitSourceId.make("hub");
+  const codex = ProviderDriverKind.make("codex");
+  const priorities = new Map<string, number>();
+  const patches: string[] = [];
+  // Weekly resets in days; the session resets run the other way so only the longest window counts.
+  const weekly: Record<string, number | null> = { unknown: null, later: 3, soon: 1 };
+  const session: Record<string, number> = { soon: 0.2, later: 0.1, unknown: 0.1 };
+  return Effect.gen(function* () {
+    const sources = yield* UsageLimitSources.make;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    const order = Effect.map(sources.current, ([source]) =>
+      (source?.accounts ?? [])
+        .toSorted((left, right) => (right.priority ?? 0) - (left.priority ?? 0))
+        .map((account) => account.id),
+    );
+    yield* sources.refresh;
+    expect(patches).toEqual([]);
+
+    yield* sources.setRouteByReset({ sourceId: hubId, driver: codex, enabled: true });
+    expect(yield* order).toEqual(["soon.json", "later.json", "unknown.json"]);
+    expect((yield* sources.current)[0]?.routeByReset).toEqual([codex]);
+    expect((yield* settings.getSettings).usageLimitSources[hubId]?.routeByReset).toEqual([codex]);
+
+    patches.length = 0;
+    yield* sources.refresh;
+    expect(patches).toEqual([]);
+
+    // "soon" resets and starts a new week behind "later".
+    yield* TestClock.adjust("25 hours");
+    weekly.soon = 8;
+    yield* sources.refresh;
+    expect(yield* order).toEqual(["later.json", "soon.json", "unknown.json"]);
+
+    yield* sources.setRouteByReset({ sourceId: hubId, driver: codex, enabled: false });
+    expect((yield* sources.current)[0]?.routeByReset).toBeUndefined();
+    expect((yield* settings.getSettings).usageLimitSources[hubId]).not.toHaveProperty(
+      "routeByReset",
+    );
+    weekly.soon = 2;
+    patches.length = 0;
+    yield* sources.refresh;
+    expect(patches).toEqual([]);
+  }).pipe(
+    Effect.provide([
+      literalSecrets,
+      ServerSettings.layerTest({
+        usageLimitSources: {
+          [hubId]: {
+            kind: "cliproxy",
+            url: "http://hub.test:8317",
+            managementKey: "management-secret",
+            enabled: true,
+          },
+        },
+      }),
+      Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.sync(() => {
+            const body =
+              request.body._tag === "Uint8Array"
+                ? JSON.parse(new TextDecoder().decode(request.body.body))
+                : undefined;
+            if (request.url.endsWith("/auth-files/fields")) {
+              patches.push(body.name);
+              priorities.set(body.name, body.priority);
+              return HttpClientResponse.fromWeb(request, Response.json({ status: "ok" }));
+            }
+            if (request.url.endsWith("/auth-files")) {
+              return HttpClientResponse.fromWeb(
+                request,
+                Response.json({
+                  files: Object.keys(weekly).map((name) => ({
+                    id: `${name}.json`,
+                    auth_index: name,
+                    provider: "codex",
+                    email: `${name}@example.com`,
+                    priority: priorities.get(`${name}.json`),
+                  })),
+                }),
+              );
+            }
+            const name: string = body?.auth_index;
+            const atDays = (days: number) => Math.round(days * DAY_SECONDS);
+            return HttpClientResponse.fromWeb(
+              request,
+              Response.json(
+                String(body?.url).endsWith("/usage")
+                  ? {
+                      status_code: 200,
+                      body: JSON.stringify({
+                        rate_limit: {
+                          primary_window: {
+                            used_percent: 10,
+                            limit_window_seconds: 5 * 60 * 60,
+                            reset_at: atDays(session[name]!),
+                          },
+                          secondary_window: {
+                            used_percent: 10,
+                            limit_window_seconds: 7 * DAY_SECONDS,
+                            reset_at: weekly[name] === null ? null : atDays(weekly[name]!),
+                          },
+                        },
+                      }),
+                    }
+                  : { status_code: 404, body: "{}" },
+              ),
+            );
+          }),
+        ),
+      ),
+      NodeCrypto.layer,
+    ]),
+    Effect.scoped,
+  );
+});
+
+it("treats logins resetting within a minute of each other as already in order", () => {
+  const codex = ProviderDriverKind.make("codex");
+  const login = (id: string, priority: number, resetsAt: string) => ({
+    id,
+    driver: codex,
+    priority,
+    usageLimits: {
+      checkedAt: "1970-01-01T00:00:00.000Z",
+      windows: [
+        {
+          id: "weekly",
+          kind: "weekly" as const,
+          label: "Weekly",
+          usedPercent: 0,
+          windowDurationMins: 7 * 24 * 60,
+          resetsAt,
+        },
+      ],
+    },
+  });
+  const drifted = [
+    login("a", 1, "1970-01-02T00:00:30.000Z"),
+    login("b", 0, "1970-01-02T00:00:00.000Z"),
+  ];
+  expect(UsageLimitSources.resetRoutingOrder(drifted, codex, 0)).toBeNull();
+  const tied = drifted.map((account) => ({ ...account, priority: 0 }));
+  expect(UsageLimitSources.resetRoutingOrder(tied, codex, 0)).toEqual(["b", "a"]);
+});
+
 it.effect("reads the hub on its interval with no client open", () =>
   Effect.gen(function* () {
     const reads = yield* Queue.unbounded<void>();

@@ -4,6 +4,8 @@ import {
   type UsageLimitSourceConsumeResetCreditInput,
   type UsageLimitSourceSetAccountOrderInput,
   type UsageLimitSourceSetAccountDisabledInput,
+  type UsageLimitSourceSetRouteByResetInput,
+  type UsageLimitSourceAccount,
   type ProviderConsumeResetCreditResult,
   type ProviderDriverKind,
   type ServerSettings,
@@ -49,6 +51,10 @@ export class UsageLimitSources extends Context.Service<
     readonly setAccountDisabled: (
       input: UsageLimitSourceSetAccountDisabledInput,
     ) => Effect.Effect<void, UsageLimitSourceError>;
+    /** Keeps the provider's logins routed soonest reset first, reordering them as resets pass. */
+    readonly setRouteByReset: (
+      input: UsageLimitSourceSetRouteByResetInput,
+    ) => Effect.Effect<void, UsageLimitSourceError>;
     /** When a hub that refused a Claude model on every credential can route it again. */
     readonly claudeCooldownResetAt: (model: string) => Effect.Effect<string | undefined>;
     /** Claude offers reset grants only to a recent Claude Code, so hub reads present the newest installed. */
@@ -75,6 +81,58 @@ function missingManagementKey(config: UsageLimitSourceConfig): string {
     : "Could not read the management key from its secret provider.";
 }
 
+// Resets this close count as a tie, so two logins' drifting clocks cannot swap them every read.
+const RESET_ORDER_TOLERANCE_MS = 60 * 1000;
+
+function longestLimitReset(account: UsageLimitSourceAccount, now: number): number {
+  let longest: (typeof account.usageLimits.windows)[number] | undefined;
+  for (const window of account.usageLimits.windows) {
+    if ((window.windowDurationMins ?? 0) > (longest?.windowDurationMins ?? 0)) longest = window;
+  }
+  const at = longest?.resetsAt ? Date.parse(longest.resetsAt) : Number.NaN;
+  // A window with no running clock, or one that already reset, has its whole length ahead.
+  return at > now ? at : Number.POSITIVE_INFINITY;
+}
+
+/** The driver's routed logins soonest reset first, or null while the hub already routes them so. */
+export function resetRoutingOrder(
+  accounts: ReadonlyArray<UsageLimitSourceAccount>,
+  driver: ProviderDriverKind,
+  now: number,
+): ReadonlyArray<string> | null {
+  const current = accounts
+    .filter((account) => account.driver === driver && !account.disabled)
+    .toSorted((left, right) => (right.priority ?? 0) - (left.priority ?? 0));
+  const reset = (account: UsageLimitSourceAccount) => longestLimitReset(account, now);
+  const routed = current.every((account, index) => {
+    const next = current[index + 1];
+    return (
+      next === undefined ||
+      ((account.priority ?? 0) > (next.priority ?? 0) &&
+        reset(account) <= reset(next) + RESET_ORDER_TOLERANCE_MS)
+    );
+  });
+  if (routed) return null;
+  return current
+    .toSorted((left, right) =>
+      reset(left) === reset(right) ? 0 : reset(left) < reset(right) ? -1 : 1,
+    )
+    .map((account) => account.id);
+}
+
+function withPriorities(
+  source: UsageLimitSourceSnapshot,
+  priorities: ReadonlyMap<string, number>,
+): UsageLimitSourceSnapshot {
+  return {
+    ...source,
+    accounts: source.accounts.map((account) => {
+      const priority = priorities.get(account.id);
+      return priority === undefined ? account : { ...account, priority };
+    }),
+  };
+}
+
 /** @public */
 export const make = Effect.gen(function* () {
   const api = yield* makeCliproxyApi;
@@ -94,6 +152,32 @@ export const make = Effect.gen(function* () {
     PubSub.shutdown,
   );
 
+  // A failed reorder keeps the hub's order; the next read tries again.
+  const routeByReset = Effect.fn("UsageLimitSources.routeByReset")(function* (
+    hub: Parameters<typeof api.setAccountOrder>[0],
+    source: UsageLimitSourceSnapshot,
+  ) {
+    if (source.error !== undefined) return source;
+    const now = DateTime.toEpochMillis(yield* DateTime.now);
+    let routed = source;
+    for (const driver of source.routeByReset ?? []) {
+      const order = resetRoutingOrder(routed.accounts, driver, now);
+      if (order === null) continue;
+      const priorities = yield* api.setAccountOrder(hub, driver, order).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("usage limit source reset routing failed", {
+            id: source.id,
+            driver,
+            detail: error.detail,
+          }),
+        ),
+        Effect.orElseSucceed((): ReadonlyMap<string, number> => new Map()),
+      );
+      routed = withPriorities(routed, priorities);
+    }
+    return routed;
+  });
+
   const readSource = Effect.fn("UsageLimitSources.readSource")(function* (
     id: UsageLimitSourceId,
     config: UsageLimitSourceConfig,
@@ -106,6 +190,7 @@ export const make = Effect.gen(function* () {
       label: sourceLabel(id, config),
       ...(url && /^https?:$/.test(url.protocol) ? { origin: url.origin } : {}),
       checkedAt,
+      ...(config.routeByReset?.length ? { routeByReset: config.routeByReset } : {}),
     } as const;
     const managementKey = yield* readManagementKey(config);
     if (managementKey.length === 0) {
@@ -124,7 +209,8 @@ export const make = Effect.gen(function* () {
     }
     const previous = (yield* Ref.get(stateRef)).find((source) => source.id === id)?.accounts;
     const carryFrom = Date.parse(checkedAt) - CARRY_READING_FOR_MS;
-    return {
+    const hub = { url: config.url, managementKey, claudeVersion: yield* Ref.get(claudeVersion) };
+    return yield* routeByReset(hub, {
       ...base,
       accounts: accounts.success.map((account) => {
         const kept =
@@ -149,7 +235,7 @@ export const make = Effect.gen(function* () {
           ...config.accounts?.[account.id],
         };
       }),
-    };
+    });
   });
 
   const publish = Effect.fn("UsageLimitSources.publish")(function* (
@@ -222,17 +308,38 @@ export const make = Effect.gen(function* () {
     const previous = yield* Ref.get(stateRef);
     yield* publish(
       previous.map((source) =>
-        source.id === input.sourceId
-          ? {
-              ...source,
-              accounts: source.accounts.map((account) => {
-                const priority = priorities.get(account.id);
-                return priority === undefined ? account : { ...account, priority };
-              }),
-            }
-          : source,
+        source.id === input.sourceId ? withPriorities(source, priorities) : source,
       ),
     );
+  }, refreshLock.withPermits(1));
+
+  const setRouteByReset = Effect.fn("UsageLimitSources.setRouteByReset")(function* (
+    input: UsageLimitSourceSetRouteByResetInput,
+  ) {
+    const { config, hub } = yield* enabledHub(input.sourceId);
+    const drivers = [
+      ...(config.routeByReset ?? []).filter((driver) => driver !== input.driver),
+      ...(input.enabled ? [input.driver] : []),
+    ];
+    const { routeByReset: _previous, ...rest } = config;
+    yield* settingsService
+      .updateSettings({
+        usageLimitSources: {
+          [input.sourceId]: drivers.length > 0 ? { ...rest, routeByReset: drivers } : rest,
+        },
+      })
+      .pipe(
+        Effect.mapError(
+          () => new UsageLimitSourceError({ detail: "Could not save the hub setting." }),
+        ),
+      );
+    const previous = yield* Ref.get(stateRef);
+    const next = yield* Effect.forEach(previous, (source) => {
+      if (source.id !== input.sourceId) return Effect.succeed(source);
+      const { routeByReset: _shown, ...shown } = source;
+      return routeByReset(hub, drivers.length > 0 ? { ...shown, routeByReset: drivers } : shown);
+    });
+    yield* publish(next);
   }, refreshLock.withPermits(1));
 
   const setAccountDisabled = Effect.fn("UsageLimitSources.setAccountDisabled")(function* (
@@ -326,6 +433,7 @@ export const make = Effect.gen(function* () {
     consumeResetCredit,
     setAccountOrder,
     setAccountDisabled,
+    setRouteByReset,
     claudeCooldownResetAt,
     reportClaudeVersion,
     refresh,

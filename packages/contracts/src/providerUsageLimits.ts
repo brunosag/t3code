@@ -120,6 +120,8 @@ export const UsageLimitSourceSnapshot = Schema.Struct({
   checkedAt: IsoDateTime,
   accounts: ForwardCompatibleArray(UsageLimitSourceAccount),
   error: Schema.optional(TrimmedNonEmptyString),
+  /** Providers the server routes by earliest reset, so their order is not set by hand. */
+  routeByReset: Schema.optional(Schema.Array(ProviderDriverKind)),
 });
 export type UsageLimitSourceSnapshot = typeof UsageLimitSourceSnapshot.Type;
 
@@ -141,6 +143,13 @@ export const UsageLimitSourceSetAccountOrderInput = Schema.Struct({
   accountIds: Schema.Array(TrimmedNonEmptyString),
 });
 export type UsageLimitSourceSetAccountOrderInput = typeof UsageLimitSourceSetAccountOrderInput.Type;
+
+export const UsageLimitSourceSetRouteByResetInput = Schema.Struct({
+  sourceId: UsageLimitSourceId,
+  driver: ProviderDriverKind,
+  enabled: Schema.Boolean,
+});
+export type UsageLimitSourceSetRouteByResetInput = typeof UsageLimitSourceSetRouteByResetInput.Type;
 
 export const UsageLimitSourceSetAccountDisabledInput = Schema.Struct({
   sourceId: UsageLimitSourceId,
