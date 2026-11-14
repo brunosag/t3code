@@ -873,6 +873,7 @@ export const make = Effect.gen(function* () {
           yield* electronUpdater.quitAndInstall({
             isSilent: true,
             isForceRunAfter: true,
+            launcherPath: Option.getOrUndefined(environment.desktopLauncherPath),
           });
           return { accepted: true, completed: false, failed: false };
         }).pipe(

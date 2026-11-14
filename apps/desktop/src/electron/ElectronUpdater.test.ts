@@ -50,7 +50,7 @@ const childProcess = NodeModule.createRequire(import.meta.url)("node:child_proce
 describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
   "ElectronUpdater AppImage install",
   () => {
-    it.live("relaunches the installed AppImage after the updater exits, without its fds", () =>
+    it.live("relaunches through the launcher after the updater exits, without its fds", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -73,11 +73,14 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
         );
         yield* fileSystem.chmod(path.join(binDir, "sleep"), 0o755);
         yield* fileSystem.writeFileString(appImagePath, "old AppImage");
-        yield* fileSystem.writeFileString(
-          stagedPath,
-          `#!/bin/sh\n{ ls /proc/self/fd; kill -0 ${updatingApp.pid} 2>/dev/null && echo updater-alive; } > '${reportPath}'\n`,
-        );
+        yield* fileSystem.writeFileString(stagedPath, "#!/bin/sh\n");
         yield* fileSystem.chmod(stagedPath, 0o755);
+        const launcherPath = path.join(dir, "t3-launcher");
+        yield* fileSystem.writeFileString(
+          launcherPath,
+          `#!/bin/sh\n{ echo launched; ls /proc/self/fd; kill -0 ${updatingApp.pid} 2>/dev/null && echo updater-alive; } > '${reportPath}'\n`,
+        );
+        yield* fileSystem.chmod(launcherPath, 0o755);
 
         const hostEnvironment = yield* HostProcess.Environment;
         yield* Effect.acquireRelease(
@@ -124,10 +127,15 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
         );
 
         const electronUpdater = yield* ElectronUpdater.ElectronUpdater;
-        yield* electronUpdater.quitAndInstall({ isSilent: true, isForceRunAfter: true });
+        yield* electronUpdater.quitAndInstall({
+          isSilent: true,
+          isForceRunAfter: true,
+          launcherPath,
+        });
         const report = yield* Effect.forkScoped(fileSystem.readFileString(reportPath));
 
         const lines = (yield* Fiber.join(report)).trim().split("\n");
+        assert.include(lines, "launched", "relaunch bypassed T3CODE_DESKTOP_LAUNCHER_PATH");
         assert.notInclude(
           lines,
           "updater-alive",

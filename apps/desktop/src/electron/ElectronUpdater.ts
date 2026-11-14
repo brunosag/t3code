@@ -16,14 +16,20 @@ type SpawnLog = (cmd: string, args?: Array<string>, ...rest: Array<unknown>) => 
 const CLOSE_INHERITED_FDS_THEN_EXEC =
   'for fd in /proc/self/fd/*; do fd=${fd##*/}; case $fd in *[!0-9]*|[012]) ;; *) eval "exec $fd>&-" ;; esac; done; while kill -0 "$1" 2>/dev/null; do sleep 0.1; done; shift; exec "$@"';
 
-const relaunchWithoutInheritedDescriptors = (updater: AppImageUpdater) => {
+const relaunchWithoutInheritedDescriptors = (
+  updater: AppImageUpdater,
+  launcherPath: string | undefined,
+) => {
   const spawnLog = (AppImageUpdater.prototype as unknown as { spawnLog: SpawnLog }).spawnLog;
   (updater as unknown as { spawnLog: SpawnLog }).spawnLog = function (cmd, args = [], ...rest) {
+    // The launcher starts the old path, so a renamed AppImage relaunches directly.
+    const env = rest[0] as NodeJS.ProcessEnv | undefined;
+    const target = launcherPath !== undefined && cmd === env?.APPIMAGE ? launcherPath : cmd;
     return spawnLog.call(
       this,
       "bash",
       // Waits for this pid: appimage-run's bwrap dies with its parent, which holds the app's lock.
-      ["-p", "-c", CLOSE_INHERITED_FDS_THEN_EXEC, cmd, String(process.pid), cmd, ...args],
+      ["-p", "-c", CLOSE_INHERITED_FDS_THEN_EXEC, target, String(process.pid), target, ...args],
       ...rest,
     );
   };
@@ -93,6 +99,8 @@ export class ElectronUpdater extends Context.Service<
     readonly quitAndInstall: (options: {
       readonly isSilent: boolean;
       readonly isForceRunAfter: boolean;
+      /** Relaunches an AppImage through this command instead (`T3CODE_DESKTOP_LAUNCHER_PATH`). */
+      readonly launcherPath?: string | undefined;
     }) => Effect.Effect<void, ElectronUpdaterQuitAndInstallError>;
     readonly on: <Args extends ReadonlyArray<unknown>>(
       eventName: string,
@@ -171,10 +179,13 @@ export const make = ElectronUpdater.of({
   quitAndInstall: Effect.fn("ElectronUpdater.quitAndInstall")(function ({
     isSilent,
     isForceRunAfter,
+    launcherPath,
   }) {
     return Effect.suspend(() => {
       const channel = autoUpdater.channel;
-      if (autoUpdater instanceof AppImageUpdater) relaunchWithoutInheritedDescriptors(autoUpdater);
+      if (autoUpdater instanceof AppImageUpdater) {
+        relaunchWithoutInheritedDescriptors(autoUpdater, launcherPath);
+      }
       return Effect.try({
         try: () => autoUpdater.quitAndInstall(isSilent, isForceRunAfter),
         catch: (cause) =>
