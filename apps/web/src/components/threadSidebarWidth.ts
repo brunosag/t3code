@@ -22,13 +22,7 @@ export function clampThreadSidebarWidth(
   return Math.min(maximumWidth, Math.max(minimumWidth, width));
 }
 
-export function resolveInitialThreadSidebarWidth(
-  storedWidth: number | null,
-  viewportWidth: number,
-): number {
-  const preferredWidth =
-    storedWidth === null
-      ? THREAD_SIDEBAR_DEFAULT_WIDTH
-      : Math.max(THREAD_SIDEBAR_MIN_WIDTH, storedWidth);
-  return Math.min(preferredWidth, resolveThreadSidebarMaximumWidth(viewportWidth));
+// Render clamps to the viewport; clamping here would bake a small startup window into the width.
+export function resolveInitialThreadSidebarWidth(storedWidth: number | null): number {
+  return storedWidth ?? THREAD_SIDEBAR_DEFAULT_WIDTH;
 }
