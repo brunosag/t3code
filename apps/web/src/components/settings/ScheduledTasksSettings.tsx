@@ -1191,6 +1191,16 @@ const THREAD_MODE_LABELS: Record<ScheduledTaskThreadMode, string> = {
   fresh_session: "One thread, fresh session each run",
 };
 
+function useScheduledTaskThread(environmentId: EnvironmentId, threadId: ThreadId | null) {
+  const ref = threadId === null ? null : scopeThreadRef(environmentId, threadId);
+  const shell = useThreadShell(ref);
+  // The shell can omit older settled threads; their family read still carries the row.
+  const family = useEnvironmentQuery(
+    ref !== null && shell === null ? threadFamilies.familyAtom(environmentId, ref.threadId) : null,
+  );
+  return shell ?? family.data?.threads.find((row) => row.id === threadId) ?? null;
+}
+
 function ScheduledTaskDestination({
   environmentId,
   projectId,
@@ -1212,12 +1222,7 @@ function ScheduledTaskDestination({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const ref = threadId === null ? null : scopeThreadRef(environmentId, threadId);
-  const shell = useThreadShell(ref);
-  // The shell can omit older settled threads; their family read still carries the title.
-  const family = useEnvironmentQuery(
-    ref !== null && shell === null ? threadFamilies.familyAtom(environmentId, ref.threadId) : null,
-  );
-  const thread = shell ?? family.data?.threads.find((row) => row.id === threadId);
+  const thread = useScheduledTaskThread(environmentId, threadId);
   const currentLabel =
     ref !== null
       ? thread?.title.trim() || `Thread ${ref.threadId}`
@@ -1435,13 +1440,22 @@ function ScheduledTaskEditorForm({
     (entry) => entry.instanceId === activeInstanceId,
   );
   const modelSelection = scheduledTaskModelSelection(activeSelection, draft.baseModelSelection);
-  // Bound runs use the thread's current model, so the stored one has no effect.
   const boundToThread = draft.threadId !== "" && draft.threadMode !== "new_thread";
+  const boundThread = useScheduledTaskThread(
+    environmentId,
+    boundToThread ? (draft.threadId as ThreadId) : null,
+  );
+  // Bound runs use the thread's current model, so the locked picker shows that one.
+  const shownSelection = boundToThread
+    ? (boundThread?.modelSelection ?? null)
+    : { instanceId: activeInstanceId, model: activeModel };
+  const shownInstanceId = shownSelection?.instanceId ?? activeInstanceId;
+  const shownModel = shownSelection?.model ?? "";
   const modelOptionsByInstance = getCustomModelOptionsByInstance(
     settings,
     providers,
-    activeInstanceId,
-    activeModel,
+    shownInstanceId,
+    shownModel,
   );
 
   const reportFailure = (title: string, error: unknown) => {
@@ -1775,49 +1789,48 @@ function ScheduledTaskEditorForm({
             />
           </Field>
 
-          {boundToThread ? null : (
-            <Field label="Model">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <ProviderModelPicker
-                  environmentId={environmentId}
-                  disabled={saving || !connected}
-                  activeInstanceId={activeInstanceId}
+          <Field label="Model">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <ProviderModelPicker
+                environmentId={environmentId}
+                // The saved selection only seeds new threads; bound runs ignore it.
+                disabled={saving || !connected || boundToThread}
+                activeInstanceId={shownInstanceId}
+                model={shownModel}
+                lockedProvider={null}
+                instanceEntries={instanceEntries}
+                modelOptionsByInstance={modelOptionsByInstance}
+                isComposerOwned={false}
+                triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                onInstanceModelChange={(instanceId, model) =>
+                  setDraft((current) => ({ ...current, modelKey: `${instanceId}:${model}` }))
+                }
+              />
+              {!boundToThread && activeInstanceEntry ? (
+                <TraitsPicker
+                  provider={activeInstanceEntry.driverKind}
+                  instanceId={activeInstanceId}
+                  models={activeInstanceEntry.models}
                   model={activeModel}
-                  lockedProvider={null}
-                  instanceEntries={instanceEntries}
-                  modelOptionsByInstance={modelOptionsByInstance}
-                  isComposerOwned={false}
+                  modelOptions={modelSelection?.options ?? []}
+                  allowPromptInjectedEffort={false}
+                  includePlanAgent={selectsPlanAgent(modelSelection?.options)}
+                  disabled={saving || !connected}
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  onInstanceModelChange={(instanceId, model) =>
-                    setDraft((current) => ({ ...current, modelKey: `${instanceId}:${model}` }))
+                  onModelOptionsChange={(options) =>
+                    setDraft((current) => ({
+                      ...current,
+                      baseModelSelection: createModelSelection(
+                        activeInstanceId,
+                        activeModel,
+                        options,
+                      ),
+                    }))
                   }
                 />
-                {activeInstanceEntry ? (
-                  <TraitsPicker
-                    provider={activeInstanceEntry.driverKind}
-                    instanceId={activeInstanceId}
-                    models={activeInstanceEntry.models}
-                    model={activeModel}
-                    modelOptions={modelSelection?.options ?? []}
-                    allowPromptInjectedEffort={false}
-                    includePlanAgent={selectsPlanAgent(modelSelection?.options)}
-                    disabled={saving || !connected}
-                    triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                    onModelOptionsChange={(options) =>
-                      setDraft((current) => ({
-                        ...current,
-                        baseModelSelection: createModelSelection(
-                          activeInstanceId,
-                          activeModel,
-                          options,
-                        ),
-                      }))
-                    }
-                  />
-                ) : null}
-              </div>
-            </Field>
-          )}
+              ) : null}
+            </div>
+          </Field>
 
           <div className="space-y-3">
             {task?.schedule.type === "interval" &&

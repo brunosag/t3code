@@ -210,8 +210,9 @@ const layerElectronTheme = Layer.succeed(ElectronTheme.ElectronTheme, {
 const makeLayerDesktopEnvironment = (
   env: Readonly<Record<string, string | undefined>> = {},
   argv?: ReadonlyArray<string>,
+  platform: NodeJS.Platform = environmentInput.platform,
 ) =>
-  DesktopEnvironment.layer({ ...environmentInput, ...(argv ? { argv } : {}) }).pipe(
+  DesktopEnvironment.layer({ ...environmentInput, platform, ...(argv ? { argv } : {}) }).pipe(
     Layer.provide(
       Layer.mergeAll(
         NodeServices.layer,
@@ -252,6 +253,12 @@ function layerTest(input: {
   readonly previewZoomReapplies?: number[];
   readonly onReveal?: (window: Electron.BrowserWindow) => void;
   readonly focusedWindow?: Electron.BrowserWindow;
+  readonly fallbackWindow?: Electron.BrowserWindow;
+  readonly platform?: NodeJS.Platform;
+  readonly appearanceWindows?: ReadonlyArray<{
+    readonly window: Electron.BrowserWindow;
+    readonly titleBarOverlay: boolean;
+  }>;
   readonly primaryPasteEnabled?: boolean;
   readonly previewPasskeyBridgeEnabled?: boolean;
 }) {
@@ -300,7 +307,9 @@ function layerTest(input: {
         Effect.as(input.window),
       ),
     main: Ref.get(input.mainWindow),
-    currentMainOrFirst: Ref.get(input.mainWindow),
+    currentMainOrFirst: Ref.get(input.mainWindow).pipe(
+      Effect.map(Option.orElse(() => Option.fromNullishOr(input.fallbackWindow ?? null))),
+    ),
     focusedMainOrFirst:
       input.focusedWindow === undefined
         ? Ref.get(input.mainWindow)
@@ -311,7 +320,14 @@ function layerTest(input: {
     reveal: (window) => Effect.sync(() => input.onReveal?.(window)),
     sendAll: () => Effect.void,
     destroyAll: input.destroyAll ?? Effect.void,
-    syncAllAppearance: (sync) => sync(input.window),
+    syncAllAppearance: (sync) =>
+      input.appearanceWindows === undefined
+        ? sync(input.window, { titleBarOverlay: true })
+        : Effect.forEach(
+            input.appearanceWindows,
+            ({ window, titleBarOverlay }) => sync(window, { titleBarOverlay }),
+            { discard: true },
+          ),
   } satisfies ElectronWindow.ElectronWindow["Service"]);
 
   return DesktopWindow.layer.pipe(
@@ -323,8 +339,8 @@ function layerTest(input: {
           recordMetrics: () => Effect.void,
           shutdown: Effect.void,
         }),
-        input.desktopEnv || input.argv
-          ? makeLayerDesktopEnvironment(input.desktopEnv, input.argv)
+        input.desktopEnv || input.argv || input.platform !== undefined
+          ? makeLayerDesktopEnvironment(input.desktopEnv, input.argv, input.platform)
           : layerDesktopEnvironment,
         layerDesktopAppSettings,
         layerDesktopClientSettings,
@@ -434,7 +450,8 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
       reveal: (window) => Ref.update(revealedWindows, (windows) => [...windows, window]),
       sendAll: () => Effect.void,
       destroyAll: Effect.void,
-      syncAllAppearance: (sync) => (fallbackWindow ? sync(fallbackWindow) : Effect.void),
+      syncAllAppearance: (sync) =>
+        fallbackWindow ? sync(fallbackWindow, { titleBarOverlay: true }) : Effect.void,
     } satisfies ElectronWindow.ElectronWindow["Service"];
 
     const layer = DesktopWindow.layer.pipe(
@@ -1002,7 +1019,7 @@ describe("DesktopWindow", () => {
     }),
   );
 
-  it.effect("reloads and inspects the main window even when a popup has focus", () =>
+  it.effect("routes menu commands to the main window even when a popup has focus", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();
       const popup = makeFakeBrowserWindow();
@@ -1022,7 +1039,10 @@ describe("DesktopWindow", () => {
         yield* desktopWindow.runMainContentsCommand("reload");
         yield* desktopWindow.runMainContentsCommand("forceReload");
         yield* desktopWindow.runMainContentsCommand("toggleDevTools");
+        yield* desktopWindow.dispatchMenuAction("open-settings");
 
+        assert.deepEqual(fakeWindow.send.mock.calls, [["desktop:menu-action", "open-settings"]]);
+        assert.equal(popup.send.mock.calls.length, 0);
         assert.equal(fakeWindow.reload.mock.calls.length, 1);
         assert.equal(fakeWindow.reloadIgnoringCache.mock.calls.length, 1);
         assert.equal(fakeWindow.toggleDevTools.mock.calls.length, 1);
@@ -1030,6 +1050,38 @@ describe("DesktopWindow", () => {
         assert.equal(popup.reloadIgnoringCache.mock.calls.length, 0);
         assert.equal(popup.toggleDevTools.mock.calls.length, 0);
       }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("recreates main for Settings when only an unregistered popup survives", () =>
+    Effect.gen(function* () {
+      const main = makeFakeBrowserWindow();
+      const auxiliary = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+
+      yield* Effect.gen(function* () {
+        const windows = yield* DesktopWindow.DesktopWindow;
+        yield* windows.dispatchMenuAction("open-settings");
+        assert.deepEqual(main.send.mock.calls, [["desktop:menu-action", "open-settings"]]);
+        assert.equal(auxiliary.send.mock.calls.length, 0);
+        assert.equal(yield* Ref.get(createCount), 1);
+        assert.strictEqual(yield* windows.ensureMain, main.window);
+        assert.equal(yield* Ref.get(createCount), 1);
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            window: main.window,
+            createCount,
+            mainWindow,
+            fallbackWindow: auxiliary.window,
+            desktopSettings: {
+              ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+              localEnvironmentEnabled: false,
+            },
+          }),
+        ),
+      );
     }),
   );
 
@@ -1343,6 +1395,36 @@ describe("DesktopWindow", () => {
 
         assert.deepEqual(mainWindowBoundsUpdates, [{ x: 180, y: 120, width: 1440, height: 960 }]);
       }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("updates title bar overlays only on windows created with one", () =>
+    Effect.gen(function* () {
+      const framed = makeFakeBrowserWindow();
+      vi.mocked(framed.window.setTitleBarOverlay).mockImplementation(() => {
+        throw new TypeError("Titlebar overlay is not enabled");
+      });
+      const overlay = makeFakeBrowserWindow();
+      const layer = layerTest({
+        window: overlay.window,
+        createCount: yield* Ref.make(0),
+        mainWindow: yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none()),
+        platform: "win32",
+        appearanceWindows: [
+          { window: framed.window, titleBarOverlay: false },
+          { window: overlay.window, titleBarOverlay: true },
+        ],
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.syncAppearance;
+      }).pipe(Effect.provide(layer));
+
+      assert.deepEqual(vi.mocked(framed.window.setBackgroundColor).mock.calls, [["#ffffff"]]);
+      assert.lengthOf(vi.mocked(framed.window.setTitleBarOverlay).mock.calls, 0);
+      assert.deepEqual(vi.mocked(overlay.window.setBackgroundColor).mock.calls, [["#ffffff"]]);
+      assert.lengthOf(vi.mocked(overlay.window.setTitleBarOverlay).mock.calls, 1);
     }),
   );
 

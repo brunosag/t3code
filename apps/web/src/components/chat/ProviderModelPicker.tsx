@@ -447,10 +447,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           };
         }}
         initialFocus={(openType) =>
-          focusesModelPickerSearch(openType)
-            ? searchInputRef.current
-            : // Like Base UI's touch default: blurs the composer so iOS drops its keyboard.
-              searchInputRef.current?.closest<HTMLElement>("[data-slot='popover-popup']")
+          focusesModelPickerSearch(openType) ? searchInputRef.current : popupRef.current
         }
         align={props.popupAlign ?? "start"}
         // Docked, the popup opens above the composer and slides over it when that space is short,
