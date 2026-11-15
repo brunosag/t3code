@@ -15,9 +15,10 @@ import packageJson from "../../package.json" with { type: "json" };
 import { BOOT_SERVICE_UNIT_FILE } from "../cloud/bootService.ts";
 import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import {
-  parseServiceState,
   SERVICE_RESTART_PENDING_FILE,
   SERVICE_STATE_FILE,
+  serviceStateActiveVersion,
+  serviceStateHasPendingUpdate,
 } from "../cloud/serviceProtocol.ts";
 import * as ServerConfig from "../config.ts";
 import { forkParked } from "../serverActivation.ts";
@@ -30,6 +31,24 @@ const CHECK_INTERVAL = Duration.seconds(5);
 const IDLE_GRACE = Duration.seconds(5);
 // Agent work that never pauses still gets the new version eventually.
 const MAX_DEFERRAL = Duration.hours(12);
+
+/**
+ * The installed version a restart would switch to, if any. Reads only the version fields: a newer
+ * installer may write a launcher protocol this runtime cannot decode, and refusing it left a
+ * service on its old version for days.
+ */
+export function pendingRestartVersion(input: {
+  readonly marker: string;
+  readonly state: string;
+  readonly runningVersion: string;
+}): string | undefined {
+  const version = input.marker.trim();
+  return version !== input.runningVersion &&
+    serviceStateActiveVersion(input.state) === version &&
+    !serviceStateHasPendingUpdate(input.state)
+    ? version
+    : undefined;
+}
 
 /**
  * Runs `restart` once a pending version exists and agent work has been idle for
@@ -94,13 +113,11 @@ export const layer = Layer.effectDiscard(
         .readFileString(path.join(runtimeDir, SERVICE_STATE_FILE))
         .pipe(Effect.option);
       if (Option.isNone(marker) || Option.isNone(state)) return undefined;
-      const version = marker.value.trim();
-      const selected = parseServiceState(state.value);
-      return version !== packageJson.version &&
-        selected?.activeVersion === version &&
-        selected.update?.status !== "pending"
-        ? version
-        : undefined;
+      return pendingRestartVersion({
+        marker: marker.value,
+        state: state.value,
+        runningVersion: packageJson.version,
+      });
     });
 
     // The unit names the launcher of the version it starts, so reload before restarting.

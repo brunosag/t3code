@@ -99,6 +99,15 @@ type RoutingReorder = {
   readonly onReorder: (activeKey: string, overKey: string) => void;
 };
 
+function accountName(account: LimitAccount) {
+  return (
+    account.displayName ??
+    account.email ??
+    providerClients.get(account.driver)?.label ??
+    String(account.driver)
+  );
+}
+
 function AccountName({
   account,
   className,
@@ -106,14 +115,10 @@ function AccountName({
   readonly account: LimitAccount;
   readonly className?: string;
 }) {
-  const name =
-    account.displayName ??
-    (account.email ? null : (providerClients.get(account.driver)?.label ?? String(account.driver)));
-  if (!account.image && name) return <span className={className}>{name}</span>;
   return (
     <span className={cn("inline-flex min-w-0 items-center gap-1.5", className)}>
       <AccountChip email={account.email} image={account.image} />
-      {name ? <span className="min-w-0 truncate">{name}</span> : null}
+      <span className="min-w-0 truncate">{accountName(account)}</span>
     </span>
   );
 }
@@ -217,11 +222,7 @@ function AccountRow({
     transition,
     isDragging,
   } = useSortable({ id: account.key, disabled: grip !== "handle" });
-  const name =
-    account.displayName ??
-    account.email ??
-    providerClients.get(account.driver)?.label ??
-    String(account.driver);
+  const name = accountName(account);
   const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
   return (
     <div
@@ -333,19 +334,27 @@ function ResetCreditRows({ pool, now }: { readonly pool: LimitPool; readonly now
       : [],
   );
   if (banked.length === 0) return null;
+  // One grid across accounts, so names, summaries and buttons each line up in a column.
   return (
     <div className="flex flex-col gap-2 px-1">
-      {banked.map(({ account, redeem, credits }) => (
-        <div key={account.key} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <AccountName account={account} className="text-xs font-medium text-foreground" />
-          <ResetCredits
-            environmentId={redeem.environmentId}
-            input={redeem.input}
-            credits={credits}
-            now={now}
-          />
-        </div>
-      ))}
+      <h3 className="text-xs font-medium text-muted-foreground">Banked resets</h3>
+      <div className="grid w-fit max-w-full grid-cols-[minmax(0,max-content)_minmax(0,max-content)_auto] gap-x-4 gap-y-2.5">
+        {banked.map(({ account, redeem, credits }) => (
+          <div key={account.key} className="col-span-3 grid grid-cols-subgrid items-start">
+            <AccountName
+              account={account}
+              className="min-h-7 text-xs font-medium text-foreground sm:min-h-6"
+            />
+            <ResetCredits
+              environmentId={redeem.environmentId}
+              input={redeem.input}
+              credits={credits}
+              now={now}
+              className="col-span-2 grid-cols-subgrid"
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -463,8 +472,10 @@ function PoolActions({
                       closeOnClick={false}
                       onCheckedChange={onToggle}
                     >
-                      <AccountChip email={login.email} image={login.image} />
-                      <span className="min-w-0 truncate">{login.name ?? login.email}</span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        <AccountChip email={login.email} image={login.image} />
+                        <span className="min-w-0 truncate">{login.name ?? login.email}</span>
+                      </span>
                     </MenuCheckboxItem>
                   ))}
                 </MenuGroup>
@@ -673,7 +684,7 @@ export function UsageLimitsPooled({
     "Change hub account",
   );
   const hubsFor = (pool: LimitPool) => {
-    const hubs = new Map<string, { label: string; logins: HubLogin[] }>();
+    const hubs = new Map<string, { label: string; name: string; logins: HubLogin[] }>();
     for (const login of hubLogins) {
       if (
         login.driver !== pool.driver ||
@@ -681,11 +692,34 @@ export function UsageLimitsPooled({
       )
         continue;
       const key = `${login.environmentId}:${login.sourceId}`;
-      const hub = hubs.get(key) ?? { label: login.hubLabel, logins: [] };
+      const hub = hubs.get(key) ?? { label: login.hubLabel, name: login.hubName, logins: [] };
       hub.logins.push(login);
       hubs.set(key, hub);
     }
-    return [...hubs.values()].map((hub) => ({
+    // Machines reading the same hub report the same login files, so it is listed once.
+    const loginFiles = (logins: readonly HubLogin[]) =>
+      logins
+        .map((login) => login.accountId)
+        .toSorted()
+        .join("\n");
+    const listed: { label: string; name: string; logins: HubLogin[] }[] = [];
+    for (const hub of hubs.values()) {
+      const same = listed.find((seen) => loginFiles(seen.logins) === loginFiles(hub.logins));
+      if (!same) {
+        listed.push({ ...hub });
+        continue;
+      }
+      if (same.name === hub.name) same.label = hub.name;
+      same.logins = same.logins.map((login) => {
+        const other = hub.logins.find((candidate) => candidate.accountId === login.accountId);
+        return {
+          ...login,
+          name: login.name ?? other?.name ?? null,
+          image: login.image ?? other?.image,
+        };
+      });
+    }
+    return listed.map((hub) => ({
       label: hub.label,
       logins: hub.logins.map((login) => ({
         login,

@@ -68,4 +68,24 @@ describe("IdleRestart", () => {
       expect(yield* service.restarts).toBe(0);
     }).pipe(Effect.scoped),
   );
+
+  it("reads the pending version from any launcher protocol", () => {
+    const pending = (state: object, marker = "2.0.0\n") =>
+      IdleRestart.pendingRestartVersion({
+        marker,
+        state: JSON.stringify(state),
+        runningVersion: "1.0.0",
+      });
+    expect(pending({ protocol: 3, activeVersion: "2.0.0" })).toBe("2.0.0");
+    expect(pending({ protocol: 99, activeVersion: "2.0.0" })).toBe("2.0.0");
+    expect(pending({ protocol: 4, activeVersion: "1.0.0" }, "1.0.0")).toBeUndefined();
+    expect(pending({ protocol: 4, activeVersion: "3.0.0" })).toBeUndefined();
+    expect(
+      pending({
+        protocol: 4,
+        activeVersion: "2.0.0",
+        update: { status: "pending", fromVersion: "2.0.0", targetVersion: "3.0.0" },
+      }),
+    ).toBeUndefined();
+  });
 });

@@ -332,19 +332,27 @@ export function ResetCredits({
   input,
   credits,
   now,
+  className,
 }: {
   readonly environmentId: EnvironmentId;
   readonly input: ProviderConsumeResetCreditInput;
   readonly credits: ServerProviderResetCredits;
   readonly now: number;
+  /** Lets a caller line several accounts' credits up, e.g. with `grid-cols-subgrid`. */
+  readonly className?: string;
 }) {
   const { canManageProviders, choice, confirming, setConfirming, confirm, busy, status, redeem } =
     useResetCredit(environmentId);
   if (credits.availableCount === 0 && status === null) return null;
   return (
-    <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+    <div
+      className={cn(
+        "grid grid-cols-[minmax(0,auto)_auto] items-center justify-start justify-items-start gap-x-3 gap-y-1 text-xs text-muted-foreground",
+        className,
+      )}
+    >
       {resetCreditChoices(credits, input, now).map((choice) => (
-        <div key={choice.key} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <Fragment key={choice.key}>
           <span className="tabular-nums">{choice.summary}</span>
           {choice.availableCount > 0 ? (
             <Button
@@ -355,10 +363,12 @@ export function ResetCredits({
             >
               {busy ? "Using…" : choice.actionLabel}
             </Button>
-          ) : null}
-        </div>
+          ) : (
+            <span />
+          )}
+        </Fragment>
       ))}
-      {status ? <span className="text-foreground">{status}</span> : null}
+      {status ? <span className="col-span-full text-foreground">{status}</span> : null}
       <ResetCreditDialog
         open={confirming}
         onOpenChange={setConfirming}

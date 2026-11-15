@@ -526,6 +526,8 @@ export interface HubLogin {
   readonly email: string | undefined;
   readonly image: string | undefined;
   readonly hubLabel: string;
+  /** The hub's own name, without the machine that reads it. */
+  readonly hubName: string;
   readonly disabled: boolean;
   readonly environmentId: EnvironmentId;
   readonly sourceId: UsageLimitSourceId;
@@ -545,6 +547,7 @@ export function collectHubLogins(presentations: LimitPresentations): readonly Hu
         hubLabel: labelEnvironment
           ? `${presentation.entry.target.label} · ${source.label}`
           : source.label,
+        hubName: source.label,
         disabled: account.disabled === true,
         environmentId,
         sourceId: source.id,
