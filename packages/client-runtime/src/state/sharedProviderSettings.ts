@@ -90,6 +90,25 @@ function shareUsageLimitSource(
 }
 
 /**
+ * A hub's shared fields as two machines agree on them: `preferred` wins where both set a value,
+ * and a login profile (name, picture) only one of them has is kept.
+ */
+function mergeUsageLimitSource(
+  preferred: UsageLimitSourceConfig,
+  other: UsageLimitSourceConfig,
+): UsageLimitSourceConfig {
+  const accounts = { ...other.accounts };
+  for (const [id, profile] of Object.entries(preferred.accounts ?? {})) {
+    accounts[id] = { ...accounts[id], ...profile };
+  }
+  return {
+    ...preferred,
+    ...(preferred.label === undefined && other.label !== undefined ? { label: other.label } : {}),
+    ...(Object.keys(accounts).length > 0 ? { accounts } : {}),
+  };
+}
+
+/**
  * The provider and hub part of a settings patch, rewritten for another machine. A hub's address
  * and key stay the target's own; a hub new on the source is copied whole.
  */
@@ -151,7 +170,7 @@ export function providerSettingsSync(
   for (const [id, sourceHub] of Object.entries(source.usageLimitSources)) {
     const targetHub = target.usageLimitSources[id as keyof typeof target.usageLimitSources];
     if (targetHub === undefined) continue;
-    const next = shareUsageLimitSource(sourceHub, targetHub);
+    const next = shareUsageLimitSource(mergeUsageLimitSource(sourceHub, targetHub), targetHub);
     if (!Equal.equals(next, targetHub)) sources[id] = next;
   }
   if (Object.keys(sources).length > 0) {
@@ -176,6 +195,23 @@ export function providerSettingsSync(
     }
   }
   return { mutations, patch };
+}
+
+/** Hub login profiles only the target has, brought back to the source so both end up equal. */
+export function providerSettingsBackfill(
+  source: ServerSettings,
+  target: ServerSettings,
+): ServerSettingsPatch {
+  const sources: Record<string, UsageLimitSourceConfig> = {};
+  for (const [id, sourceHub] of Object.entries(source.usageLimitSources)) {
+    const targetHub = target.usageLimitSources[id as keyof typeof target.usageLimitSources];
+    if (targetHub === undefined) continue;
+    const next = mergeUsageLimitSource(sourceHub, targetHub);
+    if (!Equal.equals(next, sourceHub)) sources[id] = next;
+  }
+  return Object.keys(sources).length > 0
+    ? { usageLimitSources: sources as NonNullable<ServerSettingsPatch["usageLimitSources"]> }
+    : {};
 }
 
 export const providerSettingsInSync = ({ mutations, patch }: ProviderSettingsSync) =>

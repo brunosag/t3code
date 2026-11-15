@@ -1,4 +1,4 @@
-import { useRef, useSyncExternalStore, use } from "react";
+import { useEffect, useEffectEvent, useRef, useSyncExternalStore, use } from "react";
 import { useSyncExternalStoreWithSelector } from "use-sync-external-store/with-selector";
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
@@ -32,6 +32,7 @@ import {
   supportsSharedSettingsSync,
 } from "@t3tools/client-runtime/state/shared-settings";
 import {
+  providerSettingsBackfill,
   providerSettingsInSync,
   providerSettingsSync,
   shareProviderInstanceMutation,
@@ -640,51 +641,113 @@ function useShareProviderWrite(environmentId: EnvironmentId | null) {
   };
 }
 
-/** Connected machines whose shared provider settings differ from this one's, and the copy there. */
-export function useProviderSettingsSync(environmentId: EnvironmentId) {
+const PROVIDER_SETTINGS_SETTLE_MS = 5_000;
+
+/**
+ * Keeps provider and hub settings equal on every connected machine. This device's own machine
+ * wins where both set a value; hub login profiles only one machine has reach the others.
+ */
+export function useProviderSettingsAutoSync() {
   const { environments } = useEnvironments();
+  const primaryId = usePrimaryEnvironment()?.environmentId ?? null;
   const targetIds = useSharedSettingsSyncTargetIds();
   const persist = useAtomCommand(serverEnvironment.updateSettings, {
-    label: "provider settings copy",
+    label: "provider settings sync",
     reportFailure: false,
   });
-  const source = environments.find((candidate) => candidate.environmentId === environmentId)
-    ?.serverConfig?.settings;
-  const targets = targetIds.flatMap((targetId) => {
-    const target = environments.find((candidate) => candidate.environmentId === targetId);
-    const settings = target?.serverConfig?.settings;
-    if (!source || !target || !settings || targetId === environmentId) return [];
-    if (!readEnvironmentScope(targetId, AuthProvidersManageScope)) return [];
-    const sync = providerSettingsSync(source, settings);
-    return providerSettingsInSync(sync)
-      ? []
-      : [{ environmentId: targetId, label: target.label, sync }];
-  });
-  const copy = async () => {
-    for (const target of targets) {
-      const writes = [
-        ...target.sync.mutations.map((providerInstanceMutation) => ({
-          patch: {},
-          providerInstanceMutation,
-        })),
-        ...(Object.keys(target.sync.patch).length > 0 ? [{ patch: target.sync.patch }] : []),
-      ];
-      for (const input of writes) {
-        const result = await persist({ environmentId: target.environmentId, input });
-        if (result._tag === "Success") continue;
-        if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
-          toastManager.add({
-            type: "error",
-            title: `Not copied to ${target.label}`,
-            description: error instanceof Error ? error.message : "The save failed.",
-          });
-        }
-        break;
-      }
+  // Last writes sent per machine, so one in flight or failed is not sent again.
+  const sent = useRef(new Map<EnvironmentId, string>());
+  const settingsOf = (environmentId: EnvironmentId) =>
+    environments.find((candidate) => candidate.environmentId === environmentId)?.serverConfig
+      ?.settings;
+  const source = primaryId && targetIds.includes(primaryId) ? settingsOf(primaryId) : undefined;
+  const writes: {
+    environmentId: EnvironmentId;
+    inputs: { patch: ServerSettingsPatch; providerInstanceMutation?: ProviderInstanceMutation }[];
+  }[] = [];
+  if (primaryId && source) {
+    const targets = targetIds.flatMap((targetId) => {
+      const settings = settingsOf(targetId);
+      return targetId !== primaryId &&
+        settings &&
+        readEnvironmentScope(targetId, AuthProvidersManageScope)
+        ? [{ targetId, settings }]
+        : [];
+    });
+    const hubs = { ...source.usageLimitSources };
+    for (const { settings } of targets) {
+      Object.assign(
+        hubs,
+        providerSettingsBackfill({ ...source, usageLimitSources: hubs }, settings)
+          .usageLimitSources,
+      );
     }
-  };
-  return { targets, copy };
+    const merged: ServerSettings = { ...source, usageLimitSources: hubs };
+    const backfill = providerSettingsBackfill(source, merged);
+    if (
+      Object.keys(backfill).length > 0 &&
+      requiredScopesForServerSettingsPatch(backfill).every((scope) =>
+        readEnvironmentScope(primaryId, scope),
+      )
+    ) {
+      writes.push({ environmentId: primaryId, inputs: [{ patch: backfill }] });
+    }
+    for (const { targetId, settings } of targets) {
+      const sync = providerSettingsSync(merged, settings);
+      if (providerSettingsInSync(sync)) continue;
+      writes.push({
+        environmentId: targetId,
+        inputs: [
+          ...sync.mutations.map((providerInstanceMutation) => ({
+            patch: {},
+            providerInstanceMutation,
+          })),
+          ...(Object.keys(sync.patch).length > 0 ? [{ patch: sync.patch }] : []),
+        ],
+      });
+    }
+  }
+  const send = useEffectEvent(() => {
+    const unsynced = new Set(writes.map((write) => write.environmentId));
+    for (const environmentId of sent.current.keys()) {
+      if (!unsynced.has(environmentId)) sent.current.delete(environmentId);
+    }
+    for (const { environmentId, inputs } of writes) {
+      const signature = JSON.stringify(inputs);
+      if (sent.current.get(environmentId) === signature) continue;
+      sent.current.set(environmentId, signature);
+      void (async () => {
+        for (const input of inputs) {
+          const result = await persist({ environmentId, input });
+          if (result._tag === "Success") continue;
+          if (!isAtomCommandInterrupted(result)) {
+            const label =
+              environments.find((candidate) => candidate.environmentId === environmentId)?.label ??
+              environmentId;
+            const error = squashAtomCommandFailure(result);
+            toastManager.add({
+              type: "error",
+              title: `Provider settings not shared with ${label}`,
+              description: error instanceof Error ? error.message : "The save failed.",
+            });
+          }
+          return;
+        }
+      })();
+    }
+  });
+  const pending = writes.length > 0 ? JSON.stringify(writes) : null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- writes other machines' server settings
+  useEffect(() => {
+    if (pending === null) {
+      sent.current.clear();
+      return;
+    }
+    // An edit reaches each machine separately; waiting lets a removal land everywhere before a
+    // machine that still has the old value is read as the one to copy from.
+    const timer = setTimeout(send, PROVIDER_SETTINGS_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [pending]);
 }
 
 export function usePrimarySettings<T = UnifiedSettings>(

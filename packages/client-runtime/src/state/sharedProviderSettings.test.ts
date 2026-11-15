@@ -8,6 +8,7 @@ import {
 import { describe, expect, it } from "@effect/vitest";
 
 import {
+  providerSettingsBackfill,
   providerSettingsInSync,
   providerSettingsSync,
   shareProviderInstanceMutation,
@@ -189,5 +190,41 @@ describe("providerSettingsSync", () => {
         ],
       },
     });
+  });
+
+  it("merges hub login profiles from both machines, the source's winning where both have one", () => {
+    const hubOf = (settings: ServerSettings) => settings.usageLimitSources[hub]!;
+    const source = machine("a", {
+      usageLimitSources: {
+        [hub]: {
+          ...hubOf(laptop),
+          accounts: { "team.json": { name: "Team" }, "me.json": { name: "Personal" } },
+        },
+      },
+    });
+    const target = machine("b", {
+      usageLimitSources: {
+        [hub]: {
+          ...hubOf(vps),
+          label: "Claude Pool",
+          accounts: {
+            "me.json": { name: "Me", image: "data:me" },
+            "isa.json": { name: "Isabela" },
+          },
+        },
+      },
+    });
+    const accounts = {
+      "me.json": { name: "Personal", image: "data:me" },
+      "isa.json": { name: "Isabela" },
+      "team.json": { name: "Team" },
+    };
+    expect(providerSettingsSync(source, target).patch.usageLimitSources).toEqual({
+      [hub]: { ...hubOf(target), label: "Pool", accounts },
+    });
+    expect(providerSettingsBackfill(source, target)).toEqual({
+      usageLimitSources: { [hub]: { ...hubOf(source), accounts } },
+    });
+    expect(providerSettingsBackfill(laptop, vps)).toEqual({});
   });
 });
