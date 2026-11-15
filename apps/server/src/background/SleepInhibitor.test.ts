@@ -1,6 +1,7 @@
 import {
   type OrchestrationV2DomainEvent,
   type OrchestrationV2PendingBackgroundTask,
+  ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
@@ -203,6 +204,37 @@ describe("SleepInhibitor", () => {
         holdLock: holdLock(log),
       });
       expect(log).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("reports the provider instances of active threads when they change", () =>
+    Effect.gen(function* () {
+      const reports: Array<Array<string>> = [];
+      const onShell = (id: string, active: boolean, instance: string) => ({
+        ...shell(id, active),
+        providerInstanceId: ProviderInstanceId.make(instance),
+      });
+      const states = [
+        onShell("b", true, "claude"),
+        onShell("a", true, "codex"),
+        onShell("a", false, "codex"),
+        onShell("b", false, "claude"),
+      ];
+      yield* SleepInhibitor.run({
+        initialThreads: [onShell("a", true, "codex")],
+        events: Stream.make(
+          event("run.created", "b"),
+          event("run.updated", "a"),
+          event("run.updated", "a"),
+          event("run.updated", "b"),
+        ),
+        getThreadShell: () => Effect.sync(() => states.shift()!),
+        holdLock: holdLock([]),
+        onActiveInstances: (instanceIds) =>
+          Effect.sync(() => reports.push([...instanceIds].sort())),
+      });
+      // An unchanged set, like the second "a" running update, is not reported again.
+      expect(reports).toEqual([["codex"], ["claude", "codex"], ["claude"], []]);
     }).pipe(Effect.scoped),
   );
 

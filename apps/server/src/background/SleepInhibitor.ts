@@ -3,6 +3,7 @@
 import type {
   OrchestrationV2DomainEvent,
   OrchestrationV2ThreadShell,
+  ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -35,7 +36,13 @@ const SYSTEMD_INHIBIT_ARGS = [
 type ThreadActivity = Pick<
   OrchestrationV2ThreadShell,
   "id" | "activityRunStatus" | "pendingBackgroundTasks"
->;
+> &
+  Partial<Pick<OrchestrationV2ThreadShell, "providerInstanceId">>;
+
+/** Receives the provider instances of active threads whenever that set changes. */
+type ActiveInstancesListener = (
+  instanceIds: ReadonlySet<ProviderInstanceId>,
+) => Effect.Effect<void>;
 
 const isThreadActive = (thread: ThreadActivity | null) =>
   thread?.activityRunStatus != null ||
@@ -52,20 +59,33 @@ export const run = Effect.fn("SleepInhibitor.run")(function* <E>(input: {
   readonly events: Stream.Stream<OrchestrationV2DomainEvent, E>;
   readonly getThreadShell: (threadId: ThreadId) => Effect.Effect<ThreadActivity | null>;
   readonly holdLock: Effect.Effect<void, never, Scope.Scope>;
+  readonly onActiveInstances?: ActiveInstancesListener;
 }) {
-  const activeThreadIds = new Set(
+  const activeThreads = new Map(
     Array.from(input.initialThreads)
       .filter(isThreadActive)
-      .map((thread) => thread.id),
+      .map((thread) => [thread.id, thread.providerInstanceId] as const),
   );
   let lock: Fiber.Fiber<void> | null = null;
+  let reportedInstances: string | null = null;
 
   const sync = Effect.gen(function* () {
-    if (activeThreadIds.size > 0 && lock === null) {
+    if (input.onActiveInstances !== undefined) {
+      const instances = new Set<ProviderInstanceId>();
+      for (const instanceId of activeThreads.values()) {
+        if (instanceId !== undefined) instances.add(instanceId);
+      }
+      const key = [...instances].sort().join("\n");
+      if (key !== reportedInstances) {
+        reportedInstances = key;
+        yield* input.onActiveInstances(instances);
+      }
+    }
+    if (activeThreads.size > 0 && lock === null) {
       lock = yield* Effect.forkScoped(Effect.scoped(input.holdLock), {
         startImmediately: true,
       });
-    } else if (activeThreadIds.size === 0 && lock !== null) {
+    } else if (activeThreads.size === 0 && lock !== null) {
       yield* Fiber.interrupt(lock);
       lock = null;
     }
@@ -87,10 +107,11 @@ export const run = Effect.fn("SleepInhibitor.run")(function* <E>(input: {
         default:
           return;
       }
-      if (isThreadActive(yield* input.getThreadShell(event.threadId))) {
-        activeThreadIds.add(event.threadId);
+      const thread = yield* input.getThreadShell(event.threadId);
+      if (thread !== null && isThreadActive(thread)) {
+        activeThreads.set(event.threadId, thread.providerInstanceId);
       } else {
-        activeThreadIds.delete(event.threadId);
+        activeThreads.delete(event.threadId);
       }
       yield* sync;
     }),
@@ -118,6 +139,7 @@ const holdSystemdInhibitLock = Effect.gen(function* () {
 export const watchAgentWork = Effect.fn("SleepInhibitor.watchAgentWork")(function* (
   name: string,
   holdLock: Effect.Effect<void, never, Scope.Scope>,
+  onActiveInstances?: ActiveInstancesListener,
 ) {
   const threads = yield* ThreadManagement.ThreadManagementService;
   yield* forkParked(
@@ -132,6 +154,7 @@ export const watchAgentWork = Effect.fn("SleepInhibitor.watchAgentWork")(functio
         getThreadShell: (threadId) =>
           threads.getThreadShell(threadId).pipe(Effect.orElseSucceed(() => null)),
         holdLock,
+        ...(onActiveInstances === undefined ? {} : { onActiveInstances }),
       });
     }).pipe(
       // The lock lives in this scope, so it drops if the event stream fails.

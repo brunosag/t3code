@@ -172,7 +172,16 @@ Configure npm on the server's machine. If that registry cannot be reached, the
 release shows as unavailable; T3 Code does not try the public registry instead.
 Machines without npm check the public npm registry directly.
 
+The desktop app downloads a new release as soon as it finds one, so updating
+only needs a restart. A release that did not apply on an earlier restart waits
+for you to download it again.
+
 ## Update providers
+
+Each server installs a provider's new release by itself once none of that
+provider's threads is working. A failed automatic update is not retried until a
+newer release appears or the server restarts. Turning off provider update checks in
+**Settings → Maintenance** also stops automatic provider updates.
 
 **Settings → Providers** shows provider updates for the selected environment.
 **Update all** updates every outdated provider on every connected environment

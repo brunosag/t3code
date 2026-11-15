@@ -128,7 +128,7 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(harness.layer));
   });
 
-  it.effect("re-checks an offered update without announcing it again", () => {
+  it.effect("downloads an offered update once a check finishes, and re-checks it quietly", () => {
     const harness = makeHarness();
 
     return Effect.scoped(
@@ -143,10 +143,12 @@ describe("DesktopUpdates", () => {
         yield* flushCallbacks;
         const offeredStates = harness.sentStates.length;
 
+        assert.equal(harness.downloadCount(), 0);
         yield* updates.check("poll");
-        harness.emit("update-available", { version: "1.2.4" });
         yield* flushCallbacks;
-        assert.equal(harness.sentStates.length, offeredStates);
+        assert.equal(harness.downloadCount(), 1);
+        assert.equal((yield* updates.getState).status, "downloading");
+        assert.isAbove(harness.sentStates.length, offeredStates);
 
         harness.emit("update-downloaded", { version: "1.2.4" });
         yield* flushCallbacks;
@@ -280,9 +282,10 @@ describe("DesktopUpdates", () => {
   });
 
   it.effect.each([
-    { action: "download", offer: "update-available", found: null, accepted: true },
+    // The automatic download can take the updater first, so a waiting download may be refused.
+    { action: "download", offer: "update-available", found: null, accepted: null },
     { action: "install", offer: "update-downloaded", found: null, accepted: true },
-    { action: "download", offer: "update-available", found: "1.2.5", accepted: true },
+    { action: "download", offer: "update-available", found: "1.2.5", accepted: null },
     { action: "install", offer: "update-downloaded", found: "1.2.5", accepted: false },
   ] as const)(
     "a $action waiting out a refresh check acts on what it found ($found)",
@@ -316,7 +319,8 @@ describe("DesktopUpdates", () => {
 
             yield* Deferred.succeed(releaseCheck, undefined);
             assert.isTrue((yield* Fiber.join(checkFiber)).checked);
-            assert.equal((yield* Fiber.join(actionFiber)).accepted, accepted);
+            const result = yield* Fiber.join(actionFiber);
+            if (accepted !== null) assert.equal(result.accepted, accepted);
             const state = yield* updates.getState;
             assert.equal(state.availableVersion, found ?? "1.2.4");
             if (action === "download") assert.equal(state.status, "downloading");
@@ -634,9 +638,13 @@ describe("DesktopUpdates", () => {
 
         harness.emit("update-available", { version: "1.2.4" });
         yield* flushCallbacks;
+        yield* updates.check("poll");
+        yield* flushCallbacks;
         const state = yield* updates.getState;
         assert.equal(state.status, "available");
         assert.equal(state.notAppliedVersion, "1.2.4");
+        // Retrying a release that did not apply is left to the user.
+        assert.equal(harness.downloadCount(), 0);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

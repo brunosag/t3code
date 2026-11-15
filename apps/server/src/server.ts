@@ -30,6 +30,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as HostPowerMonitor from "./background/HostPowerMonitor.ts";
 import * as IdleRestart from "./background/IdleRestart.ts";
+import * as ProviderAutoUpdate from "./provider/ProviderAutoUpdate.ts";
 import * as NonBlockingSpawner from "./process/NonBlockingSpawner.ts";
 import * as KeepAwake from "./background/KeepAwake.ts";
 import * as SleepInhibitor from "./background/SleepInhibitor.ts";
@@ -723,6 +724,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ProviderInstallation.layer,
   ReplayMarkers.layer,
   SleepInhibitor.layer,
+  ProviderAutoUpdate.layer,
   IdleRestart.layer.pipe(Layer.provide(ProcessRunner.layer)),
   // Catches overrides left behind by a project deleted before this cleanup
   // existed, or by a cleanup write that failed. See ProjectService.delete

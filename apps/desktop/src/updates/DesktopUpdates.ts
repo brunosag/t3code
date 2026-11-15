@@ -695,6 +695,30 @@ export const make = Effect.gen(function* () {
     );
   }).pipe(Effect.withSpan("desktop.updates.downloadAvailableUpdate"));
 
+  // Downloads start on their own once a check or track switch offers a release; only the restart
+  // that installs it waits for the user. A release that already failed to apply waits for them too.
+  const downloadOfferedUpdates: Effect.Effect<void, never, Scope.Scope> = Effect.gen(function* () {
+    const actionCompletions = yield* PubSub.subscribe(finishedUpdateActions);
+    const downloadOffered = Effect.gen(function* () {
+      const state = yield* Ref.get(updateStateRef);
+      const notApplied = yield* Ref.get(notAppliedVersionRef);
+      if (
+        state.status !== "available" ||
+        (Option.isSome(notApplied) && notApplied.value === state.availableVersion)
+      ) {
+        return;
+      }
+      yield* downloadAvailableUpdate;
+    });
+    yield* PubSub.take(actionCompletions).pipe(
+      Effect.flatMap((action) =>
+        action === "check" || action === "channel" ? downloadOffered : Effect.void,
+      ),
+      Effect.forever,
+      Effect.forkScoped,
+    );
+  }).pipe(Effect.withSpan("desktop.updates.downloadOfferedUpdates"));
+
   const updateRestartMarkerDir = environment.path.join(environment.baseDir, "runtime");
   const updateRestartMarkerPath = environment.path.join(
     updateRestartMarkerDir,
@@ -1271,6 +1295,7 @@ export const make = Effect.gen(function* () {
         runEffect(handleUpdateDownloaded(info));
       });
 
+      yield* downloadOfferedUpdates;
       yield* startUpdatePollers;
     }).pipe(Effect.withSpan("desktop.updates.configure")),
     setChannel: Effect.fn("desktop.updates.setChannel")(function* (

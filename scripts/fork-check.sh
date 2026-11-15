@@ -20,6 +20,7 @@ vp test run \
   apps/server/src/background/SleepInhibitor.test.ts \
   apps/server/src/background/SleepInhibitor.integration.test.ts \
   apps/server/src/background/IdleRestart.test.ts \
+  apps/server/src/provider/ProviderAutoUpdate.test.ts \
   apps/server/src/cli/service.test.ts \
   packages/shared/src/orchestrationV2PendingBackgroundWork.test.ts \
   apps/server/src/webManifest.test.ts \
@@ -51,6 +52,7 @@ vp test run \
   apps/desktop/src/app/DesktopEnvironment.test.ts \
   apps/desktop/src/window/DesktopWindow.test.ts \
   apps/desktop/src/app/DesktopApp.test.ts \
+  apps/desktop/src/updates/DesktopUpdates.test.ts \
   apps/desktop/src/electron/ElectronUpdater.test.ts \
   apps/server/src/process/agentScope.test.ts \
   apps/server/src/cli/config.test.ts \
