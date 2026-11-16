@@ -348,7 +348,8 @@ jobs:
           done
 
           echo "retained versions: ${kept[*]}"
-          du -sh "$BASE/runtime" "$BASE/releases" 2>/dev/null
+          # Informational only: a file the live server removes mid-scan makes du exit 1.
+          du -sh "$BASE/runtime" "$BASE/releases" 2>/dev/null || true
           REMOTE
 
       - name: Rollback hint

@@ -26,6 +26,7 @@ A push to `bsag` runs `.github/workflows/deploy-fork-vps.yml`: it runs the fork 
 ## Upstream merges
 
 - Merge upstream into a review worktree and run `scripts/fork-check.sh` before updating `bsag`. In a conflict, take upstream's side unless it touches a retained change below.
+- Before pushing a merge, check it for new migrations (`apps/server/src/persistence/Migrations/`) and, if there are any, back up the live database first: pushing deploys, and the server migrates as soon as agents go idle.
 - Only the two fork workflows run; every upstream workflow is disabled (`gh workflow disable -R brunosag/t3code <file>`), since their stuck runs once got the fork's Actions paused, which stopped deploys. After each merge, disable any newly arrived one.
 - The desktop app stages only the server dependencies matched in `scripts/lib/cli-external-packages.ts`, never their peers. When a merge bumps one of those and a dependency becomes a peer, declare it in `apps/server/package.json`, or the AppImage backend crash-loops on a missing module and the app never opens.
 - A new retained change gets a line below and a test in `scripts/fork-check.sh`, so a merge that breaks it fails.
