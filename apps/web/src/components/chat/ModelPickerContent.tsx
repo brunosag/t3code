@@ -69,6 +69,7 @@ import {
   type ProviderInstanceEntry,
 } from "../../providerInstances";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
+import { hasRuntimeModelCatalog } from "../../providerModels";
 
 type ModelPickerItem = {
   slug: string;
@@ -116,9 +117,7 @@ function shouldIncludeModelPickerOption(input: {
   if (isProviderInstancePickerReady(input.entry)) return true;
   return (
     input.entry.enabled &&
-    (input.entry.driverKind === "opencode" ||
-      input.entry.driverKind === "antigravity" ||
-      input.entry.driverKind === "cursor") &&
+    hasRuntimeModelCatalog(input.entry.driverKind) &&
     input.entry.instanceId === input.activeInstanceId &&
     input.option.slug === input.activeModel &&
     input.option.isUnavailable === true
