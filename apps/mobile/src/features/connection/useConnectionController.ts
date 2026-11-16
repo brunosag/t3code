@@ -19,6 +19,7 @@ import {
 import { useWorkspaceEnvironments } from "../../state/workspace";
 import { relayEnvironmentDiscovery } from "../../state/relay";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { unregisterServerPushDevice } from "../agent-awareness/serverPushRegistration";
 import { relayManagedEnvironmentIds } from "./environmentSections";
 
 export interface RelayEnvironmentView {
@@ -81,8 +82,11 @@ export function useConnectionController() {
         }),
       }),
     );
-  const removeEnvironment = (environmentId: EnvironmentId) =>
-    removeEnvironmentMutation(environmentId);
+  const removeEnvironment = async (environmentId: EnvironmentId) => {
+    // fork: stop the server's Android pushes while it can still be reached.
+    await unregisterServerPushDevice(environmentId);
+    return removeEnvironmentMutation(environmentId);
+  };
   const setEnvironmentEnabled = (environmentId: EnvironmentId, enabled: boolean) =>
     setEnvironmentEnabledMutation({ environmentId, enabled });
   const updateEnvironment = (

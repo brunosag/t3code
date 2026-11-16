@@ -163,6 +163,11 @@ import {
 } from "./review.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
+  MobilePushDeviceRegistration,
+  MobilePushError,
+  MobilePushRegistrationResult,
+} from "./mobilePush.ts";
+import {
   SpeechSynthesisError,
   SpeechSynthesisEvent,
   SpeechSynthesisInput,
@@ -520,6 +525,8 @@ export const WS_METHODS = {
   serverGetConfig: "server.getConfig",
   serverGetNpmRelease: "server.getNpmRelease",
   serverRefreshProviders: "server.refreshProviders",
+  serverRegisterMobilePushDevice: "server.registerMobilePushDevice",
+  serverUnregisterMobilePushDevice: "server.unregisterMobilePushDevice",
   serverUpdateProvider: "server.updateProvider",
   serverUpdateServer: "server.updateServer",
   serverUpdateServerWithProgress: "server.updateServerWithProgress",
@@ -669,6 +676,20 @@ const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   success: ServerConfig,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),
 });
+
+const WsServerRegisterMobilePushDeviceRpc = Rpc.make(WS_METHODS.serverRegisterMobilePushDevice, {
+  payload: MobilePushDeviceRegistration,
+  success: MobilePushRegistrationResult,
+  error: Schema.Union([MobilePushError, EnvironmentAuthorizationError]),
+});
+
+const WsServerUnregisterMobilePushDeviceRpc = Rpc.make(
+  WS_METHODS.serverUnregisterMobilePushDevice,
+  {
+    payload: Schema.Struct({ deviceId: TrimmedNonEmptyString }),
+    error: Schema.Union([MobilePushError, EnvironmentAuthorizationError]),
+  },
+);
 
 export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
   payload: Schema.Struct({
@@ -2155,6 +2176,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
+  WsServerRegisterMobilePushDeviceRpc,
+  WsServerUnregisterMobilePushDeviceRpc,
   WsServerUpdateProviderRpc,
   WsProviderConsumeResetCreditRpc,
   WsUsageLimitSourceSetAccountOrderRpc,

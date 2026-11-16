@@ -11,8 +11,8 @@ The user's fork of upstream T3 Code. Where this file and `AGENTS.md` differ, thi
 ## Limits
 
 - Before pushing, run `scripts/fork-check.sh`, the deploy's own gate (`vp run check:changed origin/bsag` is optional: its default base is upstream's `main`, so it diffs the whole fork for over ten minutes).
-- Surfaces are the server with its web client on `vps` and the Linux desktop build; macOS, Windows and the relay only when asked.
-- Leave `apps/mobile` exactly as upstream has it, even when a fork change stops it compiling: don't edit, test or typecheck it.
+- Surfaces are the server with its web client on `vps`, the Linux desktop build and the Android app; macOS, Windows, iOS and the relay only when asked.
+- The Android app (`apps/mobile`) is the fork's own build, `com.bsag.t3code`, installed next to upstream's Play Store app. It can't use upstream's T3 Connect sign-in, relay pushes or OTA updates, so it gets notifications from the fork's server directly (below). Keep iOS-only code as upstream has it.
 - Keep `packages/provider-pi` identical to upstream. Don't restore the removed V1 adapter or permission layer.
 - The live installation is `~/local/t3-pi` on `vps`; preserve its `userdata` and keep development state separate. Back up its database before deploying a migration; reverting the executable is not a database rollback.
 - `t3 service restart` on the host interrupts running agents; otherwise the server switches to a deployed version by itself once agents are idle.
@@ -21,13 +21,13 @@ The user's fork of upstream T3 Code. Where this file and `AGENTS.md` differ, thi
 
 ## Deployment
 
-A push to `bsag` runs `.github/workflows/deploy-fork-vps.yml`: it runs the fork check, builds the server with its web client, and installs the npm tarball on `vps` over Tailscale with `t3 service install --defer-restart`, which selects the version (`activeVersion` in `~/local/t3-pi/runtime/service-state.json`) without restarting. Watch the run (`gh run watch`); the deploy is live when `serverVersion` from `/.well-known/t3/environment` on the server's port ends in the pushed commit's 9-character SHA. `[skip ci]` in a docs-only commit message skips the deploy. Linux desktop builds publish fork prereleases through `.github/workflows/desktop-fork-linux.yml`. Host procedures are in `~/local/t3-pi/DEPLOYMENT.md`.
+A push to `bsag` runs `.github/workflows/deploy-fork-vps.yml`: it runs the fork check, builds the server with its web client, and installs the npm tarball on `vps` over Tailscale with `t3 service install --defer-restart`, which selects the version (`activeVersion` in `~/local/t3-pi/runtime/service-state.json`) without restarting. Watch the run (`gh run watch`); the deploy is live when `serverVersion` from `/.well-known/t3/environment` on the server's port ends in the pushed commit's 9-character SHA. `[skip ci]` in a docs-only commit message skips the deploy. Linux desktop builds publish fork prereleases through `.github/workflows/desktop-fork-linux.yml`. Android builds publish signed `android-<date>.<run>` prereleases through `.github/workflows/mobile-fork-android.yml` when a push touches the app or its packages; its signing key, Firebase files and build environment live in `~/.config/t3-fork-android` on the laptop (source `env.sh` and `signing.env`, then `expo prebuild --clean --platform android` and `./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a` with `APP_VARIANT=production`), and the same key is in the repository's `FORK_ANDROID_*` secrets. Host procedures are in `~/local/t3-pi/DEPLOYMENT.md`.
 
 ## Upstream merges
 
 - Merge upstream into a review worktree and run `scripts/fork-check.sh` before updating `bsag`. In a conflict, take upstream's side unless it touches a retained change below.
 - Before pushing a merge, check it for new migrations (`apps/server/src/persistence/Migrations/`) and, if there are any, back up the live database first: pushing deploys, and the server migrates as soon as agents go idle.
-- Only the two fork workflows run; every upstream workflow is disabled (`gh workflow disable -R brunosag/t3code <file>`), since their stuck runs once got the fork's Actions paused, which stopped deploys. After each merge, disable any newly arrived one.
+- Only the fork workflows (`deploy-fork-vps`, `desktop-fork-linux`, `mobile-fork-android`) run; every upstream workflow is disabled (`gh workflow disable -R brunosag/t3code <file>`), since their stuck runs once got the fork's Actions paused, which stopped deploys. After each merge, disable any newly arrived one.
 - The desktop app stages only the server dependencies matched in `scripts/lib/cli-external-packages.ts`, never their peers. When a merge bumps one of those and a dependency becomes a peer, declare it in `apps/server/package.json`, or the AppImage backend crash-loops on a missing module and the app never opens.
 - A new retained change gets a line below and a test in `scripts/fork-check.sh`, so a merge that breaks it fails.
 
@@ -56,6 +56,7 @@ A push to `bsag` runs `.github/workflows/deploy-fork-vps.yml`: it runs the fork 
 - **Hidden desktop start:** `--hidden` (the laptop's login autostart) loads the window without showing it; tested in `DesktopWindow.test.ts`.
 - **Automatic downloads and provider updates:** the desktop app downloads an offered release after each check or track switch (not one that failed to apply), leaving only the restart manual (tested in `DesktopUpdates.test.ts`); the server updates a provider once no active thread uses any instance of its driver, once per release (tested in `ProviderAutoUpdate.test.ts`).
 - **Installation and desktop fixes:** provider updates recognize npm ownership before native-looking layouts; Linux desktop entries need the `--class` switch upstream dropped; development can omit Electron, reuse the last server build (`dev:desktop:lean`), open DevTools explicitly and exit when its window closes; desktop dev origins stay out of the server's embedded web client.
+- **Server-sent Android pushes:** the fork's Android app registers with each server (`server.registerMobilePushDevice`), and the server sends its agent activity pushes through Firebase itself, with the relay's FCM data, from every state `AgentAwarenessRelay` publishes, T3 Connect linked or not; devices live in `mobile-push-devices.json` and credentials in `fcm-service-account.json` in the state directory (`<T3 home>/userdata`). The card and alert data come from `infra/relay`'s payload modules, imported and bundled; the FCM request and the two Android alert builders are copies of the relay's `FcmClient` and `FcmDeliveries`, so a merge that changes those needs the same change in `apps/server/src/mobilePush` (tested in `MobilePush.test.ts` and `AgentAwarenessRelay.test.ts`).
 
 ## Test fixtures on this machine
 

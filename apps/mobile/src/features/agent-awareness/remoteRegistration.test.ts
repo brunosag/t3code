@@ -43,7 +43,10 @@ import {
 } from "./remoteRegistration";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
-import { configureAndroidAgentNotifications } from "./androidNotifications";
+import {
+  clearAndroidAgentNotifications,
+  configureAndroidAgentNotifications,
+} from "./androidNotifications";
 
 vi.mock("./androidNotifications", () => ({
   supportsAndroidAgentNotifications: vi.fn(() => true),
@@ -948,6 +951,22 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       }).pipe(Effect.provide(layerRelayTest));
     },
   );
+
+  // fork: serverPushRegistration.ts owns Android's native handler.
+  it.effect("leaves the Android native handler alone across relay sign-in and sign-out", () => {
+    stubAndroidDeviceRelay();
+    vi.mocked(configureAndroidAgentNotifications).mockClear();
+    vi.mocked(clearAndroidAgentNotifications).mockClear();
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token"), "user-a");
+    return Effect.gen(function* () {
+      yield* runBackgroundOperations();
+      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-b"), "user-b");
+      setAgentAwarenessRelayTokenProvider(null);
+      yield* runBackgroundOperations();
+      expect(configureAndroidAgentNotifications).not.toHaveBeenCalled();
+      expect(clearAndroidAgentNotifications).not.toHaveBeenCalled();
+    }).pipe(Effect.provide(layerRelayTest));
+  });
 
   describe("home-screen widget", () => {
     // These cover the widget path only, so keep the Live Activity from priming.

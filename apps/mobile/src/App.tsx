@@ -77,6 +77,7 @@ import { installUiRuntimeMemoryWarningGc } from "./lib/useUiRuntimeMemoryWarning
 import { SubscriptionUsageCoordinator } from "./widgets/SubscriptionUsageCoordinator";
 import { ConnectDeviceApprovalCoordinator } from "./features/connection/ConnectDeviceApprovalCoordinator";
 import { installSubscriptionUsageRefresh } from "./widgets/useSubscriptionUsage";
+import { installServerPushRegistration } from "./features/agent-awareness/serverPushRegistration";
 import { GlobalVoiceInputControl } from "./features/voice-input/GlobalVoiceInputControl";
 import {
   launchSplashHomeRowsPending,
@@ -205,6 +206,8 @@ const appServiceDisposers = [
   }),
   installAppearanceRuntime(),
   installSubscriptionUsageRefresh(),
+  // fork: Android gets agent pushes from connected servers instead of the T3 Connect relay.
+  installServerPushRegistration(),
   installPermissionUpdateNotice(),
   installThreadOutboxDelivery(),
   installComposerAttachmentUploads(),

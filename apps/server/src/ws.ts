@@ -1,4 +1,4 @@
-import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
+import { MobilePushError, OrchestrationDispatchCommandError } from "@t3tools/contracts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- A synchronous digest inside the pure provider mapping.
 import * as NodeCrypto from "node:crypto";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -284,6 +284,7 @@ import {
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
+import * as MobilePush from "./mobilePush/MobilePush.ts";
 import { requestUrl } from "./requestUrl.ts";
 
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
@@ -1517,6 +1518,11 @@ export const layerWsRpc = (
             );
       const usage = yield* UsageService.UsageService;
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
+      // fork: optional so test harnesses that build this layer don't need it.
+      const mobilePush = yield* Effect.serviceOption(MobilePush.MobilePush);
+      const mobilePushUnavailable = new MobilePushError({
+        message: "This server can't send mobile pushes.",
+      });
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
       const repositoryIdentityResolver =
@@ -2606,6 +2612,14 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.serverUpdateProvider]: (input) =>
           providerMaintenanceRunner.updateProvider(input),
+        [WS_METHODS.serverRegisterMobilePushDevice]: (input) =>
+          Option.isSome(mobilePush)
+            ? mobilePush.value.register(input)
+            : Effect.fail(mobilePushUnavailable),
+        [WS_METHODS.serverUnregisterMobilePushDevice]: (input) =>
+          Option.isSome(mobilePush)
+            ? mobilePush.value.unregister(input)
+            : Effect.fail(mobilePushUnavailable),
         [WS_METHODS.providerConsumeResetCredit]:
           /* Request instrumentation already owns the span; keep this helper in that context. */
           Effect.fnUntraced(function* (input) {

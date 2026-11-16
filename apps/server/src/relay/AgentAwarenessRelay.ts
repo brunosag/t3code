@@ -50,6 +50,7 @@ import {
 } from "../cloud/config.ts";
 import { EnvironmentSigningKey } from "../cloud/environmentKeys.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as MobilePush from "../mobilePush/MobilePush.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { isSnoozed } from "../orchestration-v2/ThreadSettlementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -435,6 +436,8 @@ export const make = Effect.gen(function* () {
   // its first alert time through parent renames, relinks and the parent's own requests.
   const childAlertByThread = new Map<ThreadId, SubagentAlert>();
   const subagentRequests = new Map<ThreadId, SubagentRequest>();
+  // fork: the server's own Android pushes take every published state, linked or not.
+  const localPush = yield* Effect.serviceOption(MobilePush.MobilePush);
 
   const readSecretString = (name: string) =>
     secrets
@@ -470,7 +473,8 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.provide(FetchHttpClient.layer));
 
   let cachedRelayClient: Effect.Success<ReturnType<typeof makeRelayClient>> | undefined;
-  let publishedRelayConfig: NonNullable<Effect.Success<typeof readRelayConfig>> | undefined;
+  // fork: null publishes only to the local push sink.
+  let publishedRelayConfig: Effect.Success<typeof readRelayConfig> | undefined;
 
   // Confirm through the same worker so tombstones cannot race live updates; recovery clears the deadline.
   const publishConfirmDeadlines = new Map<ThreadId, number>();
@@ -501,24 +505,22 @@ export const make = Effect.gen(function* () {
 
   const publishThreadUnsafe = Effect.fn("publishThreadUnsafe")(function* (threadId: ThreadId) {
     const publishAgentActivity = yield* readPublishAgentActivityEnabled;
-    if (!publishAgentActivity) {
-      yield* cancelPublishRetries;
-      yield* resetPublishedConnection;
-      yield* Effect.logDebug("agent activity publish skipped; publication disabled", {
-        threadId,
-      });
-      return;
-    }
-    const relayConfig = yield* readRelayConfig;
-    if (!relayConfig) {
-      yield* cancelPublishRetries;
-      yield* resetPublishedConnection;
-      yield* Effect.logDebug("agent activity publish skipped; relay link credentials unavailable", {
-        threadId,
-      });
-      return;
-    }
-    if (
+    // fork: without a relay, publish to the local push sink only, keeping its dedupe and holds.
+    const relayConfig = publishAgentActivity ? yield* readRelayConfig : null;
+    if (relayConfig === null) {
+      if (Option.isNone(localPush) || publishedRelayConfig !== null) {
+        yield* cancelPublishRetries;
+        yield* resetPublishedConnection;
+        if (Option.isSome(localPush)) publishedRelayConfig = null;
+      }
+      yield* Effect.logDebug(
+        publishAgentActivity
+          ? "agent activity publish skipped; relay link credentials unavailable"
+          : "agent activity publish skipped; publication disabled",
+        { threadId },
+      );
+      if (Option.isNone(localPush)) return;
+    } else if (
       publishedRelayConfig?.url !== relayConfig.url ||
       publishedRelayConfig.issuer !== relayConfig.issuer ||
       publishedRelayConfig.environmentCredential !== relayConfig.environmentCredential
@@ -533,6 +535,11 @@ export const make = Effect.gen(function* () {
       readonly state: RelayAgentActivityState | null;
       readonly reason: string;
     }) {
+      // fork: local pushes first, so a failed relay publish can't hold them back.
+      if (Option.isSome(localPush)) {
+        yield* localPush.value.publish({ threadId, state: input.state });
+      }
+      if (relayConfig === null) return;
       if (cachedRelayClient === undefined) {
         cachedRelayClient = yield* makeRelayClient(relayConfig);
       }
@@ -867,6 +874,10 @@ export const make = Effect.gen(function* () {
       yield* Effect.logDebug("agent activity snapshot skipped; relay link credentials unavailable");
       return "unlinked" as const;
     }
+    return yield* enqueueActiveThreads;
+  });
+  // fork: also run once at startup for the local push sink, linked or not.
+  const enqueueActiveThreads = Effect.gen(function* () {
     const environmentId = yield* serverEnvironment.getEnvironmentId;
     const projectSnapshot = yield* projects.snapshot;
     const activitySnapshot = yield* threads.getAgentAwarenessSnapshot();
@@ -968,6 +979,12 @@ export const make = Effect.gen(function* () {
       }
       yield* forkParked(
         Effect.sleep("1 second").pipe(
+          // fork: an enabled relay catches every sink up itself.
+          Effect.andThen(
+            Option.isSome(localPush) && startupState !== "enabled"
+              ? enqueueActiveThreads.pipe(Effect.ignore)
+              : Effect.void,
+          ),
           Effect.andThen(publishActiveThreadsWhenConfigured(startupState !== "enabled")),
         ),
       );

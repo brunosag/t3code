@@ -50,6 +50,7 @@ import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
+import { SettingsNotificationsAndroidScreen } from "./SettingsNotificationsAndroidScreen";
 
 /**
  * A policy that turns Connect off refuses relay links and preferences, which would fail the
@@ -118,6 +119,8 @@ function useNotificationsReady(): boolean {
 }
 
 export function SettingsNotificationsRouteScreen() {
+  // fork: Android notifications come from connected servers, not T3 Connect.
+  if (Platform.OS === "android") return <SettingsNotificationsAndroidScreen />;
   if (!hasCloudPublicConfig()) {
     return (
       <SettingsScreen title="Notifications">

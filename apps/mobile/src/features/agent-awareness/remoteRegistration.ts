@@ -1,8 +1,4 @@
 import { type LiveActivity } from "expo-widgets";
-import {
-  configureAndroidAgentNotifications,
-  clearAndroidAgentNotifications,
-} from "./androidNotifications";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import * as Clock from "effect/Clock";
@@ -49,6 +45,11 @@ import { supportsAgentAwarenessPush } from "./capabilities";
 import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from "./registrationPayload";
 
 const REMOTE_ACTIVITY_REGISTRATION_RETRY_MS = 15_000;
+
+// fork: Android pushes come from connected servers, and serverPushRegistration.ts owns the native
+// handler; the relay path (unreachable without T3 Connect) must neither configure nor clear it.
+const configureAndroidAgentNotifications = (..._: [string, string, boolean]) => {};
+const clearAndroidAgentNotifications = () => {};
 
 const AgentAwarenessOperation = Schema.Literals([
   "read-notification-permissions",

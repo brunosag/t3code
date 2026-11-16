@@ -126,6 +126,8 @@ import * as ProviderAdapterRegistry from "./orchestration-v2/ProviderAdapterRegi
 import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
 import * as ProviderUsageLimitsIngestion from "./provider/ProviderUsageLimitsIngestion.ts";
 import * as UsageLimitHistory from "./usage/UsageLimitHistory.ts";
+import * as FcmSender from "./mobilePush/FcmSender.ts";
+import * as MobilePush from "./mobilePush/MobilePush.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "./project/T3ProjectFileLoader.ts";
@@ -751,7 +753,13 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ),
   // Claude adapters ask the hub when a gateway cooldown ends.
   Layer.provideMerge(UsageLimitSources.layer),
-  Layer.provideMerge(UsageLimitHistory.layer),
+  // fork: the server sends the fork Android app's pushes itself; merged here as pipe takes 20 steps.
+  Layer.provideMerge(
+    Layer.merge(
+      UsageLimitHistory.layer,
+      MobilePush.layer.pipe(Layer.provide(FcmSender.layer), Layer.provide(FetchHttpClient.layer)),
+    ),
+  ),
   // One gate for the server, below hydration so the Claude adapter sees it: layers memoize by
   // reference, so the runtime layer shares it.
   Layer.provideMerge(ProviderInstallationGate.layer),

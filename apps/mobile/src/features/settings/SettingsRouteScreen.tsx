@@ -162,7 +162,20 @@ function LocalSettingsRouteScreen() {
   const { savedConnectionsById } = useSavedRemoteConnections();
   return (
     <SettingsList
-      connections={[environmentsRow(gt("Environments"), Object.keys(savedConnectionsById).length)]}
+      connections={[
+        environmentsRow(gt("Environments"), Object.keys(savedConnectionsById).length),
+        // fork: Android notifications come from connected servers, so they need no T3 Connect.
+        ...(Platform.OS === "android"
+          ? [
+              {
+                id: "SettingsNotifications",
+                icon: "bell.badge",
+                label: gt("Notifications"),
+                target: "SettingsNotifications",
+              } as const,
+            ]
+          : []),
+      ]}
     />
   );
 }

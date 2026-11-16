@@ -42,6 +42,7 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as MobilePush from "../mobilePush/MobilePush.ts";
 import * as AgentAwarenessRelay from "./AgentAwarenessRelay.ts";
 
 const THREAD_ID = ThreadId.make("relay-thread");
@@ -1202,5 +1203,41 @@ it.effect("catches up after startup without polling after success", () =>
     assert.equal(catchUp.activitySnapshotReads, 3);
     assert.equal(publications.length, 2);
     assert.equal(publications[1]?.state?.threadId, THREAD_ID);
+  }),
+);
+
+// fork: the server's own Android pushes don't depend on a T3 Connect link.
+it.effect("publishes to the local push sink without a relay link", () =>
+  Effect.gen(function* () {
+    const local: Array<RelayAgentActivityState | null> = [];
+    const { relay, currentShell, publications } = yield* makeTestRelay({
+      linked: false,
+      catchUpThreads: [shell()],
+    }).pipe(
+      Effect.provideService(MobilePush.MobilePush, {
+        register: unused,
+        unregister: unused,
+        publish: ({ state }) => Effect.sync(() => void local.push(state)),
+        drain: Effect.void,
+      }),
+    );
+    yield* relay.start();
+    yield* TestClock.adjust("1 second");
+    yield* relay.drain;
+    assert.deepEqual(
+      local.map((state) => state?.phase),
+      ["running"],
+    );
+
+    yield* Ref.set(currentShell, shell({ status: "completed" }));
+    yield* relay.publishThread(THREAD_ID);
+    assert.equal(local.length, 1);
+    yield* TestClock.adjust("5 seconds");
+    yield* relay.drain;
+    assert.deepEqual(
+      local.map((state) => state?.phase),
+      ["running", "completed"],
+    );
+    assert.equal(publications.length, 0);
   }),
 );

@@ -35,6 +35,8 @@ vp test run \
   apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts \
   apps/server/src/usage/cliproxyApi.test.ts \
   apps/server/src/usage/UsageLimitHistory.test.ts \
+  apps/server/src/mobilePush/MobilePush.test.ts \
+  apps/server/src/relay/AgentAwarenessRelay.test.ts \
   apps/server/src/usage/UsageLimitSources.test.ts \
   packages/shared/src/usageLimitRunway.test.ts \
   packages/shared/src/usageLimits.test.ts \
