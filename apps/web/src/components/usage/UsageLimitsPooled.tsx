@@ -41,6 +41,7 @@ import {
   type LimitPoolWindow,
   limitRoutingKey,
   remainingPercent,
+  staleLimitAccounts,
 } from "@t3tools/shared/usageLimits";
 import { limitRunway } from "@t3tools/shared/usageLimitRunway";
 import type { UsageProviderKind } from "@t3tools/contracts";
@@ -311,9 +312,9 @@ function PoolWindowCard({
   );
 }
 
-/** Pools keep a login's earlier reading when the hub's last read of it failed. */
+/** Pools keep a login's earlier reading when the hub's last read of it failed; old ones are noted. */
 function StaleReadings({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
-  const stale = pool.accounts.filter((account) => account.stale && !account.disabled);
+  const stale = staleLimitAccounts(pool.accounts, now);
   if (stale.length === 0) return null;
   return (
     <div className="flex flex-col gap-1 px-1 text-xs text-muted-foreground">

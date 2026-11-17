@@ -26,6 +26,7 @@ import {
   usesChatGptSharing,
   resolveNewThreadModelSelection,
   resetCreditChoices,
+  staleLimitAccounts,
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
@@ -637,6 +638,11 @@ describe("pools", () => {
       })),
     );
     expect(collectLimitAccounts(input).map((account) => account.stale)).toEqual([false, true]);
+    // A missed read or two is routine; only an older carried reading gets a notice.
+    const noted = (at: string) =>
+      staleLimitAccounts(collectLimitAccounts(input), Date.parse(at)).map((account) => account.key);
+    expect(noted("2026-09-03T10:49:00.000Z")).toEqual([]);
+    expect(noted("2026-09-03T10:50:00.000Z")).toEqual([expect.stringContaining("second")]);
   });
 
   it("does not give old credits the timestamp of a newer window-only read", () => {

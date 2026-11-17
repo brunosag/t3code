@@ -17,9 +17,11 @@ import {
   type UsageLimitSourceId,
   type UsageLimitSourceSnapshot,
   type UsageLimitSourceSnapshots,
+  DEFAULT_PROVIDER_HEALTH_REFRESH_INTERVAL,
 } from "@t3tools/contracts";
 
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 
 import { isLocalLoopbackHost, isWildcardHost } from "./hostClassification.ts";
 
@@ -303,6 +305,21 @@ export interface LimitAccount {
   /** The hub's last read of this login failed, so `limits` is an earlier reading. */
   readonly stale: boolean;
   readonly limits: ServerProviderUsageLimits;
+}
+
+// Hubs are re-read every refresh interval (five minutes by default), and a failed read is
+// common, so a carried reading is only worth a notice once about two reads have gone by.
+const STALE_READING_NOTICE_AFTER_MS =
+  2 * Duration.toMillis(DEFAULT_PROVIDER_HEALTH_REFRESH_INTERVAL);
+
+/** Switched-on logins whose carried reading is old enough to mention. */
+export function staleLimitAccounts(accounts: readonly LimitAccount[], now: number): LimitAccount[] {
+  return accounts.filter(
+    (account) =>
+      account.stale &&
+      !account.disabled &&
+      now - Date.parse(account.limits.checkedAt) >= STALE_READING_NOTICE_AFTER_MS,
+  );
 }
 
 /** Accounts sharing a key are reordered together; null for accounts no hub routes. */

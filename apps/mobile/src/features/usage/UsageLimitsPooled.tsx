@@ -26,6 +26,7 @@ import {
   type LimitPool,
   type LimitPoolMember,
   type LimitPoolWindow,
+  staleLimitAccounts,
 } from "@t3tools/shared/usageLimits";
 import { type ReactNode, useState } from "react";
 import { Linking, Pressable, View } from "react-native";
@@ -240,9 +241,9 @@ function PoolWindowCard({
   );
 }
 
-/** Pools keep a login's earlier reading when the hub's last read of it failed. */
+/** Pools keep a login's earlier reading when the hub's last read of it failed; old ones are noted. */
 function StaleReadings({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
-  const stale = pool.accounts.filter((account) => account.stale && !account.disabled);
+  const stale = staleLimitAccounts(pool.accounts, now);
   if (stale.length === 0) return null;
   return (
     <View className="gap-1 px-1">
