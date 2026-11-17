@@ -38,12 +38,18 @@ export const ServerProviderResetCreditOption = Schema.Struct({
   description: TrimmedNonEmptyString,
   availableCount: NonNegativeInt,
   expiresAt: Schema.optional(IsoDateTime),
+  /** Each reset's expiry, soonest first; resets that never expire are left out. */
+  expiries: Schema.optional(Schema.Array(IsoDateTime)),
+  /** Ids of the windows it refills, the one it is mainly for first. */
+  refills: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type ServerProviderResetCreditOption = typeof ServerProviderResetCreditOption.Type;
 
 export const ServerProviderResetCredits = Schema.Struct({
   availableCount: NonNegativeInt,
   nextExpiresAt: Schema.optional(IsoDateTime),
+  /** Each reset's expiry, soonest first; resets that never expire are left out. */
+  expiries: Schema.optional(Schema.Array(IsoDateTime)),
   /** Pins hub redemption to the displayed credit, including retries from another client. */
   nextCreditId: Schema.optional(TrimmedNonEmptyString),
   /** Present when resets differ in what they refill; redeem one by its `creditId`. */

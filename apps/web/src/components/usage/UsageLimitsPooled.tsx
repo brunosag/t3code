@@ -27,6 +27,8 @@ import {
   routeByResetHubs,
 } from "@t3tools/client-runtime/usage-limit-controls";
 import {
+  type BankedReset,
+  bankedResets,
   CHATGPT_USAGE_URL,
   collectLimitAccounts,
   collectExternalUsageLinks,
@@ -82,7 +84,8 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { AccountChip } from "./AccountChip";
-import { ResetCredits, WindowBar, barColor } from "./UsageLimits";
+import { BankedResetButton } from "./BankedResets";
+import { WindowBar, barColor } from "./UsageLimits";
 import { BalanceCard, RunwayCard } from "./UsageLimitRunway";
 import { PROVIDER_ORDER, usageProviderForDriver } from "./usageProviders";
 
@@ -159,8 +162,19 @@ function AccountRows({
       ),
     });
   const sortable = routing !== null && movable.length > 1;
+  const banked = memberResets([...pool.members, ...pool.offMembers]).length > 0;
   const grid = (
-    <div className="grid grid-cols-[minmax(0,9rem)_minmax(3rem,1fr)_auto] items-center gap-x-3 md:grid-cols-[11rem_minmax(0,1fr)_auto] md:gap-x-6">
+    <div
+      className={cn(
+        "grid items-center gap-x-3 md:gap-x-6",
+        banked
+          ? "grid-cols-[minmax(0,9rem)_minmax(3rem,1fr)_auto_auto] md:grid-cols-[11rem_minmax(0,1fr)_auto_auto]"
+          : "grid-cols-[minmax(0,9rem)_minmax(3rem,1fr)_auto] md:grid-cols-[11rem_minmax(0,1fr)_auto]",
+      )}
+    >
+      {banked ? (
+        <span className="col-start-4 px-1.5 text-2xs text-muted-foreground/70">Banked</span>
+      ) : null}
       {pool.members.map((member) => (
         <AccountRow
           key={member.account.key}
@@ -169,6 +183,7 @@ function AccountRows({
           color={color}
           now={now}
           grip={sortable ? (movable.includes(member.account.key) ? "handle" : "space") : "none"}
+          banked={banked}
         />
       ))}
       {pool.offMembers.map((member) => (
@@ -179,6 +194,7 @@ function AccountRows({
           color={color}
           now={now}
           grip={sortable ? "space" : "none"}
+          banked={banked}
           off
         />
       ))}
@@ -207,6 +223,7 @@ function AccountRow({
   color,
   now,
   grip,
+  banked,
   off = false,
 }: {
   readonly member: Pick<LimitPoolMember, "account" | "window">;
@@ -214,6 +231,8 @@ function AccountRow({
   readonly color: string;
   readonly now: number;
   readonly grip: "handle" | "space" | "none";
+  /** Whether the rows have a column for banked resets. */
+  readonly banked: boolean;
   readonly off?: boolean;
 }) {
   const {
@@ -232,7 +251,7 @@ function AccountRow({
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn(
-        "col-span-3 grid grid-cols-subgrid items-center",
+        "col-span-full grid grid-cols-subgrid items-center",
         isDragging && "relative z-10 rounded-md bg-background shadow-md",
         off && "opacity-45",
       )}
@@ -264,6 +283,65 @@ function AccountRow({
       <span className="text-end text-xs whitespace-nowrap text-muted-foreground tabular-nums">
         {resetsAt > now ? `in ${formatDuration(resetsAt - now)}` : null}
       </span>
+      {banked ? (
+        <span className="flex items-center gap-1">
+          {memberResets([{ account, window }]).map(({ reset, environmentId }) => (
+            <BankedResetButton
+              key={reset.key}
+              reset={reset}
+              environmentId={environmentId}
+              accountName={name}
+              now={now}
+            />
+          ))}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** The account's banked resets that refill mainly this window. */
+function windowResets({
+  account,
+  window,
+}: Pick<LimitPoolMember, "account" | "window">): ReadonlyArray<BankedReset> {
+  return bankedResets(account).filter((reset) => reset.windowId === window.id);
+}
+
+function memberResets(members: ReadonlyArray<Pick<LimitPoolMember, "account" | "window">>) {
+  return members.flatMap((member) => {
+    const redeem = member.account.redeem;
+    return redeem
+      ? windowResets(member).map((reset) => ({
+          reset,
+          account: member.account,
+          environmentId: redeem.environmentId,
+        }))
+      : [];
+  });
+}
+
+/** With account rows hidden, the window's banked resets stand on their own, each with its account. */
+function WindowBankedResets({
+  resets,
+  now,
+}: {
+  readonly resets: ReturnType<typeof memberResets>;
+  readonly now: number;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <span className="me-1 text-2xs text-muted-foreground/70">Banked</span>
+      {resets.map(({ reset, account, environmentId }) => (
+        <BankedResetButton
+          key={`${account.key}:${reset.key}`}
+          reset={reset}
+          environmentId={environmentId}
+          accountName={accountName(account)}
+          chip={{ email: account.email, image: account.image }}
+          now={now}
+        />
+      ))}
     </div>
   );
 }
@@ -286,8 +364,11 @@ function PoolWindowCard({
   readonly routing: RoutingReorder | null;
 }) {
   const runway = limitRunway(pool, now);
+  const resets = showAccounts ? [] : memberResets([...pool.members, ...pool.offMembers]);
   const accounts = showAccounts ? (
     <AccountRows pool={pool} color={color} now={now} routing={routing} />
+  ) : resets.length > 0 ? (
+    <WindowBankedResets resets={resets} now={now} />
   ) : null;
   return runway?.paced ? (
     <RunwayCard
@@ -325,39 +406,6 @@ function StaleReadings({ pool, now }: { readonly pool: LimitPool; readonly now: 
           {formatDuration(Math.max(0, now - Date.parse(account.limits.checkedAt)))} ago.
         </span>
       ))}
-    </div>
-  );
-}
-
-/** Credits belong to one login, so they list by account even with account rows hidden. */
-function ResetCreditRows({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
-  const banked = pool.accounts.flatMap((account) =>
-    account.redeem && account.limits.resetCredits?.availableCount
-      ? [{ account, redeem: account.redeem, credits: account.limits.resetCredits }]
-      : [],
-  );
-  if (banked.length === 0) return null;
-  // One grid across accounts, so names, summaries and buttons each line up in a column.
-  return (
-    <div className="flex flex-col gap-2 px-1">
-      <h3 className="text-xs font-medium text-muted-foreground">Banked resets</h3>
-      <div className="grid w-fit max-w-full grid-cols-[minmax(0,max-content)_minmax(0,max-content)_auto] gap-x-4 gap-y-2.5">
-        {banked.map(({ account, redeem, credits }) => (
-          <div key={account.key} className="col-span-3 grid grid-cols-subgrid items-start">
-            <AccountName
-              account={account}
-              className="min-h-7 text-xs font-medium text-foreground sm:min-h-6"
-            />
-            <ResetCredits
-              environmentId={redeem.environmentId}
-              input={redeem.input}
-              credits={credits}
-              now={now}
-              className="col-span-2 grid-cols-subgrid"
-            />
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -552,7 +600,6 @@ function PoolSection({
         <p className="text-xs text-muted-foreground">Every hub account is off.</p>
       ) : null}
       <StaleReadings pool={pool} now={now} />
-      <ResetCreditRows pool={pool} now={now} />
     </section>
   );
 }

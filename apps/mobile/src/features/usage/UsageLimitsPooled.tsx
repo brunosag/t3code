@@ -13,6 +13,7 @@ import {
 } from "@t3tools/client-runtime/usage-limit-controls";
 import { limitRunway } from "@t3tools/shared/usageLimitRunway";
 import {
+  bankedResets,
   collectLimitAccounts,
   collectExternalUsageLinks,
   collectLimitNotices,
@@ -44,6 +45,7 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { AccountChip, emailInitials } from "./AccountChip";
+import { BankedResetButton } from "./BankedResets";
 import { PoolFigures, RunwayChart } from "./UsageLimitRunway";
 import { ResetCredits } from "./UsageLimitsSection";
 import { hubPermissionsAtom, useUsageLimitsLayout } from "./usageLimitsLayout";
@@ -151,6 +153,15 @@ function AccountRow({
         {resetsIn ? (
           <Text className="text-xs tabular-nums text-foreground-tertiary">{resetsIn}</Text>
         ) : null}
+        {memberResets([{ account, window }]).map(({ reset, environmentId }) => (
+          <BankedResetButton
+            key={reset.key}
+            reset={reset}
+            environmentId={environmentId}
+            accountName={name}
+            now={now}
+          />
+        ))}
       </View>
       <View className="h-2">
         <PaceGap timeLeft={timeLeft}>
@@ -169,6 +180,18 @@ function AccountRow({
       </View>
     </Pressable>
   );
+}
+
+/** Each account's banked resets that refill mainly its window here. */
+function memberResets(members: ReadonlyArray<Pick<LimitPoolMember, "account" | "window">>) {
+  return members.flatMap(({ account, window }) => {
+    const redeem = account.redeem;
+    return redeem
+      ? bankedResets(account)
+          .filter((reset) => reset.windowId === window.id)
+          .map((reset) => ({ reset, account, environmentId: redeem.environmentId }))
+      : [];
+  });
 }
 
 function PoolWindowCard({
@@ -194,6 +217,7 @@ function PoolWindowCard({
   // Plan sizes only weigh the pool when every account's is known.
   const weighted = pool.members.every((member) => member.account.capacity !== undefined);
   const figures = <PoolFigures pool={pool} runway={runway} label={label} now={now} />;
+  const resets = memberResets([...pool.members, ...pool.offMembers]);
   const chart = runway ? (
     <RunwayChart runway={runway} color={color} now={now} label={label ?? pool.label} />
   ) : null;
@@ -213,6 +237,9 @@ function PoolWindowCard({
       {description ? <Text className="text-xs text-foreground-muted">{description}</Text> : null}
       {showAccounts ? (
         <View className="border-t border-border-subtle pt-2">
+          {resets.length > 0 ? (
+            <Text className="self-end px-2 text-[11px] text-foreground-tertiary">Banked</Text>
+          ) : null}
           {pool.members.map((member) => (
             <AccountRow
               key={member.account.key}
@@ -236,6 +263,20 @@ function PoolWindowCard({
             />
           ))}
         </View>
+      ) : resets.length > 0 ? (
+        <View className="flex-row flex-wrap items-center gap-1.5 border-t border-border-subtle pt-3">
+          <Text className="mr-1 text-[11px] text-foreground-tertiary">Banked</Text>
+          {resets.map(({ reset, account, environmentId }) => (
+            <BankedResetButton
+              key={`${account.key}:${reset.key}`}
+              reset={reset}
+              environmentId={environmentId}
+              accountName={accountName(account)}
+              chip={{ email: account.email, image: account.image }}
+              now={now}
+            />
+          ))}
+        </View>
       ) : null}
     </View>
   );
@@ -253,38 +294,6 @@ function StaleReadings({ pool, now }: { readonly pool: LimitPool; readonly now: 
           couldn't be read just now; showing its reading from{" "}
           {formatDuration(Math.max(0, now - Date.parse(account.limits.checkedAt)))} ago.
         </Text>
-      ))}
-    </View>
-  );
-}
-
-/** Credits belong to one login, so they list by account even with account rows hidden. */
-function BankedResets({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
-  const banked = pool.accounts.flatMap((account) =>
-    account.redeem && account.limits.resetCredits?.availableCount
-      ? [{ account, redeem: account.redeem, credits: account.limits.resetCredits }]
-      : [],
-  );
-  if (banked.length === 0) return null;
-  return (
-    <View className="gap-3 rounded-[24px] border-continuous bg-grouped-card p-4">
-      <Text className="text-sm font-t3-medium text-foreground">Banked resets</Text>
-      {banked.map(({ account, redeem, credits }) => (
-        <View key={account.key} className="gap-1.5">
-          <View className="flex-row items-center gap-1.5">
-            <AccountChip email={account.email} image={account.image} />
-            <Text numberOfLines={1} className="min-w-0 shrink text-sm text-foreground">
-              {accountName(account)}
-            </Text>
-          </View>
-          <ResetCredits
-            environmentId={redeem.environmentId}
-            input={redeem.input}
-            credits={credits}
-            now={now}
-            dense
-          />
-        </View>
       ))}
     </View>
   );
@@ -546,7 +555,6 @@ export function UsageLimitsSection({
               <Text className="px-1 text-sm text-foreground-muted">Every hub account is off.</Text>
             ) : null}
             <StaleReadings pool={pool} now={now} />
-            <BankedResets pool={pool} now={now} />
           </View>
         );
       })}

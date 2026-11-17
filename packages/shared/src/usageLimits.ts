@@ -1005,6 +1005,81 @@ export function resetCreditChoices(
   ];
 }
 
+/** One kind of banked reset on an account, shown on the row of the window it is mainly for. */
+export interface BankedReset {
+  readonly key: string;
+  readonly label: string;
+  readonly availableCount: number;
+  /** Epoch millis, soonest first; shorter than `availableCount` when some never expire. */
+  readonly expiries: readonly number[];
+  readonly input: ProviderConsumeResetCreditInput;
+  readonly windowId: string | undefined;
+}
+
+export const RESET_EXPIRY_SOON_MS = 7 * DAY;
+
+export function bankedResets(account: LimitAccount): ReadonlyArray<BankedReset> {
+  const credits = account.limits.resetCredits;
+  if (!account.redeem || !credits?.availableCount) return [];
+  const { input } = account.redeem;
+  const windows = account.limits.windows;
+  // Resets that don't say what they refill sit on the weekly window, else the longest one.
+  const fallback = (
+    windows.find((window) => window.kind === "weekly") ??
+    [...windows].sort(
+      (left, right) => WINDOW_KIND_ORDER[right.kind] - WINDOW_KIND_ORDER[left.kind],
+    )[0]
+  )?.id;
+  const placed = (refills: ReadonlyArray<string> | undefined) =>
+    refills?.find((id) => windows.some((window) => window.id === id)) ?? fallback;
+  const times = (expiries: ReadonlyArray<string> | undefined, soonest: string | undefined) =>
+    (expiries ?? (soonest ? [soonest] : []))
+      .map((at) => Date.parse(at))
+      .filter(Number.isFinite)
+      .sort((left, right) => left - right);
+  if (!credits.options) {
+    return [
+      {
+        key: "next",
+        label: "Reset",
+        availableCount: credits.availableCount,
+        expiries: times(credits.expiries, credits.nextExpiresAt),
+        input,
+        windowId: fallback,
+      },
+    ];
+  }
+  return credits.options
+    .filter((option) => option.availableCount > 0)
+    .map((option) => ({
+      key: option.creditId,
+      label: option.label,
+      availableCount: option.availableCount,
+      expiries: times(option.expiries, option.expiresAt),
+      input: { ...input, creditId: option.creditId },
+      windowId: placed(option.refills),
+    }));
+}
+
+/** Compact time to a reset's expiry: whole days, then hours, then minutes. */
+export function formatExpiresIn(ms: number): string {
+  const remaining = Math.max(0, ms);
+  if (remaining >= DAY) return `${Math.floor(remaining / DAY)}d`;
+  if (remaining >= HOUR) return `${Math.floor(remaining / HOUR)}h`;
+  return `${Math.max(1, Math.floor(remaining / MINUTE))}m`;
+}
+
+/** A reset's expiry date, such as "Sat, Nov 21", with the year when it isn't this year's. */
+export function formatExpiryDate(ms: number, now: number): string {
+  const year = new Intl.DateTimeFormat(undefined, { year: "numeric" });
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    ...(year.format(ms) === year.format(now) ? {} : { year: "numeric" }),
+  }).format(ms);
+}
+
 export function formatResetsIn(window: ServerProviderUsageWindow, now: number): string | null {
   const resetsAt = resetMillis(window);
   if (resetsAt === null) return null;

@@ -62,6 +62,7 @@ describe("claudeResetCreditsToContract", () => {
       availableCount: 2,
       nextCreditId: "grant_a",
       nextExpiresAt: "2026-10-01T00:00:00.000Z",
+      expiries: ["2026-10-01T00:00:00.000Z", "2026-10-01T00:00:00.000Z"],
       options: [
         expect.objectContaining({
           creditId: "grant_a",
@@ -87,6 +88,7 @@ describe("claudeResetCreditsToContract", () => {
             ends_at: "2027-03-09T07:59:00Z",
           }),
           grant({ id: "fable_b", gives_back_weekly: true, type: "weekly" }),
+          grant({ id: "fable_c", gives_back_weekly: true, ends_at: "2027-01-01T00:00:00Z" }),
           grant({ id: "session_a", type: "session" }),
           grant({ id: "spent", clears: ["seven_day"], resets_left: 0 }),
         ],
@@ -94,17 +96,26 @@ describe("claudeResetCreditsToContract", () => {
       NOW,
     );
     expect(
-      credits?.options?.map(({ creditId, label, availableCount }) => [
+      credits?.options?.map(({ creditId, label, availableCount, expiries, refills }) => [
         creditId,
         label,
         availableCount,
+        expiries,
+        refills,
       ]),
     ).toEqual([
-      ["session_a", "5-hour reset", 1],
-      ["weekly_a", "Weekly reset", 1],
-      ["fable_a", "Fable reset", 2],
+      ["session_a", "5-hour reset", 1, [], ["five_hour"]],
+      ["weekly_a", "Weekly reset", 1, ["2026-12-10T22:00:00.000Z"], ["seven_day"]],
+      // The soonest-expiring grant is the one redeemed; one without an expiry has none listed.
+      [
+        "fable_c",
+        "Fable reset",
+        3,
+        ["2027-01-01T00:00:00.000Z", "2027-03-09T07:59:00.000Z"],
+        ["seven_day_fable", "seven_day"],
+      ],
     ]);
-    expect(credits).toMatchObject({ availableCount: 4, nextCreditId: "weekly_a" });
+    expect(credits).toMatchObject({ availableCount: 5, nextCreditId: "weekly_a" });
   });
 
   it("offers nothing to redeem without a usable next grant or an eligible account", () => {

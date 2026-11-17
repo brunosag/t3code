@@ -348,6 +348,9 @@ const CODEX_HUB: HubProvider = {
                   ? {
                       nextCreditId: next.id,
                       nextExpiresAt: DateTime.formatIso(DateTime.makeUnsafe(next.expires_at)),
+                      expiries: available.map((credit) =>
+                        DateTime.formatIso(DateTime.makeUnsafe(credit.expires_at)),
+                      ),
                     }
                   : {}),
               },

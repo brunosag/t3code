@@ -233,9 +233,15 @@ describe("CLIProxyAPI built-in management API", () => {
         const test = fixture();
         const api = yield* test.api;
         const result = yield* api.readAccounts(config);
+        const credits = {
+          availableCount: 2,
+          nextCreditId: "first",
+          nextExpiresAt: "2099-01-01T00:00:00.000Z",
+          expiries: ["2099-01-01T00:00:00.000Z", "2099-02-01T00:00:00.000Z"],
+        };
         expect(result.map((account) => account.usageLimits.resetCredits)).toEqual([
-          { availableCount: 2, nextCreditId: "first", nextExpiresAt: "2099-01-01T00:00:00.000Z" },
-          { availableCount: 2, nextCreditId: "first", nextExpiresAt: "2099-01-01T00:00:00.000Z" },
+          credits,
+          credits,
         ]);
         expect(result[0]?.usageLimits.windows).toMatchObject([
           { id: "secondary", usedPercent: 78, kind: "weekly" },
@@ -496,6 +502,7 @@ describe("CLIProxyAPI built-in management API", () => {
         availableCount: 1,
         nextCreditId: "launch",
         nextExpiresAt: "2099-03-09T07:59:00.000Z",
+        expiries: ["2099-03-09T07:59:00.000Z"],
         options: [
           {
             creditId: "launch",
@@ -503,6 +510,8 @@ describe("CLIProxyAPI built-in management API", () => {
             description: "Refills your 5-hour and weekly limits.",
             availableCount: 1,
             expiresAt: "2099-03-09T07:59:00.000Z",
+            expiries: ["2099-03-09T07:59:00.000Z"],
+            refills: ["seven_day", "five_hour"],
           },
         ],
       });

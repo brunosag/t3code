@@ -25,6 +25,7 @@ import {
   paceRemainingPercent,
   usesChatGptSharing,
   resolveNewThreadModelSelection,
+  bankedResets,
   resetCreditChoices,
   staleLimitAccounts,
 } from "./usageLimits.ts";
@@ -1576,6 +1577,72 @@ describe("reset credit choices", () => {
         ["Fable reset · 1 left", { ...input, creditId: "fable-1" }],
       ]);
     }
+  });
+  it("places each banked reset on the window it is mainly for, soonest expiry first", () => {
+    const weekly = { ...window, id: "seven_day", kind: "weekly", label: "Weekly" } as const;
+    const fable = { ...weekly, id: "seven_day_fable", label: "Weekly · Fable" } as const;
+    const hub = {
+      sourceId: UsageLimitSourceId.make("hub"),
+      accountId: "a.json",
+      creditId: "next",
+    };
+    const account = (
+      windows: LimitAccount["limits"]["windows"],
+      resetCredits: NonNullable<LimitAccount["limits"]["resetCredits"]>,
+    ): LimitAccount => ({
+      key: "a",
+      driver: ProviderDriverKind.make("claudeAgent"),
+      displayName: "a",
+      email: undefined,
+      plan: undefined,
+      capacity: undefined,
+      accentColor: undefined,
+      image: undefined,
+      environments: [],
+      sourceLabel: "Hub",
+      redeem: { environmentId: EnvironmentId.make("env"), input: hub },
+      routing: null,
+      disabled: false,
+      stale: false,
+      limits: { checkedAt: "2026-09-03T11:00:00.000Z", windows, resetCredits },
+    });
+    const option = (creditId: string, refills: string[], expiries: string[]) => ({
+      creditId,
+      label: creditId,
+      description: creditId,
+      availableCount: expiries.length,
+      expiries,
+      refills,
+    });
+    const claude = account([window, weekly, fable], {
+      availableCount: 3,
+      options: [
+        option("fable", ["seven_day_fable", "seven_day"], ["2026-09-10T00:00:00Z"]),
+        option(
+          "full",
+          ["seven_day", "five_hour"],
+          ["2026-09-05T00:00:00Z", "2026-09-04T00:00:00Z"],
+        ),
+      ],
+    });
+    expect(
+      bankedResets(claude).map((reset) => [reset.windowId, reset.expiries, reset.input]),
+    ).toEqual([
+      ["seven_day_fable", [Date.parse("2026-09-10T00:00:00Z")], { ...hub, creditId: "fable" }],
+      [
+        "seven_day",
+        [Date.parse("2026-09-04T00:00:00Z"), Date.parse("2026-09-05T00:00:00Z")],
+        { ...hub, creditId: "full" },
+      ],
+    ]);
+    // Without a window it names, a reset falls back to the weekly window.
+    const codex = account([window, weekly], {
+      availableCount: 2,
+      nextExpiresAt: "2026-09-04T00:00:00Z",
+    });
+    expect(
+      bankedResets(codex).map((reset) => [reset.windowId, reset.availableCount, reset.expiries]),
+    ).toEqual([["seven_day", 2, [Date.parse("2026-09-04T00:00:00Z")]]]);
   });
 });
 

@@ -12,6 +12,8 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
+import { scopedWindowId } from "./claudeUsageLimits.ts";
+
 const API_BASE = "https://api.anthropic.com";
 const PROGRAM = "cedar_ember";
 const GRANT_ID = /^[a-z0-9_-]{1,40}$/;
@@ -105,14 +107,27 @@ const isFutureTimestamp = (value: string, nowMs: number) => {
 // Claude Code's own grouping: a grant that gives back weekly usage is a Fable reset, else its
 // declared type, else what it clears.
 const RESET_KINDS = {
-  session: { label: "5-hour reset", description: "Refills your 5-hour limit." },
-  weekly: { label: "Weekly reset", description: "Refills your weekly limit." },
+  session: {
+    label: "5-hour reset",
+    description: "Refills your 5-hour limit.",
+    refills: ["five_hour"],
+  },
+  weekly: {
+    label: "Weekly reset",
+    description: "Refills your weekly limit.",
+    refills: ["seven_day"],
+  },
   fable: {
     label: "Fable reset",
     description:
       "Refills your Fable allowance and gives back what Fable used on your weekly limit. It doesn't reset your whole week.",
+    refills: [scopedWindowId("Fable"), "seven_day"],
   },
-  full: { label: "Full reset", description: "Refills your 5-hour and weekly limits." },
+  full: {
+    label: "Full reset",
+    description: "Refills your 5-hour and weekly limits.",
+    refills: ["seven_day", "five_hour"],
+  },
 } as const;
 type ResetKind = keyof typeof RESET_KINDS;
 
@@ -153,8 +168,19 @@ export function claudeResetCreditsToContract(
     const at = grant?.ends_at ? DateTime.make(grant.ends_at) : Option.none();
     return Option.isSome(at) ? DateTime.formatIso(at.value) : undefined;
   };
+  const expiriesOf = (grants: ReadonlyArray<typeof Grant.Type>) =>
+    grants.flatMap((grant) => {
+      const at = expiresAt(grant);
+      return at ? Array.from({ length: grant.resets_left }, () => at) : [];
+    });
   const byKind = new Map<ResetKind, Array<typeof Grant.Type>>();
-  for (const grant of live) {
+  // Soonest expiry first, so a kind redeems the reset closest to being lost.
+  const byExpiry = live.toSorted(
+    (left, right) =>
+      (left.ends_at ? Date.parse(left.ends_at) : Infinity) -
+      (right.ends_at ? Date.parse(right.ends_at) : Infinity),
+  );
+  for (const grant of byExpiry) {
     if (grant.resets_left === 0) continue;
     const kind = grantKind(grant);
     byKind.set(kind, [...(byKind.get(kind) ?? []), grant]);
@@ -171,6 +197,7 @@ export function claudeResetCreditsToContract(
           ...RESET_KINDS[kind],
           availableCount: grants.reduce((sum, grant) => sum + grant.resets_left, 0),
           ...(optionExpiresAt ? { expiresAt: optionExpiresAt } : {}),
+          expiries: expiriesOf(grants),
         },
       ];
     },
@@ -179,6 +206,7 @@ export function claudeResetCreditsToContract(
   return {
     availableCount: next ? live.reduce((sum, grant) => sum + grant.resets_left, 0) : 0,
     ...(nextExpiresAt ? { nextExpiresAt } : {}),
+    ...(next ? { expiries: expiriesOf(byExpiry) } : {}),
     ...(next ? { nextCreditId: next.id } : {}),
     ...(next ? { options } : {}),
   };

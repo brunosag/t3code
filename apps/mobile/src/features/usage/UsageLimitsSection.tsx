@@ -221,7 +221,7 @@ export function AccountLimits(props: {
   );
 }
 
-const OUTCOME_TEXT: Record<ProviderConsumeResetCreditOutcome, string> = {
+export const RESET_OUTCOME_TEXT: Record<ProviderConsumeResetCreditOutcome, string> = {
   reset: "Reset applied. Your windows have cleared.",
   nothingToReset: "Nothing to reset right now.",
   noCredit: "No reset credit left.",
@@ -251,7 +251,7 @@ export function ResetCredits(props: {
     const result = await consume({ environmentId, input: choice.input });
     setBusy(false);
     if (result._tag === "Success") {
-      setStatus(result.value.warning ?? OUTCOME_TEXT[result.value.outcome]);
+      setStatus(result.value.warning ?? RESET_OUTCOME_TEXT[result.value.outcome]);
       return;
     }
     setStatus(

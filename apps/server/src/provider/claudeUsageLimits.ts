@@ -50,7 +50,7 @@ export const makeClaudeScopedLimitNames = Ref.make<ClaudeScopedLimitNames>({
 const SCOPED_WINDOW_PREFIX = "seven_day_";
 const scopeToken = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
 
-function scopedWindowId(displayName: string): string {
+export function scopedWindowId(displayName: string): string {
   return `${SCOPED_WINDOW_PREFIX}${scopeToken(displayName)}`;
 }
 
