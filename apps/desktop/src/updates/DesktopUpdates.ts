@@ -72,7 +72,7 @@ const IDLE_INSTALL_CHECK_INTERVAL = Duration.seconds(5);
 const IDLE_INSTALL_GRACE = Duration.seconds(5);
 // Agent work that never pauses still gets the update eventually; the user being at the machine
 // always holds it back.
-const IDLE_INSTALL_MAX_DEFERRAL = Duration.hours(12);
+const IDLE_INSTALL_MAX_DEFERRAL = Duration.hours(24);
 // The restart closes T3's windows, so wait until no keyboard or mouse input for this long.
 const IDLE_INSTALL_USER_AWAY = Duration.minutes(5);
 

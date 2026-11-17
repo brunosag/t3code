@@ -1476,14 +1476,14 @@ describe("runIdleInstall", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("waits for agent work, and installs anyway after 12 hours", () =>
+  it.effect("waits for agent work, and installs anyway after 24 hours", () =>
     Effect.gen(function* () {
       const service = yield* start({
         pending: "2.0.0",
         agentWorkRunning: true,
         userActive: false,
       });
-      yield* TestClock.adjust(Duration.hours(11));
+      yield* TestClock.adjust(Duration.hours(23));
       assert.deepStrictEqual(yield* service.installs, []);
       yield* TestClock.adjust(Duration.hours(1));
       assert.deepStrictEqual(yield* service.installs, ["2.0.0"]);
@@ -1497,7 +1497,7 @@ describe("runIdleInstall", () => {
         agentWorkRunning: false,
         userActive: true,
       });
-      yield* TestClock.adjust(Duration.hours(13));
+      yield* TestClock.adjust(Duration.hours(25));
       assert.deepStrictEqual(yield* service.installs, []);
       yield* Ref.set(service.userActive, false);
       yield* TestClock.adjust(Duration.seconds(5));
@@ -1512,7 +1512,7 @@ describe("runIdleInstall", () => {
         agentWorkRunning: false,
         userActive: false,
       });
-      yield* TestClock.adjust(Duration.hours(13));
+      yield* TestClock.adjust(Duration.hours(25));
       assert.deepStrictEqual(yield* service.installs, []);
     }).pipe(Effect.scoped),
   );

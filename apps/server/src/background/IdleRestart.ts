@@ -31,7 +31,7 @@ const CHECK_INTERVAL = Duration.seconds(5);
 // Queued runs are not agent work, so this bridges a finished turn and its queued follow-up starting.
 const IDLE_GRACE = Duration.seconds(5);
 // Agent work that never pauses still gets the new version eventually.
-const MAX_DEFERRAL = Duration.hours(12);
+const MAX_DEFERRAL = Duration.hours(24);
 
 /**
  * The installed version a restart would switch to, if any. Reads only the version fields: a newer

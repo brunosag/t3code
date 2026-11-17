@@ -255,7 +255,7 @@ const serviceInstallCommand = Command.make("install", {
   ...serviceReconcileFlags,
   deferRestart: Flag.Boolean("defer-restart").pipe(
     Flag.withDescription(
-      "Point an installed service at this version without restarting it. The server switches within seconds of agent work going idle, or after 12 hours.",
+      "Point an installed service at this version without restarting it. The server switches within seconds of agent work going idle, or after 24 hours.",
     ),
     Flag.withDefault(false),
   ),

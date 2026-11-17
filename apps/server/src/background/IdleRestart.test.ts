@@ -48,13 +48,13 @@ describe("IdleRestart", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("restarts 12 hours after first seeing the version even while work runs", () =>
+  it.effect("restarts 24 hours after first seeing the version even while work runs", () =>
     Effect.gen(function* () {
       const service = yield* start({ pending: undefined, idleSince: undefined });
       yield* TestClock.adjust(Duration.hours(1));
-      // First seen by the check at 1h00m05s, so the deadline is 13h00m05s, not 13h.
+      // First seen by the check at 1h00m05s, so the deadline is 25h00m05s, not 25h.
       yield* Ref.set(service.pending, "2.0.0");
-      yield* TestClock.adjust(Duration.hours(12));
+      yield* TestClock.adjust(Duration.hours(24));
       expect(yield* service.restarts).toBe(0);
       yield* TestClock.adjust(Duration.seconds(5));
       expect(yield* service.restarts).toBe(1);
@@ -64,7 +64,7 @@ describe("IdleRestart", () => {
   it.effect("never restarts without a pending version", () =>
     Effect.gen(function* () {
       const service = yield* start({ pending: undefined, idleSince: 0 });
-      yield* TestClock.adjust(Duration.hours(13));
+      yield* TestClock.adjust(Duration.hours(25));
       expect(yield* service.restarts).toBe(0);
     }).pipe(Effect.scoped),
   );
