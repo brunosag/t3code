@@ -142,6 +142,8 @@ describe("chat math parsing", () => {
       "Pay $1,000,$2,000 now.",
       "Now (R$) and later (R$).",
       "Range [US$] to [R$].",
+      'An offer of R$162 that reads "Envie uma proposta de R$ 180,00".',
+      "Plans 5$/10$.",
     ]) {
       expect(formulas(prose), prose).toEqual([]);
       expect(text(prose), prose).toBe(prose);

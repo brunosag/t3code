@@ -389,7 +389,7 @@ patchedDependencies:
   mdast-util-math@3.0.0: afe6b2c89e1eaddfd3c90cf2723f12c9a17d513e65beff51653781486013251c
   mdast-util-to-hast@13.2.1: 57ea46c73aea3c876ab8d351fe0482ddd081dcb4a0610576e399dbe5eb59d2b1
   micromark-extension-gfm-table@2.1.1: 9ad23a530e45d9f83cba1da8654fe16d5af8b59d5c73d5c7a7c91fd25b9be1d8
-  micromark-extension-llm-math@3.1.0: c17891d1fc36ddd731b7e1003d646421e0063104e1730ee500766ec0cac1cd89
+  micromark-extension-llm-math@3.1.0: c3c1fa54e9bedfe3d5d1f63e2a172107a9d6544281b61e695fdd4bbc939bb206
   micromark@4.0.2: cb79edde7eca83bbcaaafb6ceb7b044b81b987314cde4910823b15257ecada67
   node-pty@1.2.0-beta.15: ff8117509663fe1d5a07ef2648c324e80a9349b7d90401a00a591702615b8b30
   react-native-gesture-handler@3.5.0: 171379dd378f8f11e9187876dec2116e5cbf5f21cef6576cdde6956518324f98
@@ -21330,7 +21330,7 @@ snapshots:
       micromark-util-combine-extensions: 2.0.1
       micromark-util-types: 2.0.2
 
-  micromark-extension-llm-math@3.1.0(patch_hash=c17891d1fc36ddd731b7e1003d646421e0063104e1730ee500766ec0cac1cd89):
+  micromark-extension-llm-math@3.1.0(patch_hash=c3c1fa54e9bedfe3d5d1f63e2a172107a9d6544281b61e695fdd4bbc939bb206):
     dependencies:
       '@types/katex': 0.16.8
       devlop: 1.1.0
@@ -22808,7 +22808,7 @@ snapshots:
     dependencies:
       '@types/mdast': 4.0.4
       mdast-util-math: 3.0.0(patch_hash=afe6b2c89e1eaddfd3c90cf2723f12c9a17d513e65beff51653781486013251c)(supports-color@8.1.1)
-      micromark-extension-math: micromark-extension-llm-math@3.1.0(patch_hash=c17891d1fc36ddd731b7e1003d646421e0063104e1730ee500766ec0cac1cd89)
+      micromark-extension-math: micromark-extension-llm-math@3.1.0(patch_hash=c3c1fa54e9bedfe3d5d1f63e2a172107a9d6544281b61e695fdd4bbc939bb206)
       unified: 11.0.5
     transitivePeerDependencies:
       - supports-color

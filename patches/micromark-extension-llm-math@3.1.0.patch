@@ -319,7 +319,7 @@ diff --git a/dev/lib/math-text.js b/dev/lib/math-text.js
 +++ b/dev/lib/math-text.js
 @@ -10 +10 @@
 -import {markdownLineEnding} from 'micromark-util-character'
-+import {markdownLineEnding, markdownLineEndingOrSpace} from 'micromark-util-character'
++import {asciiAlphanumeric, markdownLineEnding, markdownLineEndingOrSpace} from 'micromark-util-character'
 @@ -42,6 +42,13 @@
      let size
      /** @type {Token} */
@@ -419,6 +419,22 @@ diff --git a/dev/lib/math-text.js b/dev/lib/math-text.js
        }
  
        // More or less accents: mark as data.
+@@ -257,11 +309,13 @@
+ /**
+  * @this {TokenizeContext}
+  * @type {Previous}
+  */
+ function previous(code) {
+   // If there is a previous code, there will always be a tail.
+   return (
+-    code !== codes.dollarSign ||
+-    this.events[this.events.length - 1][1].type === types.characterEscape
++    // `R$162`, `US$`, `5$`: a dollar right after a letter or digit is currency.
++    !asciiAlphanumeric(code) &&
++    (code !== codes.dollarSign ||
++      this.events[this.events.length - 1][1].type === types.characterEscape)
+   )
+ }
 diff --git a/package.json b/package.json
 --- a/package.json
 +++ b/package.json
