@@ -1446,21 +1446,21 @@ describe("runIdleInstall", () => {
   const start = Effect.fn(function* (initial: {
     readonly pending: string | undefined;
     readonly agentWorkRunning: boolean;
-    readonly windowFocused: boolean;
+    readonly userActive: boolean;
   }) {
     const pending = yield* Ref.make(initial.pending);
     const agentWorkRunning = yield* Ref.make(initial.agentWorkRunning);
-    const windowFocused = yield* Ref.make(initial.windowFocused);
+    const userActive = yield* Ref.make(initial.userActive);
     const installs = yield* Ref.make<ReadonlyArray<string>>([]);
     yield* Effect.forkScoped(
       DesktopUpdates.runIdleInstall({
         pendingVersion: Ref.get(pending),
         agentWorkRunning: Ref.get(agentWorkRunning),
-        windowFocused: Ref.get(windowFocused),
+        userActive: Ref.get(userActive),
         install: (version) => Ref.update(installs, (all) => [...all, version]),
       }),
     );
-    return { pending, agentWorkRunning, windowFocused, installs: Ref.get(installs) };
+    return { pending, agentWorkRunning, userActive, installs: Ref.get(installs) };
   });
 
   it.effect("installs once agent work has been idle for five seconds", () =>
@@ -1468,7 +1468,7 @@ describe("runIdleInstall", () => {
       const service = yield* start({
         pending: "2.0.0",
         agentWorkRunning: false,
-        windowFocused: false,
+        userActive: false,
       });
       assert.deepStrictEqual(yield* service.installs, []);
       yield* TestClock.adjust(Duration.seconds(5));
@@ -1481,7 +1481,7 @@ describe("runIdleInstall", () => {
       const service = yield* start({
         pending: "2.0.0",
         agentWorkRunning: true,
-        windowFocused: false,
+        userActive: false,
       });
       yield* TestClock.adjust(Duration.hours(11));
       assert.deepStrictEqual(yield* service.installs, []);
@@ -1490,16 +1490,16 @@ describe("runIdleInstall", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.effect("never installs while a window is focused", () =>
+  it.effect("never installs while the user is at the machine", () =>
     Effect.gen(function* () {
       const service = yield* start({
         pending: "2.0.0",
         agentWorkRunning: false,
-        windowFocused: true,
+        userActive: true,
       });
       yield* TestClock.adjust(Duration.hours(13));
       assert.deepStrictEqual(yield* service.installs, []);
-      yield* Ref.set(service.windowFocused, false);
+      yield* Ref.set(service.userActive, false);
       yield* TestClock.adjust(Duration.seconds(5));
       assert.deepStrictEqual(yield* service.installs, ["2.0.0"]);
     }).pipe(Effect.scoped),
@@ -1510,7 +1510,7 @@ describe("runIdleInstall", () => {
       const service = yield* start({
         pending: undefined,
         agentWorkRunning: false,
-        windowFocused: false,
+        userActive: false,
       });
       yield* TestClock.adjust(Duration.hours(13));
       assert.deepStrictEqual(yield* service.installs, []);

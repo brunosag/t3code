@@ -10,6 +10,7 @@ import * as Option from "effect/Option";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as ElectronPowerMonitor from "../electron/ElectronPowerMonitor.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
@@ -123,8 +124,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     main: Effect.succeedNone,
     currentMainOrFirst: Effect.succeedNone,
     focusedMainOrFirst: Effect.succeedNone,
-    // A focused window holds back idle installs, which runIdleInstall tests cover.
-    presence: Effect.succeed("focused"),
+    anyVisible: Effect.succeed(false),
     setMain: () => Effect.void,
     clearMain: () => Effect.void,
     prepareReveal: () => Effect.succeed(false),
@@ -297,6 +297,12 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     Layer.provide(DesktopUpdatePolicy.layerTest(options.policy)),
     Layer.provideMerge(layerUpdater),
     Layer.provideMerge(layerWindow),
+    // An active user holds back idle installs, which runIdleInstall's own tests cover.
+    Layer.provideMerge(
+      Layer.mock(ElectronPowerMonitor.ElectronPowerMonitor, {
+        getSystemIdleState: () => Effect.succeed("active"),
+      }),
+    ),
     Layer.provideMerge(layerBackend),
     Layer.provideMerge(layerSshEnvironment),
     Layer.provideMerge(DesktopState.layer),

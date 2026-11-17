@@ -35,6 +35,7 @@ import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronPowerMonitor from "../electron/ElectronPowerMonitor.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
@@ -69,8 +70,11 @@ const UPDATE_CHECK_WAIT = Duration.seconds(90);
 const IDLE_INSTALL_CHECK_INTERVAL = Duration.seconds(5);
 // Queued runs are not agent work, so this bridges a finished turn and its queued follow-up starting.
 const IDLE_INSTALL_GRACE = Duration.seconds(5);
-// Agent work that never pauses still gets the update eventually; a focused window always waits.
+// Agent work that never pauses still gets the update eventually; the user being at the machine
+// always holds it back.
 const IDLE_INSTALL_MAX_DEFERRAL = Duration.hours(12);
+// The restart closes T3's windows, so wait until no keyboard or mouse input for this long.
+const IDLE_INSTALL_USER_AWAY = Duration.minutes(5);
 
 type UpdateAction = "check" | "download" | "install" | "install-recovery" | "channel";
 
@@ -381,12 +385,12 @@ function isArm64HostRunningIntelBuild(runtimeInfo: DesktopRuntimeInfo): boolean 
 
 /**
  * Installs the pending download once agent work has been idle for IDLE_INSTALL_GRACE, or
- * IDLE_INSTALL_MAX_DEFERRAL after it was first seen, never while a window is focused.
+ * IDLE_INSTALL_MAX_DEFERRAL after it was first seen, never while the user is at the machine.
  */
 export const runIdleInstall = Effect.fn("DesktopUpdates.runIdleInstall")(function* (input: {
   readonly pendingVersion: Effect.Effect<string | undefined>;
   readonly agentWorkRunning: Effect.Effect<boolean>;
-  readonly windowFocused: Effect.Effect<boolean>;
+  readonly userActive: Effect.Effect<boolean>;
   readonly install: (version: string) => Effect.Effect<void>;
 }) {
   let pending: { readonly version: string; readonly since: number } | undefined;
@@ -400,7 +404,7 @@ export const runIdleInstall = Effect.fn("DesktopUpdates.runIdleInstall")(functio
     }
     if (pending?.version !== version) pending = { version, since: now };
     idleSince = (yield* input.agentWorkRunning) ? undefined : (idleSince ?? now);
-    if (yield* input.windowFocused) return;
+    if (yield* input.userActive) return;
     const idle =
       idleSince !== undefined && now - idleSince >= Duration.toMillis(IDLE_INSTALL_GRACE);
     if (!idle && now - pending.since < Duration.toMillis(IDLE_INSTALL_MAX_DEFERRAL)) return;
@@ -418,6 +422,7 @@ export const make = Effect.gen(function* () {
   const desktopState = yield* DesktopState.DesktopState;
   const electronUpdater = yield* ElectronUpdater.ElectronUpdater;
   const electronWindow = yield* ElectronWindow.ElectronWindow;
+  const powerMonitor = yield* ElectronPowerMonitor.ElectronPowerMonitor;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
@@ -1105,13 +1110,16 @@ export const make = Effect.gen(function* () {
     agentWorkRunning: fileSystem
       .exists(agentWorkMarkerPath)
       .pipe(Effect.orElseSucceed(() => false)),
-    windowFocused: electronWindow.presence.pipe(Effect.map((presence) => presence === "focused")),
+    // "locked" counts as away, and "unknown" (no idle source) must not hold updates back forever.
+    userActive: powerMonitor
+      .getSystemIdleState(Duration.toSeconds(IDLE_INSTALL_USER_AWAY))
+      .pipe(Effect.map((state) => state === "active")),
     install: Effect.fn("desktop.updates.installWhenIdle")(function* (version) {
       // A window the user left open comes back; a hidden one stays hidden.
-      const hidden = (yield* electronWindow.presence) === "hidden";
+      const visible = yield* electronWindow.anyVisible;
       yield* installWithExpectedVersion(
         version,
-        hidden ? [DesktopEnvironment.DESKTOP_START_HIDDEN_ARG] : [],
+        visible ? [] : [DesktopEnvironment.DESKTOP_START_HIDDEN_ARG],
       );
     }),
   }).pipe(Effect.forkScoped, Effect.asVoid);

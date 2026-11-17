@@ -118,8 +118,8 @@ export class ElectronWindow extends Context.Service<
     readonly main: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
     readonly currentMainOrFirst: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
     readonly focusedMainOrFirst: Effect.Effect<Option.Option<Electron.BrowserWindow>>;
-    /** Whether the user has a window focused, one on screen, or none (hidden or minimized). */
-    readonly presence: Effect.Effect<"focused" | "visible" | "hidden">;
+    /** Whether any window is on screen, not hidden or minimized. */
+    readonly anyVisible: Effect.Effect<boolean>;
     readonly setMain: (window: Electron.BrowserWindow) => Effect.Effect<void>;
     readonly clearMain: (window: Option.Option<Electron.BrowserWindow>) => Effect.Effect<void>;
     readonly prepareReveal: (window: Electron.BrowserWindow) => Effect.Effect<boolean>;
@@ -218,15 +218,11 @@ export const make = Effect.gen(function* () {
     return yield* currentMainOrFirst;
   });
 
-  const presence = Effect.sync(() => {
-    const windows = Electron.BrowserWindow.getAllWindows().filter(
-      (window) => !window.isDestroyed(),
-    );
-    if (windows.some((window) => window.isFocused())) return "focused" as const;
-    return windows.some((window) => window.isVisible() && !window.isMinimized())
-      ? ("visible" as const)
-      : ("hidden" as const);
-  });
+  const anyVisible = Effect.sync(() =>
+    Electron.BrowserWindow.getAllWindows().some(
+      (window) => !window.isDestroyed() && window.isVisible() && !window.isMinimized(),
+    ),
+  );
 
   return ElectronWindow.of({
     create: Effect.fn("ElectronWindow.create")(function (options, behavior) {
@@ -268,7 +264,7 @@ export const make = Effect.gen(function* () {
     main: liveMain,
     currentMainOrFirst,
     focusedMainOrFirst,
-    presence,
+    anyVisible,
     setMain: Effect.fn("ElectronWindow.setMain")(function (window) {
       return Ref.set(mainWindowRef, Option.some(window));
     }),
