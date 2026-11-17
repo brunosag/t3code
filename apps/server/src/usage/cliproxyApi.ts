@@ -62,6 +62,8 @@ const AuthFile = Schema.Struct({
   // Unknown so an odd hand-edited value cannot break the Limits view.
   priority: Schema.optional(Schema.Unknown),
   project_id: Schema.optional(Schema.String),
+  model_quotas: Schema.optional(Schema.Unknown),
+  cooldowns: Schema.optional(Schema.Unknown),
   id_token: Schema.optional(
     Schema.Struct({
       chatgpt_account_id: Schema.optional(Schema.String),
@@ -275,6 +277,7 @@ interface HubProvider {
     readonly call: HubCall;
     readonly checkedAt: string;
     readonly claudeTiers: Map<string, ClaudeTier>;
+    readonly claudeCache: ClaudeCache;
   }) => Effect.Effect<HubReading, UsageLimitSourceError | Schema.SchemaError, Digest.Digest>;
 }
 
@@ -369,6 +372,81 @@ const claudeTier = Effect.fnUntraced(function* (
   return tier;
 });
 
+const CLAUDE_REFRESH_MS = 60 * 60 * 1000;
+type ClaudeCache = {
+  attemptedAt?: number;
+  observedAfter?: number;
+  usage?: typeof ClaudeUsage.Type;
+  usageAt?: number;
+};
+const QuotaObservations = Schema.Record(
+  Schema.String,
+  Schema.Struct({
+    observed_at: Schema.String,
+    signals: Schema.Record(Schema.String, Schema.String),
+  }),
+);
+const decodeObservations = Schema.decodeUnknownOption(QuotaObservations);
+const decodeCooldowns = Schema.decodeUnknownOption(
+  Schema.Array(
+    Schema.Struct({
+      scope: Schema.String,
+      reason: Schema.optional(Schema.String),
+      model_key: Schema.optional(Schema.String),
+      retry_at: Schema.String,
+    }),
+  ),
+);
+
+// Signals are sparse: a newer non-Fable response must not erase the last Fable observation.
+const claudeHeaderWindow = (account: AuthFile, window: string, now: number, after = -Infinity) => {
+  const observations = Option.getOrUndefined(decodeObservations(account.model_quotas));
+  const prefix = `anthropic-ratelimit-unified-${window}-`;
+  const signals = new Map<string, { at: number; value: string }>();
+  for (const observation of Object.values(observations ?? {}).sort(
+    (a, b) => Date.parse(b.observed_at) - Date.parse(a.observed_at),
+  )) {
+    const at = Date.parse(observation.observed_at);
+    if (!Number.isFinite(at) || at > now || at <= after) continue;
+    for (const [key, value] of Object.entries(observation.signals)) {
+      const name = key.toLowerCase();
+      if (!signals.has(name)) signals.set(name, { at, value });
+    }
+  }
+  const used = signals.get(`${prefix}utilization`);
+  const resetSignal = signals.get(`${prefix}reset`);
+  const utilization = Number(used?.value);
+  const reset = Number(resetSignal?.value) * 1000;
+  if (
+    !used ||
+    !resetSignal ||
+    !Number.isFinite(utilization) ||
+    utilization < 0 ||
+    !Number.isFinite(reset) ||
+    reset <= now ||
+    reset <= used.at ||
+    reset <= resetSignal.at
+  )
+    return undefined;
+  const latest = { at: used.at, reset, utilization, status: signals.get(`${prefix}status`)?.value };
+  const cooldowns = Option.getOrUndefined(decodeCooldowns(account.cooldowns)) ?? [];
+  const blocked =
+    latest.status === "rejected" ||
+    cooldowns.some(
+      (cooldown) =>
+        (cooldown.reason === "credential_quota" || cooldown.reason === "quota") &&
+        (window === "7d_oi"
+          ? cooldown.model_key?.includes("fable")
+          : cooldown.scope === "credential") &&
+        Math.abs(Date.parse(cooldown.retry_at) - latest.reset) < 60_000,
+    );
+  return {
+    at: latest.at,
+    utilization: blocked ? 100 : Math.min(100, latest.utilization * 100),
+    resets_at: DateTime.formatIso(DateTime.makeUnsafe(latest.reset)),
+  };
+};
+
 const CLAUDE_HUB: HubProvider = {
   driver: ProviderDriverKind.make("claudeAgent"),
   header: (_account, _platform, _architecture, hub) => ({
@@ -377,14 +455,55 @@ const CLAUDE_HUB: HubProvider = {
     // The OAuth usage endpoint can return 429 without a Claude Code user agent.
     "User-Agent": `claude-cli/${hub.claudeVersion ?? FALLBACK_CLAUDE_VERSION} (external, cli)`,
   }),
-  read: Effect.fnUntraced(function* ({ account, call, checkedAt, claudeTiers }) {
-    const usage = yield* decodeClaudeUsage(yield* call(CLAUDE_USAGE_URL));
+  read: Effect.fnUntraced(function* ({ account, call, checkedAt, claudeTiers, claudeCache }) {
+    const now = DateTime.toEpochMillis(yield* DateTime.now);
+    const five = claudeHeaderWindow(account, "5h", now, claudeCache.observedAfter);
+    const seven = claudeHeaderWindow(account, "7d", now, claudeCache.observedAfter);
+    const scoped = claudeHeaderWindow(account, "7d_oi", now, claudeCache.observedAfter);
+    if (
+      claudeCache.attemptedAt === undefined ||
+      now - claudeCache.attemptedAt >= CLAUDE_REFRESH_MS
+    ) {
+      // Cache failures too: repeated refreshes must not hammer a rate-limited login.
+      claudeCache.attemptedAt = now;
+      const fresh = yield* call(CLAUDE_USAGE_URL).pipe(
+        Effect.flatMap(decodeClaudeUsage),
+        Effect.option,
+      );
+      if (Option.isSome(fresh)) {
+        claudeCache.usage = fresh.value;
+        claudeCache.usageAt = now;
+      }
+      yield* claudeTier(claudeTiers, account, call).pipe(Effect.ignore);
+    }
+    const usage = claudeCache.usage ?? {};
+    const endpointCurrent =
+      claudeCache.usageAt !== undefined && now - claudeCache.usageAt < CLAUDE_REFRESH_MS;
+    const currentWindow = (
+      header: ReturnType<typeof claudeHeaderWindow>,
+      endpoint: typeof ClaudeWindow.Type | null | undefined,
+    ) => {
+      if (header) return header;
+      if (
+        endpointCurrent &&
+        endpoint &&
+        (!endpoint.resets_at || Date.parse(endpoint.resets_at) > now)
+      )
+        return endpoint;
+      return header ?? null;
+    };
+    if (!five && !seven && !scoped && !endpointCurrent) {
+      return yield* new UsageLimitSourceError({ detail: "No current Claude quota observation." });
+    }
     const resetCredits = claudeResetCreditsToContract(
       usage.cedar_ember,
       DateTime.toEpochMillis(yield* DateTime.now),
     );
-    const model_scoped = (usage.limits ?? []).flatMap((limit) =>
-      limit.kind === "weekly_scoped" && limit.scope?.model && typeof limit.percent === "number"
+    let model_scoped = (endpointCurrent ? (usage.limits ?? []) : []).flatMap((limit) =>
+      limit.kind === "weekly_scoped" &&
+      limit.scope?.model &&
+      typeof limit.percent === "number" &&
+      (!limit.resets_at || Date.parse(limit.resets_at) > now)
         ? [
             {
               display_name: limit.scope.model.display_name,
@@ -394,16 +513,26 @@ const CLAUDE_HUB: HubProvider = {
           ]
         : [],
     );
+    if (scoped) {
+      const name =
+        (usage.limits ?? []).find(
+          (limit) =>
+            limit.kind === "weekly_scoped" &&
+            limit.scope?.model?.display_name.toLowerCase().includes("fable"),
+        )?.scope?.model?.display_name ?? "Fable";
+      model_scoped = [
+        ...model_scoped.filter((limit) => !limit.display_name.toLowerCase().includes("fable")),
+        { display_name: name, utilization: scoped.utilization, resets_at: scoped.resets_at },
+      ];
+    }
     const rateLimits = {
-      five_hour: usage.five_hour ?? null,
-      seven_day: usage.seven_day ?? null,
+      five_hour: currentWindow(five, usage.five_hour),
+      seven_day: currentWindow(seven, usage.seven_day),
       model_scoped,
       spend: usage.spend,
       extra_usage: usage.extra_usage ?? null,
     };
-    const tier = yield* claudeTier(claudeTiers, account, call).pipe(
-      Effect.orElseSucceed(() => undefined),
-    );
+    const tier = claudeTiers.get(account.id);
     return {
       ...listedIdentity(account),
       plan: tier?.plan ?? "Claude Subscription",
@@ -578,7 +707,16 @@ export const makeCliproxyApi = Effect.gen(function* () {
     (hub: CliproxyHub, account: AuthFile, provider: HubProvider): HubCall =>
     (url, data) =>
       apiCall(hub, account, provider.header(account, platform, architecture, hub), url, data);
-  const claudeTiers = new Map<string, ClaudeTier>();
+  const claudeTiers = new Map<string, Map<string, ClaudeTier>>();
+  const claudeCaches = new Map<string, Map<string, ClaudeCache>>();
+  const cacheFor = (hub: CliproxyHub) => {
+    const key = `${hub.url}:${hub.managementKey}`;
+    let tiers = claudeTiers.get(key);
+    if (!tiers) claudeTiers.set(key, (tiers = new Map()));
+    let caches = claudeCaches.get(key);
+    if (!caches) claudeCaches.set(key, (caches = new Map()));
+    return { tiers, caches };
+  };
 
   const readAccount = Effect.fn("CliproxyApi.readAccount")(function* (
     hub: CliproxyHub,
@@ -587,17 +725,22 @@ export const makeCliproxyApi = Effect.gen(function* () {
   ) {
     const checkedAt = DateTime.formatIso(yield* DateTime.now);
     const call = hubCall(hub, account, provider);
-    const reading = yield* provider.read({ account, call, checkedAt, claudeTiers }).pipe(
-      Effect.provideService(Digest.Digest, digest),
-      Effect.orElseSucceed(() => ({
-        ...listedIdentity(account),
-        usageLimits: makeUnavailableUsageLimits({
-          checkedAt,
-          reason: "probeFailed",
-          message: "The hub could not read this account's usage.",
-        }),
-      })),
-    );
+    const { tiers, caches } = cacheFor(hub);
+    let cache = caches.get(account.id);
+    if (!cache) caches.set(account.id, (cache = {}));
+    const reading = yield* provider
+      .read({ account, call, checkedAt, claudeTiers: tiers, claudeCache: cache })
+      .pipe(
+        Effect.provideService(Digest.Digest, digest),
+        Effect.orElseSucceed(() => ({
+          ...listedIdentity(account),
+          usageLimits: makeUnavailableUsageLimits({
+            checkedAt,
+            reason: "probeFailed",
+            message: "The hub could not read this account's usage.",
+          }),
+        })),
+      );
     return {
       id: account.id,
       driver: provider.driver,
@@ -730,6 +873,11 @@ export const makeCliproxyApi = Effect.gen(function* () {
           ? yield* consumeClaude(hub, account, creditId)
           : yield* consumeCodex(hub, account, creditId);
       if (outcome !== "reset" && outcome !== "alreadyRedeemed") return { outcome };
+      if (account.provider === "claude") {
+        cacheFor(hub).caches.set(account.id, {
+          observedAfter: DateTime.toEpochMillis(yield* DateTime.now),
+        });
+      }
       const cleared = yield* management(hub, "reset-quota", {
         auth_index: account.auth_index,
       }).pipe(Effect.result);

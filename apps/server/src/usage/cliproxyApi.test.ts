@@ -1,4 +1,4 @@
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind, type UsageLimitSourceAccount } from "@t3tools/contracts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { describe, expect, it } from "@effect/vitest";
@@ -69,7 +69,13 @@ function fixture(
       disabled?: boolean;
       priority?: unknown;
       project_id?: string;
-      cooldowns?: ReadonlyArray<{ scope: string; model_key?: string; retry_at: string }>;
+      model_quotas?: unknown;
+      cooldowns?: ReadonlyArray<{
+        scope: string;
+        model_key?: string;
+        retry_at: string;
+        reason?: string;
+      }>;
       id_token?: { chatgpt_account_id: string; plan_type?: string; chatgpt_plan_type?: string };
     }>;
     upstream?: (request: RequestBody) => { status: number; body: unknown };
@@ -358,6 +364,94 @@ describe("CLIProxyAPI built-in management API", () => {
       expect(result[0]?.usageLimits.unavailable?.reason).toBe("probeFailed");
       expect(result[1]?.usageLimits.windows[0]?.usedPercent).toBe(12);
       expect(encodeJson(result)).not.toContain("do-not-publish");
+    }),
+  );
+
+  it.effect("reads sparse Claude headers each refresh and throttles failed metadata probes", () =>
+    Effect.gen(function* () {
+      const now = "2026-11-17T11:00:00Z";
+      yield* TestClock.setTime(Date.parse(now));
+      const observation = (at: string, signals: Record<string, string>) => ({
+        observed_at: at,
+        signals,
+      });
+      const signals = (window: string, utilization: string, reset: string) => ({
+        [`Anthropic-Ratelimit-Unified-${window}-Utilization`]: utilization,
+        [`Anthropic-Ratelimit-Unified-${window}-Reset`]: String(Date.parse(reset) / 1000),
+      });
+      const quotas: Record<string, { observed_at: string; signals: Record<string, string> }> = {
+        fable: observation(
+          "2026-11-17T09:00:00Z",
+          signals("7d_oi", "0.74", "2026-11-18T11:00:00Z"),
+        ),
+        haiku: observation("2026-11-17T10:00:00Z", {
+          ...signals("5h", "0.32", "2026-11-17T12:00:00Z"),
+          ...signals("7d", "0.99", "2026-11-18T11:00:00Z"),
+        }),
+      };
+      const test = fixture({
+        accounts: [
+          {
+            ...accounts[0]!,
+            provider: "claude",
+            model_quotas: quotas,
+            cooldowns: [
+              { scope: "credential", reason: "credential_quota", retry_at: "2026-11-18T11:00:23Z" },
+            ],
+          },
+        ],
+        upstream: () => ({ status: 429, body: {} }),
+      });
+      const api = yield* test.api;
+      const windows = (result: ReadonlyArray<UsageLimitSourceAccount>) =>
+        result[0]?.usageLimits.windows.map((w) => [w.id, w.usedPercent]);
+      expect(windows(yield* api.readAccounts(config))).toEqual([
+        ["five_hour", 32],
+        ["seven_day", 100],
+        ["seven_day_fable", 74],
+      ]);
+      quotas.sonnet = observation("2026-11-17T10:30:00Z", {
+        "Anthropic-Ratelimit-Unified-5h-Utilization": "0.4",
+      });
+      yield* TestClock.adjust("5 minutes");
+      expect(windows(yield* api.readAccounts(config))?.[0]).toEqual(["five_hour", 40]);
+      expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/"))).toHaveLength(2);
+      yield* TestClock.adjust("55 minutes");
+      const result = yield* api.readAccounts(config);
+      expect(result[0]?.usageLimits.windows.some((w) => w.id === "five_hour")).toBe(false);
+      expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/"))).toHaveLength(4);
+      yield* TestClock.adjust("24 hours");
+      expect((yield* api.readAccounts(config))[0]?.usageLimits.unavailable?.reason).toBe(
+        "probeFailed",
+      );
+    }),
+  );
+
+  it.effect("probes Claude once over twelve five-minute refreshes even without observations", () =>
+    Effect.gen(function* () {
+      const test = fixture({
+        accounts: [{ ...accounts[0]!, provider: "claude" }],
+        upstream: (r) => ({
+          status: 200,
+          body: r.url?.endsWith("/profile")
+            ? { organization: { rate_limit_tier: "default_claude_ai" } }
+            : {
+                five_hour: { utilization: 20, resets_at: null },
+                cedar_ember: cedarEmber([{ id: "launch", resets_left: 1 }]),
+              },
+        }),
+      });
+      const api = yield* test.api;
+      for (let i = 0; i < 12; i++) {
+        expect((yield* api.readAccounts(config))[0]?.usageLimits.windows[0]?.usedPercent).toBe(20);
+        yield* TestClock.adjust("5 minutes");
+      }
+      expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/usage"))).toHaveLength(1);
+      expect(test.requests.filter((r) => r.body?.url?.endsWith("/profile"))).toHaveLength(1);
+      yield* api.readAccounts(config);
+      expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/usage"))).toHaveLength(2);
+      yield* api.readAccounts({ ...config, url: "http://another-hub.test" });
+      expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/usage"))).toHaveLength(3);
     }),
   );
 
@@ -724,7 +818,14 @@ describe("CLIProxyAPI built-in management API", () => {
         }),
       });
       const api = yield* test.api;
+      yield* api.readAccounts(config);
       expect(yield* api.consume(config, "second.json", "launch")).toEqual({ outcome: "reset" });
+      const probes = test.requests.filter((r) => r.body?.url?.includes("/oauth/usage")).length;
+      const [refreshed] = yield* api.readAccounts(config);
+      expect(refreshed?.usageLimits.resetCredits?.availableCount).toBe(1);
+      expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/usage"))).toHaveLength(
+        probes + 1,
+      );
       expect(yield* api.consume(config, "second.json", "launch")).toEqual({
         outcome: "nothingToReset",
       });
