@@ -1441,3 +1441,79 @@ describe("DesktopUpdates under a managed policy", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 });
+
+describe("runIdleInstall", () => {
+  const start = Effect.fn(function* (initial: {
+    readonly pending: string | undefined;
+    readonly agentWorkRunning: boolean;
+    readonly windowFocused: boolean;
+  }) {
+    const pending = yield* Ref.make(initial.pending);
+    const agentWorkRunning = yield* Ref.make(initial.agentWorkRunning);
+    const windowFocused = yield* Ref.make(initial.windowFocused);
+    const installs = yield* Ref.make<ReadonlyArray<string>>([]);
+    yield* Effect.forkScoped(
+      DesktopUpdates.runIdleInstall({
+        pendingVersion: Ref.get(pending),
+        agentWorkRunning: Ref.get(agentWorkRunning),
+        windowFocused: Ref.get(windowFocused),
+        install: (version) => Ref.update(installs, (all) => [...all, version]),
+      }),
+    );
+    return { pending, agentWorkRunning, windowFocused, installs: Ref.get(installs) };
+  });
+
+  it.effect("installs once agent work has been idle for five seconds", () =>
+    Effect.gen(function* () {
+      const service = yield* start({
+        pending: "2.0.0",
+        agentWorkRunning: false,
+        windowFocused: false,
+      });
+      assert.deepStrictEqual(yield* service.installs, []);
+      yield* TestClock.adjust(Duration.seconds(5));
+      assert.deepStrictEqual(yield* service.installs, ["2.0.0"]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("waits for agent work, and installs anyway after 12 hours", () =>
+    Effect.gen(function* () {
+      const service = yield* start({
+        pending: "2.0.0",
+        agentWorkRunning: true,
+        windowFocused: false,
+      });
+      yield* TestClock.adjust(Duration.hours(11));
+      assert.deepStrictEqual(yield* service.installs, []);
+      yield* TestClock.adjust(Duration.hours(1));
+      assert.deepStrictEqual(yield* service.installs, ["2.0.0"]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("never installs while a window is focused", () =>
+    Effect.gen(function* () {
+      const service = yield* start({
+        pending: "2.0.0",
+        agentWorkRunning: false,
+        windowFocused: true,
+      });
+      yield* TestClock.adjust(Duration.hours(13));
+      assert.deepStrictEqual(yield* service.installs, []);
+      yield* Ref.set(service.windowFocused, false);
+      yield* TestClock.adjust(Duration.seconds(5));
+      assert.deepStrictEqual(yield* service.installs, ["2.0.0"]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("never installs without a pending download", () =>
+    Effect.gen(function* () {
+      const service = yield* start({
+        pending: undefined,
+        agentWorkRunning: false,
+        windowFocused: false,
+      });
+      yield* TestClock.adjust(Duration.hours(13));
+      assert.deepStrictEqual(yield* service.installs, []);
+    }).pipe(Effect.scoped),
+  );
+});

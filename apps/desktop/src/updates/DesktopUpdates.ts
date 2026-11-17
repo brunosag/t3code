@@ -1,4 +1,5 @@
 import {
+  AGENT_WORK_MARKER_FILE,
   DESKTOP_UPDATE_RESTART_MARKER_FILE,
   DESKTOP_UPDATE_IN_PROGRESS_MARKER_FILE,
   DESKTOP_UPDATE_IN_PROGRESS_TTL_MS,
@@ -11,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import { errorTag } from "@t3tools/shared/observability";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -64,6 +66,11 @@ const CHANNEL_CHANGE_RETRIES = 30;
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 hours";
 const UPDATE_CHECK_WAIT = Duration.seconds(90);
+const IDLE_INSTALL_CHECK_INTERVAL = Duration.seconds(5);
+// Queued runs are not agent work, so this bridges a finished turn and its queued follow-up starting.
+const IDLE_INSTALL_GRACE = Duration.seconds(5);
+// Agent work that never pauses still gets the update eventually; a focused window always waits.
+const IDLE_INSTALL_MAX_DEFERRAL = Duration.hours(12);
 
 type UpdateAction = "check" | "download" | "install" | "install-recovery" | "channel";
 
@@ -371,6 +378,37 @@ function getAutoUpdateDisabledReason(args: {
 function isArm64HostRunningIntelBuild(runtimeInfo: DesktopRuntimeInfo): boolean {
   return runtimeInfo.hostArch === "arm64" && runtimeInfo.appArch === "x64";
 }
+
+/**
+ * Installs the pending download once agent work has been idle for IDLE_INSTALL_GRACE, or
+ * IDLE_INSTALL_MAX_DEFERRAL after it was first seen, never while a window is focused.
+ */
+export const runIdleInstall = Effect.fn("DesktopUpdates.runIdleInstall")(function* (input: {
+  readonly pendingVersion: Effect.Effect<string | undefined>;
+  readonly agentWorkRunning: Effect.Effect<boolean>;
+  readonly windowFocused: Effect.Effect<boolean>;
+  readonly install: (version: string) => Effect.Effect<void>;
+}) {
+  let pending: { readonly version: string; readonly since: number } | undefined;
+  let idleSince: number | undefined;
+  const check = Effect.gen(function* () {
+    const version = yield* input.pendingVersion;
+    const now = yield* Clock.currentTimeMillis;
+    if (version === undefined) {
+      pending = undefined;
+      return;
+    }
+    if (pending?.version !== version) pending = { version, since: now };
+    idleSince = (yield* input.agentWorkRunning) ? undefined : (idleSince ?? now);
+    if (yield* input.windowFocused) return;
+    const idle =
+      idleSince !== undefined && now - idleSince >= Duration.toMillis(IDLE_INSTALL_GRACE);
+    if (!idle && now - pending.since < Duration.toMillis(IDLE_INSTALL_MAX_DEFERRAL)) return;
+    yield* Effect.logInfo("installing the downloaded update while idle", { version, idle });
+    yield* input.install(version);
+  });
+  yield* check.pipe(Effect.repeat(Schedule.spaced(IDLE_INSTALL_CHECK_INTERVAL)));
+});
 
 /** @public */
 export const make = Effect.gen(function* () {
@@ -888,7 +926,10 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const installDownloadedUpdate = (expectedVersion?: string) =>
+  const installDownloadedUpdate = (
+    expectedVersion?: string,
+    relaunchArgs?: ReadonlyArray<string>,
+  ) =>
     Effect.scoped(
       Effect.gen(function* () {
         const admission = yield* admitAfterCheck(
@@ -955,6 +996,7 @@ export const make = Effect.gen(function* () {
             isSilent: true,
             isForceRunAfter: true,
             launcherPath: Option.getOrUndefined(environment.desktopLauncherPath),
+            relaunchArgs,
           });
           return { accepted: true, completed: false, failed: false };
         }).pipe(
@@ -995,6 +1037,7 @@ export const make = Effect.gen(function* () {
 
   const installWithExpectedVersion = Effect.fn("desktop.updates.install")(function* (
     expectedVersion?: string,
+    relaunchArgs?: ReadonlyArray<string>,
   ) {
     if (yield* Ref.get(desktopState.quitting)) {
       return {
@@ -1039,7 +1082,7 @@ export const make = Effect.gen(function* () {
         }
       }
     }
-    const result = yield* installDownloadedUpdate(installVersion);
+    const result = yield* installDownloadedUpdate(installVersion, relaunchArgs);
     return {
       accepted: result.accepted,
       completed: result.completed,
@@ -1047,6 +1090,31 @@ export const make = Effect.gen(function* () {
       state: yield* Ref.get(updateStateRef),
     };
   });
+
+  const agentWorkMarkerPath = environment.path.join(updateRestartMarkerDir, AGENT_WORK_MARKER_FILE);
+  const installWhenIdle = runIdleInstall({
+    pendingVersion: Effect.gen(function* () {
+      const state = yield* Ref.get(updateStateRef);
+      const notApplied = yield* Ref.get(notAppliedVersionRef);
+      return state.status === "downloaded" &&
+        state.downloadedVersion !== null &&
+        !(Option.isSome(notApplied) && notApplied.value === state.downloadedVersion)
+        ? state.downloadedVersion
+        : undefined;
+    }),
+    agentWorkRunning: fileSystem
+      .exists(agentWorkMarkerPath)
+      .pipe(Effect.orElseSucceed(() => false)),
+    windowFocused: electronWindow.presence.pipe(Effect.map((presence) => presence === "focused")),
+    install: Effect.fn("desktop.updates.installWhenIdle")(function* (version) {
+      // A window the user left open comes back; a hidden one stays hidden.
+      const hidden = (yield* electronWindow.presence) === "hidden";
+      yield* installWithExpectedVersion(
+        version,
+        hidden ? [DesktopEnvironment.DESKTOP_START_HIDDEN_ARG] : [],
+      );
+    }),
+  }).pipe(Effect.forkScoped, Effect.asVoid);
 
   const startUpdatePollers: Effect.Effect<void, never, Scope.Scope> = Effect.gen(function* () {
     yield* Effect.sleep(AUTO_UPDATE_STARTUP_DELAY).pipe(
@@ -1362,6 +1430,7 @@ export const make = Effect.gen(function* () {
       });
 
       yield* downloadOfferedUpdates;
+      yield* installWhenIdle;
       yield* startUpdatePollers;
     }).pipe(Effect.withSpan("desktop.updates.configure")),
     setChannel: Effect.fn("desktop.updates.setChannel")(function* (

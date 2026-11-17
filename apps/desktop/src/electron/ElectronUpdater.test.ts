@@ -78,7 +78,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
         const launcherPath = path.join(dir, "t3-launcher");
         yield* fileSystem.writeFileString(
           launcherPath,
-          `#!/bin/sh\n{ echo launched; ls /proc/self/fd; kill -0 ${updatingApp.pid} 2>/dev/null && echo updater-alive; } > '${reportPath}'\n`,
+          `#!/bin/sh\n{ echo launched; echo "args:$*"; ls /proc/self/fd; kill -0 ${updatingApp.pid} 2>/dev/null && echo updater-alive; } > '${reportPath}'\n`,
         );
         yield* fileSystem.chmod(launcherPath, 0o755);
 
@@ -131,11 +131,13 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
           isSilent: true,
           isForceRunAfter: true,
           launcherPath,
+          relaunchArgs: ["--hidden"],
         });
         const report = yield* Effect.forkScoped(fileSystem.readFileString(reportPath));
 
         const lines = (yield* Fiber.join(report)).trim().split("\n");
         assert.include(lines, "launched", "relaunch bypassed T3CODE_DESKTOP_LAUNCHER_PATH");
+        assert.include(lines, "args:--hidden", "relaunch dropped its arguments");
         assert.notInclude(
           lines,
           "updater-alive",

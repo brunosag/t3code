@@ -19,6 +19,7 @@ const CLOSE_INHERITED_FDS_THEN_EXEC =
 const relaunchWithoutInheritedDescriptors = (
   updater: AppImageUpdater,
   launcherPath: string | undefined,
+  extraArgs: ReadonlyArray<string>,
 ) => {
   const spawnLog = (AppImageUpdater.prototype as unknown as { spawnLog: SpawnLog }).spawnLog;
   (updater as unknown as { spawnLog: SpawnLog }).spawnLog = function (cmd, args = [], ...rest) {
@@ -29,7 +30,16 @@ const relaunchWithoutInheritedDescriptors = (
       this,
       "bash",
       // Waits for this pid: appimage-run's bwrap dies with its parent, which holds the app's lock.
-      ["-p", "-c", CLOSE_INHERITED_FDS_THEN_EXEC, target, String(process.pid), target, ...args],
+      [
+        "-p",
+        "-c",
+        CLOSE_INHERITED_FDS_THEN_EXEC,
+        target,
+        String(process.pid),
+        target,
+        ...args,
+        ...extraArgs,
+      ],
       ...rest,
     );
   };
@@ -101,6 +111,8 @@ export class ElectronUpdater extends Context.Service<
       readonly isForceRunAfter: boolean;
       /** Relaunches an AppImage through this command instead (`T3CODE_DESKTOP_LAUNCHER_PATH`). */
       readonly launcherPath?: string | undefined;
+      /** Appended to an AppImage's relaunch command. */
+      readonly relaunchArgs?: ReadonlyArray<string> | undefined;
     }) => Effect.Effect<void, ElectronUpdaterQuitAndInstallError>;
     readonly on: <Args extends ReadonlyArray<unknown>>(
       eventName: string,
@@ -180,11 +192,12 @@ export const make = ElectronUpdater.of({
     isSilent,
     isForceRunAfter,
     launcherPath,
+    relaunchArgs,
   }) {
     return Effect.suspend(() => {
       const channel = autoUpdater.channel;
       if (autoUpdater instanceof AppImageUpdater) {
-        relaunchWithoutInheritedDescriptors(autoUpdater, launcherPath);
+        relaunchWithoutInheritedDescriptors(autoUpdater, launcherPath, relaunchArgs ?? []);
       }
       return Effect.try({
         try: () => autoUpdater.quitAndInstall(isSilent, isForceRunAfter),

@@ -739,6 +739,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   SleepInhibitor.layer,
   ProviderAutoUpdate.layer,
   IdleRestart.layer.pipe(Layer.provide(ProcessRunner.layer)),
+  IdleRestart.desktopMarkerLayer,
   // Catches overrides left behind by a project deleted before this cleanup
   // existed, or by a cleanup write that failed. See ProjectService.delete
   // for the normal (on-delete) path.

@@ -1,5 +1,6 @@
 // Switches the service to a version installed with `t3 service install --defer-restart` once agent
 // work is idle, so a deploy does not cut off running turns, subagents and their processes.
+import { AGENT_WORK_MARKER_FILE } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
@@ -144,5 +145,32 @@ export const layer = Layer.effectDiscard(
     );
 
     yield* forkParked(run({ pendingVersion, idleSince: Ref.get(idleSince), restart }));
+  }),
+);
+
+/** Holds the agent work marker so the desktop installs a downloaded update only while agents are idle. */
+export const desktopMarkerLayer = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const config = yield* ServerConfig.ServerConfig;
+    if (config.mode !== "desktop") return;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const runtimeDir = path.join(config.baseDir, "runtime");
+    const marker = path.join(runtimeDir, AGENT_WORK_MARKER_FILE);
+    const remove = fs.remove(marker, { force: true }).pipe(Effect.ignore);
+    // A crashed backend skips its finalizers.
+    yield* remove;
+    yield* watchAgentWork(
+      "agent work marker",
+      Effect.acquireRelease(
+        fs.makeDirectory(runtimeDir, { recursive: true }).pipe(
+          Effect.andThen(fs.writeFileString(marker, "")),
+          Effect.catch((error) =>
+            Effect.logWarning("could not write the agent work marker", { error }),
+          ),
+        ),
+        () => remove,
+      ).pipe(Effect.andThen(Effect.never)),
+    );
   }),
 );
