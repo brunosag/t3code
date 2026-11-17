@@ -140,6 +140,8 @@ describe("chat math parsing", () => {
       "Set $HOME,$@ before running.",
       "Set $HOME,$(pwd) before running.",
       "Pay $1,000,$2,000 now.",
+      "Now (R$) and later (R$).",
+      "Range [US$] to [R$].",
     ]) {
       expect(formulas(prose), prose).toEqual([]);
       expect(text(prose), prose).toBe(prose);
@@ -377,6 +379,12 @@ describe("math in GFM tables", () => {
       }
     },
   );
+
+  it("keeps currency headers like (R$) out of formulas", () => {
+    const source = "| Kind | Now (R$) | I'd set (R$) | Why |\n|---|---|---|---|\n| a | b | c | d |";
+    expect(parse(source).children[0]?.type).toBe("table");
+    expect(markdownMathRanges(source)).toEqual([]);
+  });
 
   it("retains multiline math after a prose pipe outside tables", () => {
     const source = "a | b: \\(x\n+y\\)";

@@ -4,7 +4,7 @@ The user's fork of upstream T3 Code. Where this file and `AGENTS.md` differ, thi
 
 ## You may
 
-- Land finished work on `bsag`, started from `origin/bsag` (never the stale local `main`), unless the user asked to review it first. Pushing `bsag` deploys (below).
+- Land finished work on `bsag`, started from `origin/bsag` (never the stale local `main`), unless the user asked to review it first. Pushing `bsag` deploys (below). Don't ask first: run the fork check, push, watch the deploy and check the result live, then report.
 - Skip upstream's process: Pull requests, Evals, Documentation, the bug-proof rule under Verifying (failing test first, before/after captures) and the ask-first browser rules don't apply.
 - Check user-visible changes on the deployed instance after the deploy (`~/local/t3-pi/DEPLOYMENT.md` on `vps` says how to reach it). A worktree dev server costs a ~4 GB install and a seeded database (the live one is past the 500 MiB auto-seed limit: `vp run migrate-dev-db`); start one only when a change can't be seen deployed or shipping it unseen could break the live instance.
 

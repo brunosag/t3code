@@ -334,7 +334,7 @@ diff --git a/dev/lib/math-text.js b/dev/lib/math-text.js
  
      return start
  
-@@ -89,6 +96,16 @@
+@@ -89,6 +96,18 @@
        }
  
        effects.exit('mathTextSequence')
@@ -348,10 +348,12 @@ diff --git a/dev/lib/math-text.js b/dev/lib/math-text.js
 +        code === codes.horizontalTab ||
 +        code === codes.comma
 +      if (sizeOpen === 1 && openWhitespace) return nok(code)
++      // `(R$) … (R$)`: a currency symbol, not TeX opening on closing punctuation.
++      if (sizeOpen === 1 && /[)\]};:!?]/.test(String.fromCharCode(code))) return nok(code)
        return between(code)
      }
  
-@@ -103,13 +120,14 @@
+@@ -103,13 +122,14 @@
       * @type {State}
       */
      function between(code) {
@@ -367,7 +369,7 @@ diff --git a/dev/lib/math-text.js b/dev/lib/math-text.js
          return sequenceClose(code)
        }
  
-@@ -144,6 +162,16 @@
+@@ -144,6 +164,16 @@
       * @type {State}
       */
      function data(code) {
@@ -384,7 +386,7 @@ diff --git a/dev/lib/math-text.js b/dev/lib/math-text.js
        if (
          code === codes.eof ||
          code === codes.space ||
-@@ -179,9 +207,29 @@
+@@ -179,9 +209,29 @@
  
        // Done!
        if (size === sizeOpen) {
