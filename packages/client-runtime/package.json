@@ -43,6 +43,10 @@
       "types": "./src/modelSearch.ts",
       "default": "./src/modelSearch.ts"
     },
+    "./usage-limit-controls": {
+      "types": "./src/usageLimitControls.ts",
+      "default": "./src/usageLimitControls.ts"
+    },
     "./image-attachment-size": {
       "types": "./src/imageAttachmentSize.ts",
       "default": "./src/imageAttachmentSize.ts"
@@ -610,6 +614,14 @@
     "./read-aloud": {
       "types": "./src/readAloud.ts",
       "default": "./src/readAloud.ts"
+    },
+    "./read-aloud-controller": {
+      "types": "./src/readAloudController.ts",
+      "default": "./src/readAloudController.ts"
+    },
+    "./read-aloud-speech": {
+      "types": "./src/readAloudSpeech.ts",
+      "default": "./src/readAloudSpeech.ts"
     },
     "./provider-instance-ids": {
       "types": "./src/providerInstanceIds.ts",

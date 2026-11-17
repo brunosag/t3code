@@ -8,7 +8,7 @@ import {
 
 import { readAloud } from "~/lib/readAloud";
 import { usePrimaryEnvironmentId } from "~/state/environments";
-import { READ_ALOUD_VOICE_INFO } from "~/lib/readAloudVoices";
+import { READ_ALOUD_VOICE_GROUPS, READ_ALOUD_VOICE_INFO } from "@t3tools/client-runtime/read-aloud";
 import { Button } from "../ui/button";
 import {
   Select,
@@ -26,22 +26,6 @@ import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings"
 
 const PREVIEW_KEY = "settings-voice-preview";
 const getServerSnapshot = () => null;
-
-const VOICE_GROUPS = (
-  [
-    ["American", "Female"],
-    ["American", "Male"],
-    ["British", "Female"],
-    ["British", "Male"],
-  ] as const
-).map(([accent, gender]) => ({
-  label: `${accent} ${gender.toLowerCase()}`,
-  voices: READ_ALOUD_VOICES.filter(
-    (voice) =>
-      READ_ALOUD_VOICE_INFO[voice].accent === accent &&
-      READ_ALOUD_VOICE_INFO[voice].gender === gender,
-  ),
-}));
 
 function isReadAloudVoice(value: unknown): value is ReadAloudVoice {
   return READ_ALOUD_VOICES.some((voice) => voice === value);
@@ -103,7 +87,7 @@ export function ReadAloudVoiceSettings() {
               </SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
-              {VOICE_GROUPS.map((group) => (
+              {READ_ALOUD_VOICE_GROUPS.map((group) => (
                 <SelectGroup key={group.label}>
                   <SelectGroupLabel>{group.label}</SelectGroupLabel>
                   {group.voices.map((option) => (

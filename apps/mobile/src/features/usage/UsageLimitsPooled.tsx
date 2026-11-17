@@ -1,8 +1,17 @@
 import { useAtomValue } from "@effect/atom-react";
+import type { MenuAction } from "@react-native-menu/menu";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, type UsageProviderKind } from "@t3tools/contracts";
 import { providerClients } from "@t3tools/client-runtime/provider-clients";
 import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/provider-instance-display";
+import {
+  hubLimitPools,
+  moveProvider,
+  NO_PENDING_HUB_CHANGES,
+  type PendingHubChanges,
+  routeByResetHubs,
+} from "@t3tools/client-runtime/usage-limit-controls";
+import { limitRunway } from "@t3tools/shared/usageLimitRunway";
 import {
   collectLimitAccounts,
   collectExternalUsageLinks,
@@ -10,27 +19,35 @@ import {
   collectLimitPools,
   cursorUsageWindowDetails,
   displayLimitWindows,
-  formatResetsIn,
+  formatDuration,
   paceRemainingPercent,
   remainingPercent,
   type LimitAccount,
+  type LimitPool,
+  type LimitPoolMember,
   type LimitPoolWindow,
 } from "@t3tools/shared/usageLimits";
-import { Fragment, type ReactNode, useId, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Linking, Pressable, View } from "react-native";
-import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
-import { Defs, Path, Pattern, Rect, Svg } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
+import { ControlPill } from "../../components/ui/ControlPill";
+import { Menu } from "../../components/ui/Menu";
+import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { ProviderIcon } from "../../components/ProviderIcon";
-import { SettingsScreen } from "../settings/components/SettingsScreen";
+import { cn } from "../../lib/cn";
 import { environmentPresentations } from "../../state/presentation";
+import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { SettingsScreen } from "../settings/components/SettingsScreen";
+import { AccountChip, emailInitials } from "./AccountChip";
+import { PoolFigures, RunwayChart } from "./UsageLimitRunway";
 import { ResetCredits } from "./UsageLimitsSection";
-import { usageProviderKind, useProviderColors } from "./usageProviders";
-
-const PACE_LABEL = { ahead: "Ahead of pace", on: "On pace", under: "Under pace" } as const;
+import { hubPermissionsAtom, useUsageLimitsLayout } from "./usageLimitsLayout";
+import { environmentIdsKey } from "./usageLimitsRefresh";
+import { PROVIDER_LABEL, usageProviderKind, useProviderColors } from "./usageProviders";
 
 function accountName(account: LimitAccount) {
   if (account.displayName) return account.displayName;
@@ -38,35 +55,11 @@ function accountName(account: LimitAccount) {
   return emailInitials(account.email) || "Account";
 }
 
-function emailInitials(email: string) {
-  const [local = "", domain = ""] = email.split("@");
-  return `${local[0] ?? ""}${domain[0] ?? ""}`.toUpperCase();
+function providerLabel(driver: LimitPool["driver"]) {
+  return providerClients.get(driver)?.label ?? driver;
 }
 
-function accountHue(email: string) {
-  let hash = 0;
-  for (let index = 0; index < email.length; index += 1) {
-    hash = (hash * 31 + email.charCodeAt(index)) | 0;
-  }
-  return Math.abs(hash) % 360;
-}
-
-// Same hashed hue as the web account chip, so an account keeps its color across clients.
-function AccountChip({ email }: { readonly email: string }) {
-  const hue = accountHue(email);
-  return (
-    <View
-      className="size-5 items-center justify-center rounded-full"
-      style={{ backgroundColor: `hsl(${hue}, 45%, 82%)` }}
-    >
-      <Text className="text-[9px] font-t3-bold" style={{ color: `hsl(${hue}, 45%, 28%)` }}>
-        {emailInitials(email)}
-      </Text>
-    </View>
-  );
-}
-
-// Same gap-and-tick as the Limits rows: two clipped copies of the segment leave a see-through gap.
+// Same gap-and-tick as the Limits rows: two clipped copies of the bar leave a see-through gap.
 function PaceGap({
   timeLeft,
   children,
@@ -105,56 +98,75 @@ function PaceGap({
           ))}
       {tickX !== null ? (
         <View
-          className="absolute top-0.5 bottom-0.5 w-0.5 rounded-full bg-foreground"
-          style={{ left: tickX - 1 }}
+          className="absolute top-0 bottom-0 w-px rounded-full bg-foreground opacity-60"
+          style={{ left: tickX }}
         />
       ) : null}
     </View>
   );
 }
 
-function AccountSegment({
-  remaining,
+/** One account's own reading under the pooled figure; switched-off logins are dimmed and left out of it. */
+function AccountRow({
+  member: { account, window },
+  weighted,
   color,
-  refillPercent,
+  now,
+  off,
+  onPress,
 }: {
-  readonly remaining: number;
+  readonly member: Pick<LimitPoolMember, "account" | "window">;
+  readonly weighted: boolean;
   readonly color: string;
-  readonly refillPercent: number;
+  readonly now: number;
+  readonly off: boolean;
+  readonly onPress: () => void;
 }) {
-  const patternId = useId().replace(/:/g, "");
-  const [size, setSize] = useState({ width: 0, height: 0 });
+  const name = accountName(account);
+  const remaining = remainingPercent(window);
+  const timeLeft = paceRemainingPercent(window, now);
+  const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+  const resetsIn = resetsAt > now ? `in ${formatDuration(resetsAt - now)}` : null;
+  const showChip = account.image !== undefined || (account.email && account.displayName);
   return (
-    <View
-      pointerEvents="none"
-      className="absolute inset-0"
-      onLayout={(event) => {
-        const { width, height } = event.nativeEvent.layout;
-        setSize((previous) =>
-          previous.width === width && previous.height === height ? previous : { width, height },
-        );
-      }}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${name}${off ? ", off" : ""}, ${remaining}% left${resetsIn ? `, resets ${resetsIn}` : ""}`}
+      accessibilityHint="Show account details"
+      onPress={onPress}
+      className={cn("min-h-11 justify-center gap-1 py-1 active:opacity-60", off && "opacity-45")}
     >
-      {size.width > 0 && size.height > 0 ? (
-        // Numeric canvas dimensions clear Android SVG geometry cached before a segment resized.
-        <Svg width={size.width} height={size.height} accessible={false}>
-          <Defs>
-            <Pattern id={patternId} width={6} height={6} patternUnits="userSpaceOnUse">
-              <Path d="M-1 1L1 -1M0 6L6 0M5 7L7 5" stroke={color} strokeWidth={1} opacity={0.22} />
-            </Pattern>
-          </Defs>
-          {refillPercent > 0 ? (
-            <Rect
-              x={`${100 - Math.min(100 - remaining, refillPercent)}%`}
-              width={`${Math.min(100 - remaining, refillPercent)}%`}
-              height="100%"
-              fill={`url(#${patternId})`}
+      <View className="flex-row items-center gap-1.5">
+        {showChip ? <AccountChip email={account.email} image={account.image} /> : null}
+        <Text numberOfLines={1} className="min-w-0 shrink text-xs text-foreground-muted">
+          {name}
+        </Text>
+        {weighted && account.capacity !== 1 ? (
+          <Text className="text-xs text-foreground-tertiary">×{account.capacity}</Text>
+        ) : null}
+        {off ? <Text className="text-xs text-foreground-muted">· off</Text> : null}
+        <View className="flex-1" />
+        <Text className="text-xs font-t3-medium tabular-nums text-foreground">{remaining}%</Text>
+        {resetsIn ? (
+          <Text className="text-xs tabular-nums text-foreground-tertiary">{resetsIn}</Text>
+        ) : null}
+      </View>
+      <View className="h-2">
+        <PaceGap timeLeft={timeLeft}>
+          <View className="absolute inset-x-0 top-0.5 bottom-0.5 rounded-full bg-subtle" />
+          {remaining > 0 ? (
+            <View
+              className="absolute top-0.5 bottom-0.5 left-0 rounded-full"
+              style={{
+                width: `${remaining}%`,
+                backgroundColor: normalizeProviderAccentColor(account.accentColor) ?? color,
+                opacity: 0.8,
+              }}
             />
           ) : null}
-          <Rect width={`${remaining}%`} height="100%" fill={color} opacity={0.35} />
-        </Svg>
-      ) : null}
-    </View>
+        </PaceGap>
+      </View>
+    </Pressable>
   );
 }
 
@@ -162,242 +174,127 @@ function PoolWindowCard({
   pool,
   color,
   now,
-  environmentIds,
   label,
   description,
+  showAccounts,
+  onOpenAccount,
   wide,
 }: {
   readonly pool: LimitPoolWindow;
   readonly color: string;
   readonly now: number;
-  readonly environmentIds: readonly string[] | null;
-  readonly label?: string | null;
-  readonly description?: string;
+  readonly label: string | null;
+  readonly description?: string | undefined;
+  readonly showAccounts: boolean;
+  readonly onOpenAccount: (account: LimitAccount) => void;
   readonly wide: boolean;
 }) {
-  const navigation = useNavigation();
-  const [barWidth, setBarWidth] = useState(0);
-  // Each segment needs room for its account, percent and reset to label itself.
-  const segmentWidth = barWidth / Math.max(pool.columns.length, 1);
-  const inlineLabels = wide && segmentWidth >= 96;
-  const inlineReset = wide && segmentWidth >= 150;
-  const inlineName = wide && segmentWidth >= 220;
-  const nextRefill = pool.resets.find((reset) => reset.restoresPercent > 0);
-  const openAccount = (account: LimitAccount) =>
-    navigation.navigate("SettingsUsageAccount", {
-      accountKey: account.key,
-      windowId: pool.id,
-      windowKind: pool.kind,
-      environmentIds,
-      now,
-    });
-  const summary = (
-    <>
-      <View className={wide ? "gap-1" : "flex-row items-start justify-between gap-3"}>
-        <View className="gap-1">
-          {label !== null ? (
-            <Text className="text-sm font-t3-medium text-foreground">{label ?? pool.label}</Text>
-          ) : null}
-          <View className="flex-row items-baseline gap-1.5">
-            <Text className="text-3xl font-t3-bold tabular-nums text-foreground">
-              {pool.remainingPercent}%
-            </Text>
-            <Text className="text-sm text-foreground-muted">left</Text>
-          </View>
-        </View>
-        {pool.pace ? (
-          <Text className="text-xs text-foreground-tertiary">{PACE_LABEL[pool.pace]}</Text>
-        ) : null}
-      </View>
-      {description ? <Text className="text-xs text-foreground-muted">{description}</Text> : null}
-      {nextRefill ? (
-        <Text className="text-xs tabular-nums text-foreground-muted">
-          ↻ +{nextRefill.restoresPercent}%{" "}
-          {formatResetsIn(nextRefill.member.window, now)
-            ?.replace("resets in ", "in ")
-            .replace("resets now", "now")}
-        </Text>
-      ) : null}
-    </>
-  );
-  const bar = (
-    <View
-      className="flex-row gap-1"
-      onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}
-    >
-      {pool.columns.map((member, index) => {
-        if (!member.window)
-          return (
-            <View
-              key={member.account.key}
-              className={wide ? "h-9 min-w-0 flex-1" : "h-7 min-w-0 flex-1"}
-            />
-          );
-        const { account, window } = member;
-        const timeLeft = paceRemainingPercent(window, now);
-        const credits = account.limits.resetCredits?.availableCount ?? 0;
-        const resetsIn = formatResetsIn(window, now)?.replace("resets in ", "");
-        return (
-          <Pressable
-            key={account.key}
-            accessibilityRole="button"
-            accessibilityLabel={`Segment ${index + 1}, ${accountName(account)}, ${remainingPercent(window)}% left${timeLeft === null ? "" : `, ${timeLeft}% of the window left`}`}
-            accessibilityHint="Show account details"
-            onPress={() => openAccount(account)}
-            className={wide ? "h-9 min-w-0 flex-1 rounded-md" : "h-7 min-w-0 flex-1 rounded-md"}
-          >
-            <PaceGap timeLeft={timeLeft}>
-              <View className="absolute inset-0 rounded-md bg-subtle" />
-              <View className="absolute inset-0 overflow-hidden rounded-md">
-                <AccountSegment
-                  remaining={remainingPercent(window)}
-                  color={normalizeProviderAccentColor(account.accentColor) ?? color}
-                  refillPercent={window.resetsAt ? member.refillPercent : 0}
-                />
-              </View>
-            </PaceGap>
-            {inlineLabels ? (
-              <View
-                pointerEvents="none"
-                className="absolute inset-0 flex-row items-center justify-between gap-2 overflow-hidden rounded-md px-2"
-              >
-                <View className="min-w-0 shrink flex-row items-center gap-1.5">
-                  {account.email ? <AccountChip email={account.email} /> : null}
-                  {account.email && !(account.displayName && inlineName) ? null : (
-                    <Text
-                      numberOfLines={1}
-                      className="min-w-0 shrink text-xs font-t3-medium text-foreground"
-                    >
-                      {accountName(account)}
-                    </Text>
-                  )}
-                  <Text className="text-sm font-t3-bold tabular-nums text-foreground">
-                    {remainingPercent(window)}%
-                  </Text>
-                </View>
-                {inlineReset && (resetsIn || credits) ? (
-                  <View className="shrink-0 flex-row items-center gap-1 rounded bg-grouped-card/85 px-1.5 py-0.5">
-                    {resetsIn ? (
-                      <>
-                        <SymbolView
-                          name="arrow.clockwise"
-                          size={11}
-                          tintColorClassName="accent-foreground-muted"
-                        />
-                        <Text className="text-xs tabular-nums text-foreground-muted">
-                          {resetsIn}
-                        </Text>
-                      </>
-                    ) : null}
-                    {credits ? (
-                      <>
-                        <SymbolView name="ticket" size={12} tintColorClassName="accent-icon" />
-                        <Text className="text-xs font-t3-medium tabular-nums text-foreground">
-                          {credits}
-                        </Text>
-                      </>
-                    ) : null}
-                  </View>
-                ) : null}
-              </View>
-            ) : (
-              <View
-                pointerEvents="none"
-                className="absolute inset-0 items-center justify-center overflow-hidden rounded-md"
-              >
-                <Text
-                  numberOfLines={1}
-                  className="max-w-full shrink text-xs font-t3-medium tabular-nums text-foreground"
-                >
-                  {index + 1}
-                </Text>
-              </View>
-            )}
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-  const legend = (
-    <View>
-      {pool.columns.map(({ account, window }, index) => {
-        if (!window) return null;
-        const segmentColor = normalizeProviderAccentColor(account.accentColor) ?? color;
-        const credits = account.limits.resetCredits?.availableCount ?? 0;
-        const resetsIn = formatResetsIn(window, now);
-        return (
-          <Pressable
-            key={account.key}
-            accessibilityRole="button"
-            accessibilityLabel={`Segment ${index + 1}, ${accountName(account)}, ${remainingPercent(window)}% left${resetsIn ? `, ${resetsIn}` : ""}${credits ? `, ${credits} reset credits banked` : ""}`}
-            accessibilityHint="Show account details"
-            onPress={() => openAccount(account)}
-            className="min-h-[44px] flex-row items-center gap-2 active:opacity-60"
-          >
-            <View className="relative size-5 items-center justify-center overflow-hidden rounded-md bg-subtle-strong">
-              <View
-                pointerEvents="none"
-                className="absolute inset-0"
-                style={{ backgroundColor: segmentColor, opacity: 0.35 }}
-              />
-              <Text className="text-xs font-t3-medium tabular-nums text-foreground">
-                {index + 1}
-              </Text>
-            </View>
-            <Text
-              numberOfLines={1}
-              className="min-w-0 flex-1 text-sm font-t3-medium text-foreground"
-            >
-              {accountName(account)}
-            </Text>
-            <Text className="text-sm font-t3-medium tabular-nums text-foreground">
-              {remainingPercent(window)}%
-            </Text>
-            <View className="flex-row items-center gap-1">
-              {resetsIn ? (
-                <>
-                  <SymbolView
-                    name="arrow.clockwise"
-                    size={12}
-                    tintColorClassName="accent-foreground-muted"
-                  />
-                  <Text className="text-xs tabular-nums text-foreground-muted">
-                    {resetsIn.replace("resets in ", "")}
-                  </Text>
-                </>
-              ) : null}
-              {credits ? (
-                <>
-                  {resetsIn ? <Text className="text-xs text-foreground-tertiary">·</Text> : null}
-                  <SymbolView name="ticket" size={13} tintColorClassName="accent-icon" />
-                  <Text className="text-xs font-t3-medium tabular-nums text-foreground">
-                    {credits}
-                  </Text>
-                </>
-              ) : null}
-            </View>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-  if (wide) {
-    return (
-      <View className="flex-row items-center gap-6 rounded-[24px] border-continuous bg-grouped-card p-4">
-        <View className="w-44 gap-1">{summary}</View>
-        <View className="min-w-0 flex-1 gap-1">
-          {bar}
-          {inlineLabels ? null : legend}
-        </View>
-      </View>
-    );
-  }
+  const runway = limitRunway(pool, now);
+  // Plan sizes only weigh the pool when every account's is known.
+  const weighted = pool.members.every((member) => member.account.capacity !== undefined);
+  const figures = <PoolFigures pool={pool} runway={runway} label={label} now={now} />;
+  const chart = runway ? (
+    <RunwayChart runway={runway} color={color} now={now} label={label ?? pool.label} />
+  ) : null;
   return (
     <View className="gap-3 rounded-[24px] border-continuous bg-grouped-card p-4">
-      {summary}
-      {bar}
-      {legend}
+      {wide ? (
+        <View className="flex-row items-center gap-6">
+          <View className="w-44">{figures}</View>
+          <View className="min-w-0 flex-1">{chart}</View>
+        </View>
+      ) : (
+        <>
+          {figures}
+          {chart}
+        </>
+      )}
+      {description ? <Text className="text-xs text-foreground-muted">{description}</Text> : null}
+      {showAccounts ? (
+        <View className="border-t border-border-subtle pt-2">
+          {pool.members.map((member) => (
+            <AccountRow
+              key={member.account.key}
+              member={member}
+              weighted={weighted}
+              color={color}
+              now={now}
+              off={false}
+              onPress={() => onOpenAccount(member.account)}
+            />
+          ))}
+          {pool.offMembers.map((member) => (
+            <AccountRow
+              key={member.account.key}
+              member={member}
+              weighted={weighted}
+              color={color}
+              now={now}
+              off
+              onPress={() => onOpenAccount(member.account)}
+            />
+          ))}
+        </View>
+      ) : null}
     </View>
+  );
+}
+
+/** Pools keep a login's earlier reading when the hub's last read of it failed. */
+function StaleReadings({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
+  const stale = pool.accounts.filter((account) => account.stale && !account.disabled);
+  if (stale.length === 0) return null;
+  return (
+    <View className="gap-1 px-1">
+      {stale.map((account) => (
+        <Text key={account.key} className="text-xs text-foreground-muted">
+          <Text className="text-xs font-t3-medium text-foreground">{accountName(account)}</Text>{" "}
+          couldn't be read just now; showing its reading from{" "}
+          {formatDuration(Math.max(0, now - Date.parse(account.limits.checkedAt)))} ago.
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+/** Credits belong to one login, so they list by account even with account rows hidden. */
+function BankedResets({ pool, now }: { readonly pool: LimitPool; readonly now: number }) {
+  const banked = pool.accounts.flatMap((account) =>
+    account.redeem && account.limits.resetCredits?.availableCount
+      ? [{ account, redeem: account.redeem, credits: account.limits.resetCredits }]
+      : [],
+  );
+  if (banked.length === 0) return null;
+  return (
+    <View className="gap-3 rounded-[24px] border-continuous bg-grouped-card p-4">
+      <Text className="text-sm font-t3-medium text-foreground">Banked resets</Text>
+      {banked.map(({ account, redeem, credits }) => (
+        <View key={account.key} className="gap-1.5">
+          <View className="flex-row items-center gap-1.5">
+            <AccountChip email={account.email} image={account.image} />
+            <Text numberOfLines={1} className="min-w-0 shrink text-sm text-foreground">
+              {accountName(account)}
+            </Text>
+          </View>
+          <ResetCredits
+            environmentId={redeem.environmentId}
+            input={redeem.input}
+            credits={credits}
+            now={now}
+            dense
+          />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const limitKey = (pool: LimitPool, window: LimitPoolWindow) => `${pool.driver}:${window.id}`;
+
+function windowLabel(pool: LimitPool, window: LimitPoolWindow) {
+  return (
+    (pool.driver === "cursor" ? cursorUsageWindowDetails(window.id, pool)?.label : undefined) ??
+    window.label
   );
 }
 
@@ -412,15 +309,188 @@ export function UsageLimitsSection({
   readonly selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null;
   readonly wide?: boolean;
 }) {
+  const navigation = useNavigation();
   const presentations = useAtomValue(environmentPresentations.presentationsWithProvidersAtom);
+  const layout = useUsageLimitsLayout();
+  const { providerOrder, hiddenProviders, hiddenLimits, hiddenAccountRows } = layout;
   const selected =
     selectedEnvironmentIds === null
       ? presentations
       : new Map([...presentations].filter(([id]) => selectedEnvironmentIds.has(id)));
-  const pools = collectLimitPools(collectLimitAccounts(selected), now);
+  const [pending, setPending] = useState<PendingHubChanges>(NO_PENDING_HUB_CHANGES);
+  const resolved = hubLimitPools(selected, pending, now);
+  // Dropped during render once the hub reports a change, or the login is gone.
+  if (resolved.pending !== pending) setPending(resolved.pending);
+  const rank = (pool: LimitPool) => {
+    const provider = usageProviderKind(pool.driver);
+    return provider ? providerOrder.indexOf(provider) : providerOrder.length;
+  };
+  const pools = resolved.pools
+    .filter((pool) => {
+      const provider = usageProviderKind(pool.driver);
+      return provider === null || !hiddenProviders.has(provider);
+    })
+    .sort((left, right) => rank(left) - rank(right));
+  const environmentIds = [...selected.keys()];
+  const permissions = useAtomValue(hubPermissionsAtom(environmentIdsKey(environmentIds)));
+  const mayRoute = (account: LimitAccount) =>
+    account.routing !== null && permissions.route.has(account.routing.environmentId);
+  const setRouteByReset = useAtomCommand(
+    serverEnvironment.setUsageLimitSourceRouteByReset,
+    "Change hub routing",
+  );
+  const toggleRouteByReset = (pool: LimitPool) => {
+    const routable = routeByResetHubs(pool, mayRoute);
+    if (routable === null) return;
+    const enabled = !routable.on;
+    for (const [key, routing] of routable.hubs) {
+      setPending((previous) => ({
+        ...previous,
+        byReset: new Map([...previous.byReset, [key, enabled]]),
+      }));
+      void setRouteByReset({
+        environmentId: routing.environmentId,
+        input: { sourceId: routing.sourceId, driver: pool.driver, enabled },
+      }).then((result) => {
+        if (result._tag === "Failure") {
+          setPending((previous) => ({
+            ...previous,
+            byReset: new Map([...previous.byReset].filter(([entry]) => entry !== key)),
+          }));
+        }
+      });
+    }
+  };
+  const environmentParam = selectedEnvironmentIds === null ? null : [...selectedEnvironmentIds];
+  const openAccount = (pool: LimitPoolWindow) => (account: LimitAccount) =>
+    navigation.navigate("SettingsUsageAccount", {
+      accountKey: account.key,
+      windowId: pool.id,
+      windowKind: pool.kind,
+      environmentIds: environmentParam,
+      now,
+    });
+  const shownProviders = pools.flatMap((pool) => usageProviderKind(pool.driver) ?? []);
+  const menuFor = (pool: LimitPool) => {
+    const provider = usageProviderKind(pool.driver);
+    if (!provider) return null;
+    const label = providerLabel(pool.driver);
+    const index = shownProviders.indexOf(provider);
+    const limits = displayLimitWindows(pool).map((window) => ({
+      key: limitKey(pool, window),
+      label: windowLabel(pool, window),
+    }));
+    const accountsShown = !hiddenAccountRows.has(provider);
+    const routeByReset = routeByResetHubs(pool, mayRoute);
+    const hasHubControls =
+      pool.accounts.some(mayRoute) ||
+      resolved.hubLogins.some(
+        (login) =>
+          login.driver === pool.driver &&
+          (permissions.disable.has(login.environmentId) ||
+            permissions.rename.has(login.environmentId)),
+      );
+    const actions: MenuAction[] = [
+      {
+        id: "up",
+        title: "Move up",
+        image: "arrow.up",
+        attributes: { disabled: index <= 0 },
+      },
+      {
+        id: "down",
+        title: "Move down",
+        image: "arrow.down",
+        attributes: { disabled: index === -1 || index >= shownProviders.length - 1 },
+      },
+      ...(limits.length > 1
+        ? [
+            {
+              id: "limits",
+              title: "Limits",
+              image: "list.number",
+              subactions: limits.map((limit): MenuAction => ({
+                id: `limit:${limit.key}`,
+                title: limit.label,
+                state: hiddenLimits.has(limit.key) ? "off" : "on",
+              })),
+            } satisfies MenuAction,
+          ]
+        : []),
+      ...(pool.accounts.length > 1
+        ? [
+            {
+              id: "accounts",
+              title: "Show accounts",
+              state: accountsShown ? "on" : "off",
+            } satisfies MenuAction,
+          ]
+        : []),
+      ...(routeByReset
+        ? [
+            {
+              id: "route-by-reset",
+              title: "Route by earliest reset",
+              state: routeByReset.on ? "on" : "off",
+            } satisfies MenuAction,
+          ]
+        : []),
+      ...(hasHubControls
+        ? [{ id: "hub", title: "Hub accounts", image: "person.2" } satisfies MenuAction]
+        : []),
+      { id: "hide", title: `Hide ${label}`, image: "eye.slash" },
+    ];
+    const onAction = (id: string) => {
+      if (id === "up" || id === "down") {
+        layout.update({
+          providerOrder: moveProvider(
+            providerOrder,
+            shownProviders,
+            provider,
+            id === "up" ? -1 : 1,
+          ),
+        });
+      } else if (id.startsWith("limit:")) {
+        const key = id.slice("limit:".length);
+        layout.update({
+          hiddenLimits: hiddenLimits.has(key)
+            ? [...hiddenLimits].filter((entry) => entry !== key)
+            : [...hiddenLimits, key],
+        });
+      } else if (id === "accounts") {
+        layout.update({
+          hiddenAccountRows: accountsShown
+            ? [...hiddenAccountRows, provider]
+            : [...hiddenAccountRows].filter((entry) => entry !== provider),
+        });
+      } else if (id === "route-by-reset") {
+        toggleRouteByReset(pool);
+      } else if (id === "hub") {
+        navigation.navigate("SettingsUsageHub", {
+          driver: pool.driver,
+          environmentIds: environmentParam,
+        });
+      } else if (id === "hide") {
+        layout.update({ hiddenProviders: [...hiddenProviders, provider] });
+      }
+    };
+    return (
+      <Menu
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={`${label} limit actions`}
+        title={label}
+        actions={actions}
+        onPressAction={({ nativeEvent }) => onAction(nativeEvent.event)}
+      >
+        <ControlPill icon="ellipsis" accessibilityLabel={`${label} limit actions`} />
+      </Menu>
+    );
+  };
   const notices = collectLimitNotices(selected);
   const externalLinks = collectExternalUsageLinks(selected);
   const colors = useProviderColors();
+  const hiddenCount = resolved.pools.length - pools.length;
   return (
     <View className="gap-6">
       {pools.length === 0 &&
@@ -430,40 +500,53 @@ export function UsageLimitsSection({
         <Text className="py-12 text-center text-base text-foreground-muted">
           {selected.size === 0
             ? "Select an environment to see limits."
-            : "No provider on the selected environments reports subscription limits."}
+            : hiddenCount > 0
+              ? "Every provider with limits is hidden. Show one from the provider filter."
+              : "No provider on the selected environments reports subscription limits."}
         </Text>
       ) : null}
       {pools.map((pool) => {
-        const windows = displayLimitWindows(pool);
+        const provider = usageProviderKind(pool.driver);
+        const windows = displayLimitWindows(pool).filter(
+          (window) => !hiddenLimits.has(limitKey(pool, window)),
+        );
+        const showAccounts =
+          pool.accounts.length > 1 && (provider === null || !hiddenAccountRows.has(provider));
+        const allOff = resolved.hubLogins.every(
+          (login) => login.driver !== pool.driver || login.disabled,
+        );
         return (
-          <Fragment key={pool.driver}>
-            <View className="gap-3">
-              <View className="flex-row items-center gap-2 px-1">
-                <ProviderIcon provider={pool.driver} size={18} />
-                <Text className="text-base font-t3-medium text-foreground">
-                  {providerClients.get(pool.driver)?.label ?? pool.driver}
-                </Text>
-              </View>
-              {windows.map((window) => {
-                const details =
-                  pool.driver === "cursor" ? cursorUsageWindowDetails(window.id, pool) : undefined;
-                return (
-                  <PoolWindowCard
-                    key={`${window.kind}:${window.id}`}
-                    pool={window}
-                    color={colors[usageProviderKind(pool.driver) ?? "codex"]}
-                    now={now}
-                    environmentIds={
-                      selectedEnvironmentIds === null ? null : [...selectedEnvironmentIds]
-                    }
-                    label={details?.label}
-                    description={details?.description}
-                    wide={wide}
-                  />
-                );
-              })}
+          <View key={pool.driver} className="gap-3">
+            <View className="flex-row items-center gap-2 px-1">
+              <ProviderIcon provider={pool.driver} size={18} />
+              <Text className="flex-1 text-base font-t3-medium text-foreground">
+                {providerLabel(pool.driver)}
+              </Text>
+              {menuFor(pool)}
             </View>
-          </Fragment>
+            {windows.map((window) => {
+              const details =
+                pool.driver === "cursor" ? cursorUsageWindowDetails(window.id, pool) : undefined;
+              return (
+                <PoolWindowCard
+                  key={`${window.kind}:${window.id}`}
+                  pool={window}
+                  color={colors[provider ?? "codex"]}
+                  now={now}
+                  label={details ? details.label : window.label}
+                  description={details?.description}
+                  showAccounts={showAccounts}
+                  onOpenAccount={openAccount(window)}
+                  wide={wide}
+                />
+              );
+            })}
+            {pool.windows.length === 0 && allOff ? (
+              <Text className="px-1 text-sm text-foreground-muted">Every hub account is off.</Text>
+            ) : null}
+            <StaleReadings pool={pool} now={now} />
+            <BankedResets pool={pool} now={now} />
+          </View>
         );
       })}
       {externalLinks.map((link) => (
@@ -512,6 +595,35 @@ export function UsageLimitsSection({
   );
 }
 
+/** The header filter that hides providers from the Limits view and shows them again. */
+export function useUsageLimitsProviderMenu() {
+  const layout = useUsageLimitsLayout();
+  const { providerOrder, hiddenProviders } = layout;
+  return {
+    title: "Filter limit providers",
+    icon: "slider.horizontal.3" as const,
+    items: [
+      {
+        id: "all-providers",
+        title: "All providers",
+        selected: hiddenProviders.size === 0,
+        onPress: () => layout.update({ hiddenProviders: [] }),
+      },
+      ...providerOrder.map((provider: UsageProviderKind) => ({
+        id: `provider:${provider}`,
+        title: PROVIDER_LABEL[provider],
+        selected: !hiddenProviders.has(provider),
+        onPress: () =>
+          layout.update({
+            hiddenProviders: hiddenProviders.has(provider)
+              ? [...hiddenProviders].filter((entry) => entry !== provider)
+              : [...hiddenProviders, provider],
+          }),
+      })),
+    ],
+  };
+}
+
 type AccountScreenProps = StaticScreenProps<{
   accountKey: string;
   windowId: string;
@@ -535,7 +647,9 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
   const pool = collectLimitPools(accounts, now)
     .find((candidate) => candidate.driver === account?.driver)
     ?.windows.find((candidate) => candidate.id === windowId && candidate.kind === windowKind);
-  const window = pool?.members.find((member) => member.account.key === accountKey)?.window;
+  const poolMembers = pool ? [...pool.members, ...pool.offMembers] : [];
+  const member = poolMembers.find((candidate) => candidate.account.key === accountKey);
+  const window = member?.window;
   const evenPace = window ? paceRemainingPercent(window, now) : null;
   const reset = pool?.resets.find((candidate) => candidate.member.account.key === accountKey);
   const [revealed, setRevealed] = useState(false);
@@ -556,9 +670,7 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
               <View className="flex-row items-center gap-2">
                 <ProviderIcon provider={account.driver} size={24} />
                 <Text className="flex-1 text-xl font-t3-bold text-foreground">
-                  {account.displayName ??
-                    providerClients.get(account.driver)?.label ??
-                    account.driver}
+                  {account.displayName ?? providerLabel(account.driver)}
                 </Text>
               </View>
               {account.email ? (
@@ -576,6 +688,11 @@ export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
               {account.plan ? (
                 <Text selectable className="text-sm text-foreground-muted">
                   {account.plan}
+                </Text>
+              ) : null}
+              {account.disabled ? (
+                <Text className="text-sm text-foreground-muted">
+                  Switched off in the hub, so the pool leaves it out.
                 </Text>
               ) : null}
             </View>

@@ -16,8 +16,9 @@ export interface SpeechGenerationProgress {
 
 /** One generated piece of a response, playable while later pieces are still generating. */
 export interface SpeechChunk {
-  readonly blob: Blob;
-  /** Seconds, known from the sample count before the audio element loads metadata. */
+  /** A complete WAV file. */
+  readonly audio: Uint8Array;
+  /** Seconds, known from the sample count before the player loads metadata. */
   readonly duration: number;
 }
 
@@ -33,8 +34,22 @@ export interface ReadAloudState {
   readonly error: string | null;
 }
 
-type PlaybackAudio = EventTarget &
-  Pick<HTMLAudioElement, "currentTime" | "playbackRate" | "paused" | "ended" | "play" | "pause">;
+export type PlaybackAudioEvent = "playing" | "pause" | "timeupdate" | "ended" | "error";
+
+/**
+ * The part of a media element the controller drives. A player reaching its end pauses,
+ * then reports `ended`; `play` rejects with a `NotAllowedError` when playback needs a gesture.
+ */
+export interface PlaybackAudio {
+  currentTime: number;
+  playbackRate: number;
+  readonly paused: boolean;
+  readonly ended: boolean;
+  play(): Promise<void>;
+  pause(): void;
+  addEventListener(type: PlaybackAudioEvent, listener: () => void): void;
+  removeEventListener(type: PlaybackAudioEvent, listener: () => void): void;
+}
 
 export interface ReadAloudBackend {
   /** Resolves once every chunk has been delivered through `onChunk`. */
@@ -44,7 +59,7 @@ export interface ReadAloudBackend {
     onProgress: (progress: SpeechGenerationProgress) => void,
     onChunk: (chunk: SpeechChunk) => void,
   ) => Promise<void>;
-  readonly createPlayback: (blob: Blob) => {
+  readonly createPlayback: (chunk: SpeechChunk) => {
     readonly audio: PlaybackAudio;
     readonly dispose: () => void;
   };
@@ -168,7 +183,7 @@ export class ReadAloudController {
   private append(chunk: SpeechChunk): Promise<void> | undefined {
     const index = this.segments.length;
     const previous = this.segments.at(-1);
-    const playback = this.backend.createPlayback(chunk.blob);
+    const playback = this.backend.createPlayback(chunk);
     const { audio } = playback;
     audio.playbackRate = this.speed;
     const isCurrent = () => this.current === index;

@@ -132,6 +132,7 @@ import {
 } from "./features/settings/SettingsOpenSourceLicensesRouteScreen";
 import { SettingsProjectGroupingRouteScreen } from "./features/settings/SettingsProjectGroupingRouteScreen";
 import { SettingsProjectOverviewRouteScreen } from "./features/settings/SettingsProjectOverviewRouteScreen";
+import { UsageHubAccountsScreen } from "./features/usage/UsageHubAccountsScreen";
 import { UsageLimitAccountScreen } from "./features/usage/UsageLimitsPooled";
 import { UsageRouteScreen } from "./features/usage/UsageRouteScreen";
 import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRouteScreen";
@@ -348,6 +349,10 @@ const SETTINGS_SCREENS = {
   SettingsUsageAccount: createNativeStackScreen({
     screen: UsageLimitAccountScreen,
     options: settingsPage("Account"),
+  }),
+  SettingsUsageHub: createNativeStackScreen({
+    screen: UsageHubAccountsScreen,
+    options: settingsPage("Hub accounts"),
   }),
   SettingsOpenSourceLicenses: createNativeStackScreen({
     screen: SettingsOpenSourceLicensesRouteScreen,

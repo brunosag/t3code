@@ -139,6 +139,7 @@ import IconUserPlus from "@tabler/icons-react-native/IconUserPlus";
 import IconUsers from "@tabler/icons-react-native/IconUsers";
 import IconWifi from "@tabler/icons-react-native/IconWifi";
 import IconWifiOff from "@tabler/icons-react-native/IconWifiOff";
+import IconVolume from "@tabler/icons-react-native/IconVolume";
 import IconWorld from "@tabler/icons-react-native/IconWorld";
 import IconX from "@tabler/icons-react-native/IconX";
 import type { AndroidSymbol, SFSymbol, SymbolViewProps } from "expo-symbols";
@@ -263,6 +264,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "point.topleft.down.curvedto.point.bottomright.up": IconGitMerge,
   safari: IconExternalLink,
   "server.rack": IconServer,
+  "speaker.wave.2": IconVolume,
   stethoscope: IconStethoscope,
   "sidebar.left": IconLayoutSidebar,
   "sidebar.right": IconLayoutSidebarRight,

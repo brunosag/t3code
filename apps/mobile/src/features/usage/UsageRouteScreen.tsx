@@ -45,7 +45,7 @@ import { SettingsSection } from "../settings/components/SettingsSection";
 import { UsageDailyChart } from "./UsageDailyChart";
 import { toggleUsageEnvironment } from "./usageEnvironmentSelection";
 import { useRefreshLimits } from "./UsageLimitsSection";
-import { UsageLimitsSection } from "./UsageLimitsPooled";
+import { UsageLimitsSection, useUsageLimitsProviderMenu } from "./UsageLimitsPooled";
 import type { UsageChartMetric } from "./usageChartData";
 import { PROVIDER_LABEL, useProviderColors, useUsageMixColors } from "./usageProviders";
 
@@ -214,10 +214,16 @@ function UsageScreen(props: {
     ],
   };
 
+  const providerMenu = useUsageLimitsProviderMenu();
+  const menus = [
+    ...(showingLimits ? [providerMenu] : []),
+    ...(showEnvironmentFilter ? [environmentMenu] : []),
+  ];
+
   return (
     <SettingsScreen
       title="Usage"
-      menus={showEnvironmentFilter ? [environmentMenu] : undefined}
+      menus={menus.length > 0 ? menus : undefined}
       workspaceRoot={props.workspace}
     >
       {headerOnly ? null : (

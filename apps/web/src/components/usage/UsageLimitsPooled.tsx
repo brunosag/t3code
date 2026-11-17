@@ -17,12 +17,20 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useAtomValue } from "@effect/atom-react";
 import {
+  hubLimitPools,
+  listHubs,
+  moveProvider,
+  NO_PENDING_HUB_CHANGES,
+  type PendingHubChanges,
+  pendingRoutingFor,
+  reorderedHubAccounts,
+  routeByResetHubs,
+} from "@t3tools/client-runtime/usage-limit-controls";
+import {
   CHATGPT_USAGE_URL,
-  collectHubLogins,
   collectLimitAccounts,
   collectExternalUsageLinks,
   collectLimitNotices,
-  collectLimitPools,
   cursorUsageWindowDetails,
   displayLimitWindows,
   formatDuration,
@@ -75,13 +83,7 @@ import {
 import { AccountChip } from "./AccountChip";
 import { ResetCredits, WindowBar, barColor } from "./UsageLimits";
 import { BalanceCard, RunwayCard } from "./UsageLimitRunway";
-import { moveProvider, PROVIDER_ORDER, usageProviderForDriver } from "./usageProviders";
-import {
-  type PendingRouting,
-  pendingRoutingSettled,
-  reorderedHubAccounts,
-  withPendingRouting,
-} from "./usageRouting";
+import { PROVIDER_ORDER, usageProviderForDriver } from "./usageProviders";
 
 const reorderPermissionsAtom = environmentAtomList(
   "web-usage-limit-routing-permissions",
@@ -579,65 +581,12 @@ export function UsageLimitsPooled({
     const provider = usageProviderForDriver(pool.driver);
     return provider ? providerOrder.indexOf(provider) : providerOrder.length;
   };
-  const [pendingRouting, setPendingRouting] = useState<PendingRouting | null>(null);
-  const [pendingDisabled, setPendingDisabled] = useState<ReadonlyMap<string, boolean>>(
-    () => new Map(),
-  );
-  const [pendingByReset, setPendingByReset] = useState<ReadonlyMap<string, boolean>>(
-    () => new Map(),
-  );
-  const reportedLogins = collectHubLogins(presentations);
-  const unsettledDisabled = new Map(
-    [...pendingDisabled].filter(([key, disabled]) =>
-      reportedLogins.some((login) => login.key === key && login.disabled !== disabled),
-    ),
-  );
-  // Dropped during render once the hub reports the change, or the login is gone.
-  if (unsettledDisabled.size !== pendingDisabled.size) setPendingDisabled(unsettledDisabled);
-  const hubLogins = reportedLogins.map((login) => ({
-    ...login,
-    disabled: unsettledDisabled.get(login.key) ?? login.disabled,
-  }));
-  const byResetKey = (account: LimitAccount) => `${account.driver}\n${limitRoutingKey(account)}`;
-  const collected = collectLimitAccounts(presentations);
-  const unsettledByReset = new Map(
-    [...pendingByReset].filter(([key, byReset]) =>
-      collected.some(
-        (account) => byResetKey(account) === key && account.routing?.byReset !== byReset,
-      ),
-    ),
-  );
-  if (unsettledByReset.size !== pendingByReset.size) setPendingByReset(unsettledByReset);
-  const reported = collected.map((account) => {
-    const disabled =
-      account.routing && account.environments.length === 0
-        ? unsettledDisabled.get(
-            `${account.routing.environmentId}:${account.routing.sourceId}:${account.routing.accountId}`,
-          )
-        : undefined;
-    const byReset = unsettledByReset.get(byResetKey(account));
-    const routing =
-      byReset === undefined || account.routing === null
-        ? account.routing
-        : { ...account.routing, byReset };
-    return disabled === undefined && routing === account.routing
-      ? account
-      : { ...account, routing, disabled: disabled ?? account.disabled };
-  });
-  // Dropped during render so an optimistic order never outlives the hub report it was for.
-  if (pendingRouting !== null && pendingRoutingSettled(reported, pendingRouting)) {
-    setPendingRouting(null);
-  }
-  const reportedPools = collectLimitPools(withPendingRouting(reported, pendingRouting), now);
-  // A provider with hub logins but no readings keeps its section, so its menu can turn one on.
-  const unreadPools = [...new Set(hubLogins.map((login) => login.driver))].flatMap((driver) =>
-    reportedPools.some((pool) => pool.driver === driver)
-      ? []
-      : [{ driver, accounts: [], windows: [] }],
-  );
-  const pools = [...reportedPools, ...unreadPools].toSorted(
-    (left, right) => rank(left) - rank(right),
-  );
+  const [pending, setPending] = useState<PendingHubChanges>(NO_PENDING_HUB_CHANGES);
+  const resolved = hubLimitPools(presentations, pending, now);
+  const { hubLogins } = resolved;
+  // Dropped during render once the hub reports a change, or the login is gone.
+  if (resolved.pending !== pending) setPending(resolved.pending);
+  const pools = resolved.pools.toSorted((left, right) => rank(left) - rank(right));
   const environmentIds = [...presentations.keys()];
   const reorderPermissions = useAtomValue(
     reorderPermissionsAtom(environmentIdsKey(environmentIds)),
@@ -651,25 +600,26 @@ export function UsageLimitsPooled({
     "Change hub routing",
   );
   const routeByResetFor = (pool: LimitPool) => {
-    const routable = pool.accounts.flatMap((account) =>
-      account.routing && mayRoute(account) ? [[byResetKey(account), account.routing] as const] : [],
-    );
-    if (routable.length < 2) return null;
-    const hubs = new Map(routable);
-    const on = [...hubs.values()].every((routing) => routing.byReset);
+    const routable = routeByResetHubs(pool, mayRoute);
+    if (routable === null) return null;
+    const { on, hubs } = routable;
     return {
       on,
       onToggle: () => {
         for (const [key, routing] of hubs) {
-          setPendingByReset((previous) => new Map([...previous, [key, !on]]));
+          setPending((previous) => ({
+            ...previous,
+            byReset: new Map([...previous.byReset, [key, !on]]),
+          }));
           void setRouteByReset({
             environmentId: routing.environmentId,
             input: { sourceId: routing.sourceId, driver: pool.driver, enabled: !on },
           }).then((result) => {
             if (result._tag === "Failure") {
-              setPendingByReset(
-                (previous) => new Map([...previous].filter(([entry]) => entry !== key)),
-              );
+              setPending((previous) => ({
+                ...previous,
+                byReset: new Map([...previous.byReset].filter(([entry]) => entry !== key)),
+              }));
             }
           });
         }
@@ -683,63 +633,37 @@ export function UsageLimitsPooled({
     serverEnvironment.setUsageLimitSourceAccountDisabled,
     "Change hub account",
   );
-  const hubsFor = (pool: LimitPool) => {
-    const hubs = new Map<string, { label: string; name: string; logins: HubLogin[] }>();
-    for (const login of hubLogins) {
-      if (
-        login.driver !== pool.driver ||
-        disablePermissions[environmentIds.indexOf(login.environmentId)] !== true
-      )
-        continue;
-      const key = `${login.environmentId}:${login.sourceId}`;
-      const hub = hubs.get(key) ?? { label: login.hubLabel, name: login.hubName, logins: [] };
-      hub.logins.push(login);
-      hubs.set(key, hub);
-    }
-    // Machines reading the same hub report the same login files, so it is listed once.
-    const loginFiles = (logins: readonly HubLogin[]) =>
-      logins
-        .map((login) => login.accountId)
-        .toSorted()
-        .join("\n");
-    const listed: { label: string; name: string; logins: HubLogin[] }[] = [];
-    for (const hub of hubs.values()) {
-      const same = listed.find((seen) => loginFiles(seen.logins) === loginFiles(hub.logins));
-      if (!same) {
-        listed.push({ ...hub });
-        continue;
-      }
-      if (same.name === hub.name) same.label = hub.name;
-      same.logins = same.logins.map((login) => {
-        const other = hub.logins.find((candidate) => candidate.accountId === login.accountId);
-        return {
-          ...login,
-          name: login.name ?? other?.name ?? null,
-          image: login.image ?? other?.image,
-        };
-      });
-    }
-    return listed.map((hub) => ({
+  const hubsFor = (pool: LimitPool) =>
+    listHubs(
+      hubLogins.filter(
+        (login) =>
+          login.driver === pool.driver &&
+          disablePermissions[environmentIds.indexOf(login.environmentId)] === true,
+      ),
+    ).map((hub) => ({
       label: hub.label,
       logins: hub.logins.map((login) => ({
         login,
         onToggle: () => {
           const disabled = !login.disabled;
-          setPendingDisabled((previous) => new Map([...previous, [login.key, disabled]]));
+          setPending((previous) => ({
+            ...previous,
+            disabled: new Map([...previous.disabled, [login.key, disabled]]),
+          }));
           void setAccountDisabled({
             environmentId: login.environmentId,
             input: { sourceId: login.sourceId, accountId: login.accountId, disabled },
           }).then((result) => {
             if (result._tag === "Failure") {
-              setPendingDisabled(
-                (previous) => new Map([...previous].filter(([key]) => key !== login.key)),
-              );
+              setPending((previous) => ({
+                ...previous,
+                disabled: new Map([...previous.disabled].filter(([key]) => key !== login.key)),
+              }));
             }
           });
         },
       })),
     }));
-  };
   const setAccountOrder = useAtomCommand(
     serverEnvironment.setUsageLimitSourceAccountOrder,
     "Change hub routing order",
@@ -748,13 +672,10 @@ export function UsageLimitsPooled({
   const sendOrder = (pool: LimitPool, accounts: readonly LimitAccount[]) => {
     const routing = accounts[0]?.routing;
     if (!routing) return;
-    setPendingRouting(
-      (previous) =>
-        new Map([
-          ...(previous ?? []),
-          ...accounts.map((account, index) => [account.key, accounts.length - 1 - index] as const),
-        ]),
-    );
+    setPending((previous) => ({
+      ...previous,
+      routing: pendingRoutingFor(previous.routing, accounts),
+    }));
     void setAccountOrder({
       environmentId: routing.environmentId,
       input: {
@@ -763,7 +684,7 @@ export function UsageLimitsPooled({
         accountIds: accounts.flatMap((account) => account.routing?.accountId ?? []),
       },
     }).then((result) => {
-      if (result._tag === "Failure") setPendingRouting(null);
+      if (result._tag === "Failure") setPending((previous) => ({ ...previous, routing: null }));
     });
   };
   const routingFor = (pool: LimitPool): RoutingReorder | null =>

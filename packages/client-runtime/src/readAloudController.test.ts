@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { EnvironmentId } from "@t3tools/contracts";
 
-import { ReadAloudController, type ReadAloudBackend } from "./readAloudController";
+import { ReadAloudController, type ReadAloudBackend } from "./readAloudController.ts";
 
 const environmentId = EnvironmentId.make("environment");
 
@@ -12,8 +12,11 @@ class TestAudio extends EventTarget {
   paused = true;
   ended = false;
 
-  constructor(readonly duration: number) {
+  readonly duration: number;
+
+  constructor(duration: number) {
     super();
+    this.duration = duration;
   }
 
   get currentTime() {
@@ -48,21 +51,16 @@ class TestAudio extends EventTarget {
 }
 
 const oneChunk: ReadAloudBackend["generate"] = async (_request, _signal, _progress, onChunk) => {
-  onChunk({ blob: new Blob(), duration: 60 });
+  onChunk({ audio: new Uint8Array(), duration: 60 });
 };
 
 function setup(generate: ReadAloudBackend["generate"] = oneChunk) {
   const audios: TestAudio[] = [];
-  const durations = new Map<Blob, number>();
   let disposed = 0;
   const player = new ReadAloudController({
-    generate: (request, signal, onProgress, onChunk) =>
-      generate(request, signal, onProgress, (chunk) => {
-        durations.set(chunk.blob, chunk.duration);
-        onChunk(chunk);
-      }),
-    createPlayback: (blob) => {
-      const audio = new TestAudio(durations.get(blob) ?? 0);
+    generate,
+    createPlayback: (chunk) => {
+      const audio = new TestAudio(chunk.duration);
       audios.push(audio);
       return {
         audio,
@@ -81,7 +79,7 @@ function streamed() {
   let finish!: () => void;
   let fail!: (error: Error) => void;
   const generate: ReadAloudBackend["generate"] = (_request, _signal, _progress, onChunk) => {
-    emit = (duration) => onChunk({ blob: new Blob(), duration });
+    emit = (duration) => onChunk({ audio: new Uint8Array(), duration });
     return new Promise((resolve, reject) => {
       finish = resolve;
       fail = reject;
@@ -188,8 +186,8 @@ describe("ReadAloudController", () => {
     let generated = 0;
     const { player, audios } = setup(async (_request, _signal, _progress, onChunk) => {
       generated += 1;
-      onChunk({ blob: new Blob(), duration: 30 });
-      onChunk({ blob: new Blob(), duration: 30 });
+      onChunk({ audio: new Uint8Array(), duration: 30 });
+      onChunk({ audio: new Uint8Array(), duration: 30 });
     });
     await player.start("response", { environmentId, text: "Hello.", voice: "af_heart" });
     audios[0]!.currentTime = 15;

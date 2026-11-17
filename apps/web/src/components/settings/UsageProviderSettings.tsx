@@ -7,6 +7,7 @@ import {
   type UsageLimitSourceConfig,
 } from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
+import { withHubLabel } from "@t3tools/client-runtime/usage-limit-controls";
 import { PlusIcon, XIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -27,7 +28,6 @@ import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AccountChip } from "../usage/AccountChip";
 import { AddUsageLimitSourceDialog } from "./AddUsageLimitSourceDialog";
-import { withHubLabel } from "./AddUsageLimitSourceDialog.logic";
 import { searchableSetting } from "./settingsSearch";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 

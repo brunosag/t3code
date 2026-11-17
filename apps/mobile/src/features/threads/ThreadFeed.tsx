@@ -198,6 +198,7 @@ import {
   type MediaVideoPreviewSource,
 } from "../../lib/videoPreviewSource";
 import { CopyTextButton } from "./CopyTextButton";
+import { ReadAloudButton } from "../read-aloud/ReadAloudButton";
 import { getReviewSectionIdForCheckpoint } from "../review/reviewModel";
 import { setReviewSelectedSectionId } from "../review/reviewState";
 import { Menu } from "../../components/ui/Menu";
@@ -2124,6 +2125,12 @@ function renderFeedEntry(
       props.terminalAssistantMessageIds.has(message.id) &&
       !assistantTurnStillInProgress &&
       !message.streaming;
+    // A running turn's latest finished message can already be read aloud.
+    const showRunningReadAloud =
+      message.role === "assistant" &&
+      props.terminalAssistantMessageIds.has(message.id) &&
+      assistantTurnStillInProgress &&
+      !message.streaming;
 
     if (isUser && props.workflowOpening?.messageId === message.id) {
       return (
@@ -2534,11 +2541,36 @@ function renderFeedEntry(
             onOpenTurnDiff={props.onOpenTurnDiff}
           />
         ) : null}
+        {showRunningReadAloud ? (
+          <View className="mt-1 flex-row items-center gap-1">
+            <ReadAloudButton
+              environmentId={props.environmentId}
+              threadId={props.threadId}
+              messageId={message.id}
+              markdown={message.text}
+              tintColor={iconSubtleColor}
+              buttonSize={props.replyActionSize.button}
+              iconSize={props.replyActionSize.icon}
+            />
+            <Text className="font-t3-medium text-xs tabular-nums text-foreground-secondary">
+              {timestampLabel}
+            </Text>
+          </View>
+        ) : null}
         {showAssistantMeta ? (
           <View className="mt-1 flex-row items-center gap-1">
             <CopyTextButton
               accessibilityLabel="Copy message"
               text={renderedText}
+              tintColor={iconSubtleColor}
+              buttonSize={props.replyActionSize.button}
+              iconSize={props.replyActionSize.icon}
+            />
+            <ReadAloudButton
+              environmentId={props.environmentId}
+              threadId={props.threadId}
+              messageId={message.id}
+              markdown={message.text}
               tintColor={iconSubtleColor}
               buttonSize={props.replyActionSize.button}
               iconSize={props.replyActionSize.icon}

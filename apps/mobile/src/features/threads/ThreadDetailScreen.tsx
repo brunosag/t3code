@@ -202,6 +202,7 @@ import { useThreadTurnSubagents } from "./ThreadAgentsSheet";
 import { ComposerQueuedEditBanner } from "./ComposerQueuedEdit";
 import { useThreadQueuedCount } from "./ThreadQueueControl";
 import { ThreadGuestShareBar } from "./ThreadGuestShareBar";
+import { ReadAloudPlayer } from "../read-aloud/ReadAloudPlayer";
 import { ThreadSideChatsRow } from "./ThreadSideChatsRow";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-scroll-position";
@@ -1616,6 +1617,12 @@ function ThreadDetailBody(
                     <ThreadGuestShareBar
                       threadRef={props.selectedThreadDetailRef}
                       canOperateThread={props.canOperateThread}
+                    />
+                    <ReadAloudPlayer
+                      threadRef={{
+                        environmentId: props.environmentId,
+                        threadId: props.selectedThread.id,
+                      }}
                     />
                     {props.draftMode ? null : (
                       <ThreadSideChatsRow

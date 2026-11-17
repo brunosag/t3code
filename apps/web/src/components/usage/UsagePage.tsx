@@ -15,6 +15,7 @@ import { settlePromise } from "@t3tools/client-runtime/state/runtime";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import * as Cause from "effect/Cause";
 import { refreshUsageLimits } from "@t3tools/client-runtime/state/usage";
+import { orderedProviders } from "@t3tools/client-runtime/usage-limit-controls";
 import {
   updatingProvidersLabel,
   usageEnvironmentProgress,
@@ -96,7 +97,6 @@ import {
   type UsageMetric,
 } from "./usageShortcuts";
 import {
-  orderedProviders,
   PROVIDER_ORDER,
   PROVIDER_PRESENTATION,
   providersWithUsage,
@@ -204,7 +204,7 @@ export function UsagePage() {
   const [selectedEnvironmentIds, setSelectedEnvironmentIds] =
     useState<ReadonlySet<EnvironmentId> | null>(null);
   const hiddenProviders = new Set(preferences.hiddenProviders);
-  const providerOrder = orderedProviders(preferences.providerOrder);
+  const providerOrder = orderedProviders(preferences.providerOrder, PROVIDER_ORDER);
   const hiddenLimits = new Set(preferences.hiddenLimits);
   const hiddenAccountRows = new Set(preferences.hiddenAccountRows);
   const { days: windowDays, window } = windowSelection;

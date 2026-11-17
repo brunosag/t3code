@@ -17,8 +17,9 @@ import {
   type ProviderInstanceId,
   PullRequestMergeMethod,
   type SidebarProjectGroupingMode,
+  UsageProviderKind,
 } from "@t3tools/contracts";
-import { ToolCallVisibility } from "@t3tools/contracts/settings";
+import { ReadAloudVoice, ToolCallVisibility } from "@t3tools/contracts/settings";
 import type { AndroidNavigationStyle } from "../lib/androidNavigationStyle";
 import type { ComposerEnterBehavior } from "../lib/composerEnterBehavior";
 import type { FollowUpBehavior } from "../lib/followUpBehavior";
@@ -123,7 +124,19 @@ const PullRequestActivityVisibility = Schema.Struct({
 });
 export type PullRequestActivityVisibility = typeof PullRequestActivityVisibility.Type;
 
+/** The Limits view's provider order and what it hides, with the web Usage page's semantics. */
+const UsageLimitsLayout = Schema.Struct({
+  hiddenProviders: Schema.optional(Schema.Array(UsageProviderKind)),
+  providerOrder: Schema.optional(Schema.Array(UsageProviderKind)),
+  /** `<driver>:<window id>` keys. */
+  hiddenLimits: Schema.optional(Schema.Array(Schema.String)),
+  hiddenAccountRows: Schema.optional(Schema.Array(UsageProviderKind)),
+});
+export type UsageLimitsLayout = typeof UsageLimitsLayout.Type;
+const isUsageLimitsLayout = Schema.is(UsageLimitsLayout);
+
 const isThreadListFilters = Schema.is(ThreadListFilters);
+const isReadAloudVoice = Schema.is(ReadAloudVoice);
 const isPullRequestActivityVisibility = Schema.is(PullRequestActivityVisibility);
 const isWorkspaceSelections = Schema.is(WorkspaceSelections);
 const isPullRequestListPreferences = Schema.is(PullRequestListPreferences);
@@ -162,6 +175,7 @@ export interface Preferences {
   /** Hardware-keyboard Return behavior in the composer. */
   readonly composerEnterBehavior?: ComposerEnterBehavior;
   readonly followUpBehavior?: FollowUpBehavior;
+  readonly readAloudVoice?: ReadAloudVoice;
   /** The client `language` setting: a locale code or "system". Unset means English. */
   readonly language?: string;
   readonly microphones?: ReadonlyArray<MicrophoneEntry>;
@@ -183,6 +197,7 @@ export interface Preferences {
   readonly workspaceSelections?: WorkspaceSelections;
   readonly pullRequestSavedViews?: ReadonlyArray<PullRequestSavedView>;
   readonly issueSavedViews?: ReadonlyArray<IssueSavedView>;
+  readonly usageLimitsLayout?: UsageLimitsLayout;
 }
 
 export class MobilePreferencesLoadError extends Schema.TaggedError<MobilePreferencesLoadError>()(
@@ -253,6 +268,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     dismissedDatabaseStorageNotices?: readonly string[];
     composerEnterBehavior?: ComposerEnterBehavior;
     followUpBehavior?: FollowUpBehavior;
+    readAloudVoice?: ReadAloudVoice;
     language?: string;
     microphones?: ReadonlyArray<MicrophoneEntry>;
     projectGroupingEnabled?: boolean;
@@ -270,6 +286,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     workspaceSelections?: WorkspaceSelections;
     pullRequestSavedViews?: ReadonlyArray<PullRequestSavedView>;
     issueSavedViews?: ReadonlyArray<IssueSavedView>;
+    usageLimitsLayout?: UsageLimitsLayout;
   } = {};
 
   if (Array.isArray(parsed.hiddenNavigationTabs)) {
@@ -368,6 +385,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   if (parsed.followUpBehavior === "queue" || parsed.followUpBehavior === "steer") {
     preferences.followUpBehavior = parsed.followUpBehavior;
   }
+  if (isReadAloudVoice(parsed.readAloudVoice)) preferences.readAloudVoice = parsed.readAloudVoice;
   if (typeof parsed.language === "string") preferences.language = parsed.language;
   if (Array.isArray(parsed.microphones)) {
     preferences.microphones = parsed.microphones.flatMap((entry): MicrophoneEntry[] => {
@@ -434,6 +452,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (Array.isArray(parsed.issueSavedViews)) {
     preferences.issueSavedViews = parsed.issueSavedViews.filter(isIssueSavedView);
+  }
+  if (isUsageLimitsLayout(parsed.usageLimitsLayout)) {
+    preferences.usageLimitsLayout = parsed.usageLimitsLayout;
   }
   return preferences;
 }
