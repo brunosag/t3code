@@ -584,7 +584,7 @@ export default defineConfig({
         },
       },
       // Registered always so a disable comment for intentional English counts as used.
-      // `vp run i18n:untranslated` counts what it flags.
+      // `vp run i18n:untranslated` counts what it flags. Fork: a warning, as fork-only UI stays English.
       {
         files: ["apps/web/src/**", "apps/mobile/src/**", "packages/client-runtime/src/**"],
         excludeFiles: [
@@ -595,7 +595,7 @@ export default defineConfig({
           "apps/mobile/src/features/development/**",
           "packages/client-runtime/src/rpc/**",
         ],
-        rules: { "t3code/no-untranslated-copy": "error" },
+        rules: { "t3code/no-untranslated-copy": "warn" },
       },
       {
         // React Compiler owns memoization; upstream rules do not ban redundant useMemo/useCallback.
