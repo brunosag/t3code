@@ -5,6 +5,7 @@ import {
   formatExpiryDate,
   RESET_EXPIRY_SOON_MS,
 } from "@t3tools/shared/usageLimits";
+import { useMessages } from "gt-react";
 import { useState } from "react";
 
 import { cn } from "../../lib/utils";
@@ -39,6 +40,7 @@ export function BankedResetButton({
   const consume = useAtomCommand(serverEnvironment.consumeResetCredit, { reportFailure: false });
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const m = useMessages();
   const next = reset.expiries[0];
   const rows = [
     ...reset.expiries,
@@ -57,7 +59,7 @@ export function BankedResetButton({
     if (result._tag === "Success") {
       toastManager.add({
         type: result.value.outcome === "reset" ? "success" : "info",
-        title: result.value.warning ?? RESET_OUTCOME_TEXT[result.value.outcome],
+        title: result.value.warning ?? m(RESET_OUTCOME_TEXT[result.value.outcome]),
       });
       return;
     }

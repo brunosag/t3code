@@ -31,11 +31,7 @@ import {
   bankedResets,
   CHATGPT_USAGE_URL,
   collectLimitAccounts,
-  collectExternalUsageLinks,
-  collectLimitNotices,
-  cursorUsageWindowDetails,
   displayLimitWindows,
-  formatDuration,
   type HubLogin,
   type LimitAccount,
   type LimitPool,
@@ -45,6 +41,12 @@ import {
   remainingPercent,
   staleLimitAccounts,
 } from "@t3tools/shared/usageLimits";
+import {
+  collectExternalUsageLinks,
+  collectLimitNotices,
+  cursorUsageWindowDetails,
+  formatDuration,
+} from "@t3tools/shared/usageLimitsCopy";
 import { limitRunway } from "@t3tools/shared/usageLimitRunway";
 import type { UsageProviderKind } from "@t3tools/contracts";
 import {

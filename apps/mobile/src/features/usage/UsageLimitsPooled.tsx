@@ -15,12 +15,8 @@ import { limitRunway } from "@t3tools/shared/usageLimitRunway";
 import {
   bankedResets,
   collectLimitAccounts,
-  collectExternalUsageLinks,
-  collectLimitNotices,
   collectLimitPools,
-  cursorUsageWindowDetails,
   displayLimitWindows,
-  formatDuration,
   paceRemainingPercent,
   remainingPercent,
   type LimitAccount,
@@ -29,6 +25,12 @@ import {
   type LimitPoolWindow,
   staleLimitAccounts,
 } from "@t3tools/shared/usageLimits";
+import {
+  collectExternalUsageLinks,
+  collectLimitNotices,
+  cursorUsageWindowDetails,
+  formatDuration,
+} from "@t3tools/shared/usageLimitsCopy";
 import { type ReactNode, useState } from "react";
 import { Linking, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";

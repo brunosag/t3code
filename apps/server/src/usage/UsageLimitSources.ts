@@ -212,17 +212,28 @@ export const make = Effect.gen(function* () {
       yield* Effect.logDebug("usage limit source read failed", { id, cause: accounts.failure });
       return { ...base, accounts: [], error: accounts.failure.detail };
     }
-    const previous = (yield* Ref.get(stateRef)).find((source) => source.id === id)?.accounts;
+    // Auth file names can be reused, so only the same hub and login may lend a reading.
+    const previous = (yield* Ref.get(stateRef)).find(
+      (source) =>
+        source.id === id && source.endpoint === ("endpoint" in base ? base.endpoint : undefined),
+    )?.accounts;
     const carryFrom = Date.parse(checkedAt) - CARRY_READING_FOR_MS;
     const hub = { url: config.url, managementKey, claudeVersion: yield* Ref.get(claudeVersion) };
     return yield* routeByReset(hub, {
       ...base,
       accounts: accounts.success.map((account) => {
         const kept =
-          account.usageLimits.unavailable?.reason === "probeFailed"
+          account.usageLimits.unavailable?.reason === "probeFailed" &&
+          // Without a listed login, a reused auth file name cannot be told apart from the old one.
+          (account.email !== undefined || account.workspaceId !== undefined)
             ? previous?.find(
                 (candidate) =>
                   candidate.id === account.id &&
+                  candidate.driver === account.driver &&
+                  // Fingerprinted Antigravity readings omit the listed identity, so they are never lent.
+                  candidate.usageLimits.credentialFingerprint === undefined &&
+                  candidate.email === account.email &&
+                  candidate.workspaceId === account.workspaceId &&
                   !candidate.usageLimits.unavailable &&
                   candidate.usageLimits.windows.length > 0 &&
                   Date.parse(candidate.usageLimits.checkedAt) > carryFrom,

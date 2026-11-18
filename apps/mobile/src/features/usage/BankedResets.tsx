@@ -15,6 +15,7 @@ import { serverEnvironment } from "../../state/server";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AccountChip } from "./AccountChip";
+import { m } from "../../i18n/messages";
 import { RESET_OUTCOME_TEXT } from "./UsageLimitsSection";
 
 /** One kind of banked reset on an account: its count and soonest expiry; tapping lists every expiry and redeems. */
@@ -45,7 +46,7 @@ export function BankedResetButton({
     setBusy(false);
     Dialog.alert(
       result._tag === "Success"
-        ? (result.value.warning ?? RESET_OUTCOME_TEXT[result.value.outcome])
+        ? (result.value.warning ?? m(RESET_OUTCOME_TEXT[result.value.outcome]))
         : "error" in result.cause && result.cause.error instanceof Error
           ? result.cause.error.message
           : "Could not use the reset credit.",

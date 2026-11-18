@@ -11,6 +11,7 @@ export function formatAppDisplayName(input: {
 
 export function resolveHostedAppChannelLabel(channel: string | null | undefined): string | null {
   const normalized = channel?.trim().toLowerCase();
+  // oxlint-disable-next-line t3code/no-untranslated-copy -- release channel name, part of the product name
   return normalized === "nightly" ? "Nightly" : normalized === "latest" ? "Latest" : null;
 }
 
@@ -21,6 +22,7 @@ export function resolveWebAppStageLabel(input: {
 }): string {
   // Fork: a server-served build is the stable app, so it carries no stage suffix.
   return (
+    // oxlint-disable-next-line t3code/no-untranslated-copy -- release channel name, part of the product name
     resolveHostedAppChannelLabel(input.hostedAppChannel) ?? (input.development ? "Dev" : "Latest")
   );
 }
