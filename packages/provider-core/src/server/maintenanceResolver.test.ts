@@ -1616,7 +1616,11 @@ it.layer(
         nativePackageToolUpdate,
         {
           binaryPath: "native-package-tool",
-          env: { PATH: nativeBinDir },
+          env: {
+            PATH: nativeBinDir,
+            MISE_SHIMS_DIR: nativeBinDir,
+            MISE_SYSTEM_SHIMS_DIR: nativeBinDir,
+          },
         },
       ).pipe(
         Effect.provideService(HostProcess.Platform, "darwin"),
@@ -1679,11 +1683,10 @@ it.layer(
       }),
   );
 
-  // Spawn the explicit native path even outside PATH or with spaces.
-  it.effect.each(["wrapper", "symlink"])(
+  it.effect.each(["wrapper", "symlink", "custom-data"])(
     "keeps a mise-owned %s in a native install location manual-only",
     (launcher, { skip }) => {
-      if (windowsHost || (launcher === "symlink" && !symlinksSupported)) skip();
+      if (windowsHost || (launcher !== "wrapper" && !symlinksSupported)) skip();
       return Effect.gen(function* () {
         const tempDir = yield* makeTempDir("t3-native-mise");
         const nativePath = NodePath.join(tempDir, ".local", "bin", "native-package-tool");
@@ -1696,7 +1699,7 @@ it.layer(
         } else {
           const target = NodePath.join(
             tempDir,
-            "mise",
+            launcher === "custom-data" ? "managed-tools" : "mise",
             "installs",
             "native-package-tool",
             "1.0.0",
@@ -1709,7 +1712,15 @@ it.layer(
 
         const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(
           nativePackageToolUpdate,
-          { binaryPath: nativePath, env: { PATH: "" } },
+          {
+            binaryPath: nativePath,
+            env: {
+              PATH: "",
+              ...(launcher === "custom-data"
+                ? { MISE_DATA_DIR: NodePath.join(tempDir, "managed-tools") }
+                : {}),
+            },
+          },
         ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn));
 
         expect(capabilities.update).toBeNull();
