@@ -230,9 +230,7 @@ jobs:
           # Bounded on the host, not just the runner: killing the ssh session must
           # not leave npm running in this user's session (it compiles node-pty, so
           # a genuine run is minutes, not an hour).
-          # onnxruntime-node (read aloud) ships its CPU binaries; without this its
-          # postinstall downloads CUDA libraries on Linux x64 if npm runs it.
-          ONNXRUNTIME_NODE_INSTALL_CUDA=skip timeout --kill-after=30s 900s npm install --prefix "$RUNTIME" --no-fund --no-audit "$BASE/releases/t3-$VERSION.tgz"
+          timeout --kill-after=30s 900s npm install --prefix "$RUNTIME" --no-fund --no-audit "$BASE/releases/t3-$VERSION.tgz"
           # Applies the pnpm patches the runner sent (named <scope>__<name>@<version>.patch); a
           # version npm resolved differently would run unpatched, so it fails the deploy instead.
           for patch_file in "$BASE/releases/t3-$VERSION."*.patch; do

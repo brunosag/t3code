@@ -21,7 +21,6 @@ allowBuilds:
   # Ships prebuilds; its host-architecture probe triggers source builds during cross-packaging.
   koffi: false
   node-pty: true
-  onnxruntime-node: false
   protobufjs: false
   # Ships N-API prebuilds; its install script only rebuilds from source.
   objc-js: false

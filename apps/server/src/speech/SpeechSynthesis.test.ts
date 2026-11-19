@@ -6,28 +6,21 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
-import * as KokoroEngine from "./KokoroEngine.ts";
-import { estimateSpeechSeconds, KOKORO_SAMPLE_RATE } from "./kokoroText.ts";
+import * as PhononEngine from "./PhononEngine.ts";
+import { SPEECH_SAMPLE_RATE } from "./speechText.ts";
 import * as SpeechSynthesis from "./SpeechSynthesis.ts";
-
-const vocab = new Map(
-  [..."abcdefghijklmnopqrstuvwxyz ,.!?"].map((symbol, index) => [symbol, index + 1]),
-);
 
 interface FakeEngineOptions {
   readonly onAcquire?: Effect.Effect<void>;
-  readonly onInfer?: (
-    ids: ReadonlyArray<number>,
-  ) => Effect.Effect<void, KokoroEngine.SpeechEngineError>;
+  readonly onSpeak?: (text: string) => Effect.Effect<void, PhononEngine.SpeechEngineError>;
   readonly downloadProgress?: ReadonlyArray<readonly [number, number]>;
-  readonly onPhonemize?: (text: string) => void;
 }
 
-/** Phonemizes to lowercase letters and returns 100 samples per token. */
+/** Speaks 100 samples per letter or sentence mark, so digits and dashes yield no audio. */
 function layerFakeEngine(options: FakeEngineOptions = {}) {
   return Layer.succeed(
-    KokoroEngine.KokoroEngine,
-    KokoroEngine.KokoroEngine.of({
+    PhononEngine.PhononEngine,
+    PhononEngine.PhononEngine.of({
       acquire: ({ onDownloadProgress }) =>
         Effect.gen(function* () {
           for (const [completed, total] of options.downloadProgress ?? []) {
@@ -35,15 +28,11 @@ function layerFakeEngine(options: FakeEngineOptions = {}) {
           }
           yield* options.onAcquire ?? Effect.void;
           return {
-            vocab,
-            phonemize: (text) =>
-              Effect.sync(() => {
-                options.onPhonemize?.(text);
-                return [text.toLowerCase().replace(/[^a-z ]/g, "")];
-              }),
-            infer: (ids) =>
-              (options.onInfer?.(ids) ?? Effect.void).pipe(
-                Effect.as(new Float32Array((ids.length - 2) * 100).fill(0.5)),
+            speak: (text) =>
+              (options.onSpeak?.(text) ?? Effect.void).pipe(
+                Effect.as(
+                  new Float32Array((text.match(/[\p{L}.!?]/gu)?.length ?? 0) * 100).fill(0.5),
+                ),
               ),
           };
         }),
@@ -54,13 +43,13 @@ function layerFakeEngine(options: FakeEngineOptions = {}) {
 const synthesize = (text: string) =>
   Effect.gen(function* () {
     const speech = yield* SpeechSynthesis.SpeechSynthesis;
-    return yield* speech.synthesize({ text, voice: "af_heart" }).pipe(Stream.runCollect);
+    return yield* speech.synthesize({ text, voice: "default" }).pipe(Stream.runCollect);
   });
 
 const summarize = (events: ReadonlyArray<SpeechSynthesisEvent>) =>
   events.map((event) =>
     event.type === "chunk"
-      ? `chunk ${event.durationSeconds * KOKORO_SAMPLE_RATE}`
+      ? `chunk ${event.durationSeconds * SPEECH_SAMPLE_RATE}`
       : `${event.stage} ${event.completed}/${event.total}`,
   );
 
@@ -71,8 +60,8 @@ describe("SpeechSynthesis", () => {
       expect(summarize(events)).toEqual([
         "starting 0/null",
         "generating 0/2",
-        // "hi you." keeps its period: 7 tokens of 100 samples.
-        "chunk 700",
+        // Five letters and the period.
+        "chunk 600",
         "generating 1/2",
         "chunk 400",
       ]);
@@ -83,30 +72,24 @@ describe("SpeechSynthesis", () => {
     }).pipe(Effect.provide(SpeechSynthesis.layer.pipe(Layer.provide(layerFakeEngine())))),
   );
 
-  it.effect("estimates the whole response once the first sentence is out", () => {
-    const phonemized: string[] = [];
-    return Effect.gen(function* () {
+  it.effect("estimates the whole response at the rate of the audio generated so far", () =>
+    Effect.gen(function* () {
       const events = yield* synthesize("Hi you. Bye now. Ok.");
       const estimates = events.flatMap((event) =>
         event.type === "progress" && event.stage === "generating"
           ? [event.estimatedDurationSeconds]
           : [],
       );
-      // Sentences already generated count at their real length, the rest by phonemes.
-      expect(estimates).toEqual([
-        undefined,
-        700 / KOKORO_SAMPLE_RATE + estimateSpeechSeconds("bye now.") + estimateSpeechSeconds("ok."),
-        1500 / KOKORO_SAMPLE_RATE + estimateSpeechSeconds("ok."),
-      ]);
-      expect(phonemized).toEqual(["Hi you", "Bye now", "Ok"]);
-    }).pipe(
-      Effect.provide(
-        SpeechSynthesis.layer.pipe(
-          Layer.provide(layerFakeEngine({ onPhonemize: (text) => phonemized.push(text) })),
-        ),
-      ),
-    );
-  });
+      // "Hi you." is 7 characters in 600 samples; the other 11 characters are read at that rate.
+      const secondsPerCharacter = 600 / SPEECH_SAMPLE_RATE / 7;
+      expect(estimates[0]).toBeUndefined();
+      expect(estimates[1]).toBeCloseTo(600 / SPEECH_SAMPLE_RATE + 11 * secondsPerCharacter);
+      // After "Bye now.", 15 characters took 1300 samples.
+      expect(estimates[2]).toBeCloseTo(
+        1300 / SPEECH_SAMPLE_RATE + (3 * 1300) / SPEECH_SAMPLE_RATE / 15,
+      );
+    }).pipe(Effect.provide(SpeechSynthesis.layer.pipe(Layer.provide(layerFakeEngine())))),
+  );
 
   it.effect("reports model download progress before generating", () =>
     Effect.gen(function* () {
@@ -142,14 +125,14 @@ describe("SpeechSynthesis", () => {
   it.effect("fails the stream when the engine fails", () =>
     Effect.gen(function* () {
       const error = yield* synthesize("Hello.").pipe(Effect.flip);
-      expect(error).toBeInstanceOf(KokoroEngine.SpeechEngineError);
+      expect(error).toBeInstanceOf(PhononEngine.SpeechEngineError);
     }).pipe(
       Effect.provide(
         SpeechSynthesis.layer.pipe(
           Layer.provide(
             layerFakeEngine({
-              onInfer: () =>
-                Effect.fail(new KokoroEngine.SpeechEngineError({ operation: "infer" })),
+              onSpeak: () =>
+                Effect.fail(new PhononEngine.SpeechEngineError({ operation: "speak" })),
             }),
           ),
         ),
@@ -180,7 +163,7 @@ describe("SpeechSynthesis", () => {
           Layer.provide(
             layerFakeEngine({
               onAcquire: Effect.sync(() => log.push("acquire")),
-              onInfer: () =>
+              onSpeak: () =>
                 log.length === 1
                   ? Deferred.succeed(firstInferring, undefined).pipe(
                       Effect.andThen(Deferred.await(releaseFirst)),

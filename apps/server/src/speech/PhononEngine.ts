@@ -1,4 +1,5 @@
 import * as NodeModule from "node:module";
+import * as NodeURL from "node:url";
 
 import { sha256 } from "@noble/hashes/sha2";
 import type { ReadAloudVoice } from "@t3tools/contracts";
@@ -22,7 +23,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../config.ts";
-import { KOKORO_ENGINE_SCRIPT } from "./kokoroEngineScript.ts";
+import { PHONON_ENGINE_SCRIPT } from "./phononEngineScript.ts";
 
 export class SpeechModelDownloadError extends Schema.TaggedError<SpeechModelDownloadError>()(
   "SpeechModelDownloadError",
@@ -41,7 +42,7 @@ const isSpeechModelDownloadError = Schema.is(SpeechModelDownloadError);
 export class SpeechEngineError extends Schema.TaggedError<SpeechEngineError>()(
   "SpeechEngineError",
   {
-    operation: Schema.Literals(["start", "phonemize", "infer"]),
+    operation: Schema.Literals(["start", "speak"]),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -51,76 +52,122 @@ export class SpeechEngineError extends Schema.TaggedError<SpeechEngineError>()(
 }
 
 /** A running engine, valid for the scope it was acquired in. */
-interface KokoroSession {
-  readonly vocab: ReadonlyMap<string, number>;
-  readonly phonemize: (
-    text: string,
-    language: "en-us" | "en",
-  ) => Effect.Effect<ReadonlyArray<string>, SpeechEngineError>;
-  /** Returns 24 kHz mono samples for boundary-wrapped token ids. */
-  readonly infer: (ids: ReadonlyArray<number>) => Effect.Effect<Float32Array, SpeechEngineError>;
+interface PhononSession {
+  /** Returns 24 kHz mono samples for `text` in the acquired voice. */
+  readonly speak: (text: string) => Effect.Effect<Float32Array, SpeechEngineError>;
 }
 
-export class KokoroEngine extends Context.Service<
-  KokoroEngine,
+export class PhononEngine extends Context.Service<
+  PhononEngine,
   {
     /**
-     * Downloads the model on first use, then starts the engine process or reuses a
-     * running one. The process exits once no scope has used it for five minutes.
+     * Downloads the model and voice on first use, then starts the engine process or reuses
+     * a running one. The process exits once no scope has used it for five minutes.
      */
     readonly acquire: (input: {
       readonly voice: ReadAloudVoice;
       readonly onDownloadProgress: (completed: number, total: number | null) => Effect.Effect<void>;
-    }) => Effect.Effect<KokoroSession, SpeechModelDownloadError | SpeechEngineError, Scope.Scope>;
+    }) => Effect.Effect<PhononSession, SpeechModelDownloadError | SpeechEngineError, Scope.Scope>;
   }
->()("t3/speech/KokoroEngine") {}
+>()("t3/speech/PhononEngine") {}
 
-// Pinned so every host speaks with the same model the text pipeline was verified against.
-const KOKORO_REPOSITORY = "onnx-community/Kokoro-82M-v1.0-ONNX";
-const KOKORO_REVISION = "1939ad2a8e416c0acfeecc08a694d14ef25f2231";
-// fp32 runs about twice as fast as the 8-bit model on CPU, at 326 MB instead of 92 MB.
-const MODEL_FILE = {
-  path: "onnx/model.onnx",
-  sha256: "8fbea51ea711f2af382e88c833d9e288c6dc82ce5e98421ea61c058ce21a34cb",
+interface RemoteFile {
+  readonly repository: string;
+  readonly revision: string;
+  readonly path: string;
+  readonly sha256?: string;
+}
+
+// Pinned so every host speaks with the same model and voices the text pipeline was checked with.
+const MODEL_REPOSITORY = "gradium/phonon-31m-en";
+const MODEL_REVISION = "92741c5b07d085ff840e26fea8ce43110b87852f";
+const modelFile = (path: string, hash: string): RemoteFile => ({
+  repository: MODEL_REPOSITORY,
+  revision: MODEL_REVISION,
+  path,
+  sha256: hash,
+});
+const MODEL_FILES = {
+  // The q8 weights run as fast as f32 in WebAssembly, at 64 MB instead of 103 MB.
+  model: modelFile(
+    "model.q8.gguf",
+    "a7d9aad2cd6dc66473f24a08bc6d2939030ef4d751ef82349361fbef3272dbae",
+  ),
+  tokenizer: modelFile(
+    "tokenizer.json",
+    "691a00068fa7b989f2f3e5ae5daa2d1a5bb319f2d5360deafcfb19a8bb6e7936",
+  ),
+  config: modelFile(
+    "config.json",
+    "b5d0f88353638370d94035b7d73d7d6577c0554d78f8d7ecfd40490aae39ae85",
+  ),
 };
+const DEFAULT_VOICE = modelFile(
+  "default-voice.safetensors",
+  "dc537478eaadc1a5257fcda2e3501ab81e14c111a5d95a5838f350db2afd0f1a",
+);
+const VOICE_REPOSITORY = "gradium/phonon-voices";
+const VOICE_REVISION = "da6c9ec0d47be8df5c87c730a3aa97187f3229c3";
+// Catalog ids of the voices offered by name, from the catalog's voices.jsonl.
+const CATALOG_VOICE_IDS: Record<Exclude<ReadAloudVoice, "default">, string> = {
+  zoey: "NbpkqMVS3CJeq2j8",
+  juniper: "NIWIOv5vTi5eRMj8",
+  everly: "vjFyp2BcCyTlUmYb",
+  harper: "4SZHfMpw-p46Ywgs",
+  hadley: "bXwrkHhURL1VFJdG",
+  delia: "nGzMHMPAWGaJFHOo",
+  easton: "LMDIYE0Oa377Qh6Z",
+  micah: "40QrMVgAxFiUnP9f",
+  trevor: "0zLApsZfVLLNaEGl",
+  russell: "_6Aslh2DxfmnRLmP",
+  preston: "qIxlZ7Ei8KvWlyQH",
+  miles: "d9XCyhjo4JhkHF1d",
+  maeve: "6PWnV0Nq4wu7RVBT",
+  freya: "GgfEkEJtxZR7gnpy",
+  pippa: "uem82D50GRv2Dwma",
+  "elodie-rose": "y9bQqIDnyxwqK01t",
+  imogen: "gDT1nz7Ie36ZhL-C",
+  lottie: "m9MxpY6IUGXtWp76",
+  bryony: "gfP44RlHwr2kEwk7",
+  alfie: "X6NceqF285Gr04gb",
+  hugh: "YyKcxPG7iIgS3jsK",
+  edwin: "zUCxzrOrugTSis03",
+  spencer: "JOW0vchyswkQUMDS",
+  toby: "dME3IWyZBvmh1n1q",
+  teddy: "Zn7g6NxLqXlJb7Qi",
+};
+const voiceFile = (voice: ReadAloudVoice): RemoteFile =>
+  voice === "default"
+    ? DEFAULT_VOICE
+    : {
+        repository: VOICE_REPOSITORY,
+        revision: VOICE_REVISION,
+        path: `voices/${CATALOG_VOICE_IDS[voice]}.safetensors`,
+      };
+
 const ENGINE_IDLE_TIME = Duration.minutes(5);
 const DOWNLOAD_RESPONSE_TIMEOUT = Duration.seconds(30);
 
-// The engine process loads these from disk, so they stay external to the server bundle.
+// The engine process loads phonon-tts from disk, so it stays external to the server bundle.
 const requireForEngine = NodeModule.createRequire(import.meta.url);
 
-const TokenizerJson = Schema.fromJsonString(
-  Schema.Struct({ model: Schema.Struct({ vocab: Schema.Record(Schema.String, Schema.Number) }) }),
-);
 const EngineConfigJson = Schema.fromJsonString(
   Schema.Struct({
-    onnxRuntimePath: Schema.String,
-    phonemizerPath: Schema.String,
+    moduleUrl: Schema.String,
+    wasmPath: Schema.String,
     modelPath: Schema.String,
+    tokenizerPath: Schema.String,
+    configPath: Schema.String,
   }),
 );
 const EngineRequestJson = Schema.fromJsonString(
-  Schema.Union([
-    Schema.Struct({
-      id: Schema.Number,
-      op: Schema.Literal("phonemize"),
-      text: Schema.String,
-      language: Schema.String,
-    }),
-    Schema.Struct({
-      id: Schema.Number,
-      op: Schema.Literal("infer"),
-      ids: Schema.Array(Schema.Number),
-      voicePath: Schema.String,
-    }),
-  ]),
+  Schema.Struct({ id: Schema.Number, text: Schema.String, voicePath: Schema.String }),
 );
 type EngineRequest = typeof EngineRequestJson.Type;
 const EngineResponseJson = Schema.fromJsonString(
   Schema.Struct({
     id: Schema.Number,
     error: Schema.optionalKey(Schema.String),
-    phonemes: Schema.optionalKey(Schema.Array(Schema.String)),
     audio: Schema.optionalKey(Schema.String),
   }),
 );
@@ -128,7 +175,6 @@ type EngineResponse = typeof EngineResponseJson.Type;
 const encodeEngineConfig = Schema.encodeEffect(EngineConfigJson);
 const encodeEngineRequest = Schema.encodeEffect(EngineRequestJson);
 const decodeEngineResponse = Schema.decodeEffect(EngineResponseJson);
-const decodeTokenizer = Schema.decodeEffect(TokenizerJson);
 
 class EngineFailure extends Schema.TaggedError<EngineFailure>()("EngineFailure", {
   reason: Schema.String,
@@ -140,20 +186,20 @@ const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const httpClient = yield* HttpClient.HttpClient;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const root = path.join(config.providerStatusCacheDir, "kokoro", KOKORO_REVISION);
+  const root = path.join(config.providerStatusCacheDir, "phonon");
   const encoder = new TextEncoder();
 
-  /** Downloads a model file into the cache once, verifying it when a hash is pinned. */
-  const ensureFile = Effect.fn("KokoroEngine.ensureFile")(function* (
-    file: string,
-    options: {
-      readonly sha256?: string;
-      readonly onProgress?: (completed: number, total: number | null) => Effect.Effect<void>;
-    } = {},
+  const localPath = (file: RemoteFile) =>
+    path.join(root, file.repository.replace("/", "--"), file.revision, file.path);
+
+  /** Downloads a file into the cache once, verifying it when a hash is pinned. */
+  const ensureFile = Effect.fn("PhononEngine.ensureFile")(function* (
+    file: RemoteFile,
+    onProgress?: (completed: number, total: number | null) => Effect.Effect<void>,
   ) {
-    const target = path.join(root, file);
+    const target = localPath(file);
     if (yield* fileSystem.exists(target).pipe(Effect.orElseSucceed(() => false))) return target;
-    const fail = (cause?: unknown) => new SpeechModelDownloadError({ file, cause });
+    const fail = (cause?: unknown) => new SpeechModelDownloadError({ file: file.path, cause });
     return yield* Effect.scoped(
       Effect.gen(function* () {
         yield* fileSystem.makeDirectory(path.dirname(target), { recursive: true });
@@ -166,7 +212,7 @@ const make = Effect.gen(function* () {
         const response = yield* httpClient
           .execute(
             HttpClientRequest.get(
-              `https://huggingface.co/${KOKORO_REPOSITORY}/resolve/${KOKORO_REVISION}/${file}`,
+              `https://huggingface.co/${file.repository}/resolve/${file.revision}/${file.path}`,
             ),
           )
           .pipe(
@@ -175,14 +221,13 @@ const make = Effect.gen(function* () {
           );
         const length = Number(response.headers["content-length"]);
         const total = Number.isFinite(length) && length > 0 ? length : null;
-        const hash = options.sha256 === undefined ? undefined : sha256.create();
+        const hash = file.sha256 === undefined ? undefined : sha256.create();
         let completed = 0;
         let reportedPercent = -1;
         yield* response.stream.pipe(
           Stream.tap((chunk) => {
             completed += chunk.byteLength;
             hash?.update(chunk);
-            const onProgress = options.onProgress;
             if (onProgress === undefined || total === null) return Effect.void;
             // At most one update per percent, so the client is not flooded.
             const percent = Math.floor((completed / total) * 100);
@@ -192,7 +237,7 @@ const make = Effect.gen(function* () {
           }),
           Stream.run(fileSystem.sink(temporaryFile)),
         );
-        if (hash !== undefined && Hex.encode(hash.digest()) !== options.sha256) {
+        if (hash !== undefined && Hex.encode(hash.digest()) !== file.sha256) {
           return yield* fail();
         }
         yield* fileSystem.rename(temporaryFile, target);
@@ -204,11 +249,18 @@ const make = Effect.gen(function* () {
   const startEngine = Effect.gen(function* () {
     const start = (cause?: unknown) => new SpeechEngineError({ operation: "start", cause });
     const engineConfig = yield* Effect.try({
-      try: () => ({
-        onnxRuntimePath: requireForEngine.resolve("onnxruntime-node"),
-        phonemizerPath: requireForEngine.resolve("phonemizer"),
-        modelPath: path.join(root, MODEL_FILE.path),
-      }),
+      try: () => {
+        const packageRoot = path.dirname(requireForEngine.resolve("phonon-tts/package.json"));
+        return {
+          // The threaded build; its JavaScript is not in the package's exports map.
+          moduleUrl: NodeURL.pathToFileURL(path.join(packageRoot, "wasm-threads/phonon_tts.js"))
+            .href,
+          wasmPath: path.join(packageRoot, "wasm-threads/phonon_tts_simd_bg.wasm"),
+          modelPath: localPath(MODEL_FILES.model),
+          tokenizerPath: localPath(MODEL_FILES.tokenizer),
+          configPath: localPath(MODEL_FILES.config),
+        };
+      },
       catch: start,
     });
     const configJson = yield* encodeEngineConfig(engineConfig).pipe(Effect.mapError(start));
@@ -216,8 +268,8 @@ const make = Effect.gen(function* () {
       .spawn(
         // The server's own Node runs the engine. In the desktop app that is Electron, which
         // behaves as Node because the server inherits ELECTRON_RUN_AS_NODE.
-        ChildProcess.make(process.execPath, ["-e", KOKORO_ENGINE_SCRIPT], {
-          env: { T3_KOKORO_ENGINE_CONFIG: configJson },
+        ChildProcess.make(process.execPath, ["-e", PHONON_ENGINE_SCRIPT], {
+          env: { T3_PHONON_ENGINE_CONFIG: configJson },
           extendEnv: true,
         }),
       )
@@ -241,7 +293,7 @@ const make = Effect.gen(function* () {
     yield* Stream.runDrain(handle.stderr).pipe(Effect.ignore, Effect.forkScoped);
 
     // Takes responses until the one for `id`, skipping answers to interrupted requests.
-    const awaitResponse = Effect.fn("KokoroEngine.awaitResponse")(function* (id: number) {
+    const awaitResponse = Effect.fn("PhononEngine.awaitResponse")(function* (id: number) {
       while (true) {
         const response = yield* Queue.take(responses).pipe(
           Effect.catchTags({ Done: () => new EngineFailure({ reason: "exited" }) }),
@@ -272,38 +324,20 @@ const make = Effect.gen(function* () {
 
   const engine = yield* RcRef.make({ acquire: startEngine, idleTimeToLive: ENGINE_IDLE_TIME });
 
-  const acquire: KokoroEngine["Service"]["acquire"] = Effect.fn("KokoroEngine.acquire")(function* ({
+  const acquire: PhononEngine["Service"]["acquire"] = Effect.fn("PhononEngine.acquire")(function* ({
     voice,
     onDownloadProgress,
   }) {
-    yield* ensureFile(MODEL_FILE.path, {
-      sha256: MODEL_FILE.sha256,
-      onProgress: onDownloadProgress,
-    });
-    const tokenizerPath = yield* ensureFile("tokenizer.json");
-    const voicePath = yield* ensureFile(`voices/${voice}.bin`);
-    const tokenizer = yield* fileSystem.readFileString(tokenizerPath).pipe(
-      Effect.flatMap(decodeTokenizer),
-      Effect.mapError((cause) => new SpeechModelDownloadError({ file: "tokenizer.json", cause })),
-    );
+    // The weights are nearly all of the download, so only they report progress.
+    yield* ensureFile(MODEL_FILES.model, onDownloadProgress);
+    yield* ensureFile(MODEL_FILES.tokenizer);
+    yield* ensureFile(MODEL_FILES.config);
+    const voicePath = yield* ensureFile(voiceFile(voice));
     const running = yield* RcRef.get(engine);
-    // A failed engine is replaced on the next request rather than reused.
-    const failed = (operation: SpeechEngineError["operation"]) => (cause: unknown) =>
-      RcRef.invalidate(engine).pipe(
-        Effect.andThen(Effect.fail(new SpeechEngineError({ operation, cause }))),
-      );
     return {
-      vocab: new Map(Object.entries(tokenizer.model.vocab)),
-      phonemize: (text, language) =>
+      speak: (text) =>
         running
-          .call((id) => ({ id, op: "phonemize", text, language }))
-          .pipe(
-            Effect.map((response) => response.phonemes ?? []),
-            Effect.catch(failed("phonemize")),
-          ),
-      infer: (ids) =>
-        running
-          .call((id) => ({ id, op: "infer", ids: [...ids], voicePath }))
+          .call((id) => ({ id, text, voicePath }))
           .pipe(
             Effect.flatMap((response) => {
               const bytes = Base64.decode(response.audio ?? "");
@@ -311,12 +345,17 @@ const make = Effect.gen(function* () {
                 ? Effect.succeed(new Float32Array(bytes.success.slice().buffer))
                 : Effect.fail(bytes.failure);
             }),
-            Effect.catch(failed("infer")),
+            // A failed engine is replaced on the next request rather than reused.
+            Effect.catch((cause) =>
+              RcRef.invalidate(engine).pipe(
+                Effect.andThen(Effect.fail(new SpeechEngineError({ operation: "speak", cause }))),
+              ),
+            ),
           ),
-    } satisfies KokoroSession;
+    } satisfies PhononSession;
   });
 
-  return KokoroEngine.of({ acquire });
+  return PhononEngine.of({ acquire });
 });
 
-export const layer = Layer.effect(KokoroEngine, make);
+export const layer = Layer.effect(PhononEngine, make);

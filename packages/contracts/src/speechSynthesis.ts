@@ -1,14 +1,14 @@
 import * as Schema from "effect/Schema";
 
 import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
-import { ReadAloudVoice } from "./settings.ts";
+import { ReadAloudVoiceSetting } from "./settings.ts";
 
 /** Upper bound on one request; a long agent response is a few tens of thousands of characters. */
 const SPEECH_SYNTHESIS_MAX_TEXT_LENGTH = 200_000;
 
 export const SpeechSynthesisInput = Schema.Struct({
   text: TrimmedNonEmptyString.check(Schema.isMaxLength(SPEECH_SYNTHESIS_MAX_TEXT_LENGTH)),
-  voice: ReadAloudVoice,
+  voice: ReadAloudVoiceSetting,
 });
 export type SpeechSynthesisInput = typeof SpeechSynthesisInput.Type;
 

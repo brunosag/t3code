@@ -1000,43 +1000,16 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/gnome-extension",
   "!apps/desktop/gnome-extension/**/*",
 ] as const;
-// onnxruntime-node (the speech engine) publishes every platform's binaries in one
-// package, 31-43 MB each. A package only needs its own platform and architecture.
-const ONNX_RUNTIME_BINARIES = "**/node_modules/onnxruntime-node/bin/napi-v3";
-const ONNX_RUNTIME_PLATFORM = { mac: "darwin", linux: "linux", win: "win32" } as const;
-function unusedOnnxRuntimeBinaries(
-  platform: keyof typeof ONNX_RUNTIME_PLATFORM,
-  arch?: typeof BuildArch.Type,
-): string[] {
-  const own = ONNX_RUNTIME_PLATFORM[platform];
-  const unused = Object.values(ONNX_RUNTIME_PLATFORM)
-    .filter((other) => other !== own)
-    .map((other) => `${ONNX_RUNTIME_BINARIES}/${other}`);
-  if (arch === "x64" || arch === "arm64") {
-    unused.push(`${ONNX_RUNTIME_BINARIES}/${own}/${arch === "arm64" ? "x64" : "arm64"}`);
-  }
-  return unused;
-}
-
 // Windows terminal helpers cannot run on macOS and slow signing and notarization.
 export const MAC_FILE_EXCLUSIONS = [
   "!**/node_modules/node-pty/prebuilds/win32-*/**/*",
   "!**/node_modules/node-pty/third_party/conpty/**/*",
-  ...unusedOnnxRuntimeBinaries("mac").map((directory) => `!${directory}/**/*`),
 ] as const;
 // Linux builds node-pty from source; its prebuilds target other platforms.
 export const LINUX_FILE_EXCLUSIONS = [
-  "!**/node_modules/node-pty/prebuilds/win32-*/**/*",
-  "!**/node_modules/node-pty/third_party/conpty/**/*",
+  ...MAC_FILE_EXCLUSIONS,
   "!**/node_modules/node-pty/prebuilds/darwin-*/**/*",
-  ...unusedOnnxRuntimeBinaries("linux").map((directory) => `!${directory}/**/*`),
 ] as const;
-
-export function resolveLinuxFileExclusions(arch?: typeof BuildArch.Type) {
-  if (arch !== "x64" && arch !== "arm64") return [...LINUX_FILE_EXCLUSIONS];
-  const unusedArch = arch === "arm64" ? "x64" : "arm64";
-  return [...LINUX_FILE_EXCLUSIONS, `!${ONNX_RUNTIME_BINARIES}/linux/${unusedArch}/**/*`];
-}
 
 // Native packages (node-pty, objc-js) ship prebuilds for both Darwin architectures; only universal
 // apps need both. macOS 27 warns that an arm64 app holding x64-only code won't open on macOS 28.
@@ -1046,11 +1019,7 @@ export function resolveMacFileExclusions(arch?: typeof BuildArch.Type) {
   }
 
   const unusedArch = arch === "arm64" ? "x64" : "arm64";
-  return [
-    ...MAC_FILE_EXCLUSIONS,
-    `!**/node_modules/**/prebuilds/darwin-${unusedArch}/**/*`,
-    `!${ONNX_RUNTIME_BINARIES}/darwin/${unusedArch}/**/*`,
-  ];
+  return [...MAC_FILE_EXCLUSIONS, `!**/node_modules/**/prebuilds/darwin-${unusedArch}/**/*`];
 }
 // Large ASAR sidecars avoid NSIS extracting thousands of loose files during installs and updates.
 export const WINDOWS_SERVER_ASAR_RESOURCE = "server.asar";
@@ -1086,11 +1055,6 @@ export function resolveWindowsServerAsarIgnoreGlobs(arch: typeof BuildArch.Type)
     `${unusedPrebuild}/**`,
     unusedConpty,
     `${unusedConpty}/**`,
-    // Unpacked native files count toward WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT.
-    ...unusedOnnxRuntimeBinaries("win", arch).flatMap((directory) => [
-      directory,
-      `${directory}/**`,
-    ]),
   ];
 }
 
@@ -2823,7 +2787,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       ...(platform === "mac"
         ? resolveMacFileExclusions(arch)
         : platform === "linux"
-          ? resolveLinuxFileExclusions(arch)
+          ? LINUX_FILE_EXCLUSIONS
           : []),
     ],
     directories: {

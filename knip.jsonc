@@ -68,13 +68,12 @@
       // The Vite+ web build prerequisite.
       // Native and disk-loaded provider packages stay external to the bundle; the
       // CLI archive and desktop sidecar stage them from this manifest.
-      // The speech engine process requires onnxruntime-node and phonemizer by resolved path.
+      // The speech engine process imports phonon-tts by resolved path.
       "ignoreDependencies": [
         "@effect/platform-node-shared",
         "@t3tools/web",
         "@napi-rs/keyring",
-        "onnxruntime-node",
-        "phonemizer",
+        "phonon-tts",
         "ffi-rs",
         "transcribe-cpp",
       ],

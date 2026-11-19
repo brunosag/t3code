@@ -134,56 +134,70 @@ export function speechTextFromMarkdown(markdown: string): string {
 
 export interface ReadAloudVoiceInfo {
   readonly name: string;
-  readonly accent: "American" | "British";
-  readonly gender: "Female" | "Male";
-  /** Kokoro's published overall grade; lower grades sound noticeably less natural. */
-  readonly grade: string;
+  /** Null for the model's own voice, which its catalog does not describe. */
+  readonly accent: "American" | "British" | null;
+  readonly gender: "Female" | "Male" | null;
 }
 
-/** Display metadata mirrored from kokoro-js, which is too heavy to import outside the speech worker. */
+/** Display metadata from the gradium/phonon-voices catalog. */
 export const READ_ALOUD_VOICE_INFO: Record<ReadAloudVoice, ReadAloudVoiceInfo> = {
-  af_heart: { name: "Heart", accent: "American", gender: "Female", grade: "A" },
-  af_alloy: { name: "Alloy", accent: "American", gender: "Female", grade: "C" },
-  af_aoede: { name: "Aoede", accent: "American", gender: "Female", grade: "C+" },
-  af_bella: { name: "Bella", accent: "American", gender: "Female", grade: "A-" },
-  af_jessica: { name: "Jessica", accent: "American", gender: "Female", grade: "D" },
-  af_kore: { name: "Kore", accent: "American", gender: "Female", grade: "C+" },
-  af_nicole: { name: "Nicole", accent: "American", gender: "Female", grade: "B-" },
-  af_nova: { name: "Nova", accent: "American", gender: "Female", grade: "C" },
-  af_river: { name: "River", accent: "American", gender: "Female", grade: "D" },
-  af_sarah: { name: "Sarah", accent: "American", gender: "Female", grade: "C+" },
-  af_sky: { name: "Sky", accent: "American", gender: "Female", grade: "C-" },
-  am_adam: { name: "Adam", accent: "American", gender: "Male", grade: "F+" },
-  am_echo: { name: "Echo", accent: "American", gender: "Male", grade: "D" },
-  am_eric: { name: "Eric", accent: "American", gender: "Male", grade: "D" },
-  am_fenrir: { name: "Fenrir", accent: "American", gender: "Male", grade: "C+" },
-  am_liam: { name: "Liam", accent: "American", gender: "Male", grade: "D" },
-  am_michael: { name: "Michael", accent: "American", gender: "Male", grade: "C+" },
-  am_onyx: { name: "Onyx", accent: "American", gender: "Male", grade: "D" },
-  am_puck: { name: "Puck", accent: "American", gender: "Male", grade: "C+" },
-  am_santa: { name: "Santa", accent: "American", gender: "Male", grade: "D-" },
-  bf_alice: { name: "Alice", accent: "British", gender: "Female", grade: "D" },
-  bf_emma: { name: "Emma", accent: "British", gender: "Female", grade: "B-" },
-  bf_isabella: { name: "Isabella", accent: "British", gender: "Female", grade: "C" },
-  bf_lily: { name: "Lily", accent: "British", gender: "Female", grade: "D" },
-  bm_daniel: { name: "Daniel", accent: "British", gender: "Male", grade: "D" },
-  bm_fable: { name: "Fable", accent: "British", gender: "Male", grade: "C" },
-  bm_george: { name: "George", accent: "British", gender: "Male", grade: "C" },
-  bm_lewis: { name: "Lewis", accent: "British", gender: "Male", grade: "D+" },
+  default: { name: "Default", accent: null, gender: null },
+  zoey: { name: "Zoey", accent: "American", gender: "Female" },
+  juniper: { name: "Juniper", accent: "American", gender: "Female" },
+  everly: { name: "Everly", accent: "American", gender: "Female" },
+  harper: { name: "Harper", accent: "American", gender: "Female" },
+  hadley: { name: "Hadley", accent: "American", gender: "Female" },
+  delia: { name: "Delia", accent: "American", gender: "Female" },
+  easton: { name: "Easton", accent: "American", gender: "Male" },
+  micah: { name: "Micah", accent: "American", gender: "Male" },
+  trevor: { name: "Trevor", accent: "American", gender: "Male" },
+  russell: { name: "Russell", accent: "American", gender: "Male" },
+  preston: { name: "Preston", accent: "American", gender: "Male" },
+  miles: { name: "Miles", accent: "American", gender: "Male" },
+  maeve: { name: "Maeve", accent: "British", gender: "Female" },
+  freya: { name: "Freya", accent: "British", gender: "Female" },
+  pippa: { name: "Pippa", accent: "British", gender: "Female" },
+  "elodie-rose": { name: "Elodie-Rose", accent: "British", gender: "Female" },
+  imogen: { name: "Imogen", accent: "British", gender: "Female" },
+  lottie: { name: "Lottie", accent: "British", gender: "Female" },
+  alfie: { name: "Alfie", accent: "British", gender: "Male" },
+  hugh: { name: "Hugh", accent: "British", gender: "Male" },
+  edwin: { name: "Edwin", accent: "British", gender: "Male" },
+  spencer: { name: "Spencer", accent: "British", gender: "Male" },
+  toby: { name: "Toby", accent: "British", gender: "Male" },
+  teddy: { name: "Teddy", accent: "British", gender: "Male" },
+  bryony: { name: "Bryony", accent: "British", gender: "Female" },
 };
 
-export const READ_ALOUD_VOICE_GROUPS = (
-  [
-    ["American", "Female"],
-    ["American", "Male"],
-    ["British", "Female"],
-    ["British", "Male"],
-  ] as const
-).map(([accent, gender]) => ({
-  label: `${accent} ${gender.toLowerCase()}`,
-  voices: READ_ALOUD_VOICES.filter(
-    (voice) =>
-      READ_ALOUD_VOICE_INFO[voice].accent === accent &&
-      READ_ALOUD_VOICE_INFO[voice].gender === gender,
-  ),
-}));
+export function readAloudVoiceLabel(voice: ReadAloudVoice): string {
+  const info = READ_ALOUD_VOICE_INFO[voice];
+  return info.accent === null ? info.name : `${info.name} · ${info.accent}`;
+}
+
+export function readAloudVoicePreviewText(voice: ReadAloudVoice): string {
+  const info = READ_ALOUD_VOICE_INFO[voice];
+  const greeting = info.accent === null ? "" : `Hi, I'm ${info.name}. `;
+  return `${greeting}This is how responses will sound when read aloud.`;
+}
+
+export const READ_ALOUD_VOICE_GROUPS = [
+  {
+    label: "Model",
+    voices: READ_ALOUD_VOICES.filter((voice) => READ_ALOUD_VOICE_INFO[voice].accent === null),
+  },
+  ...(
+    [
+      ["American", "Female"],
+      ["American", "Male"],
+      ["British", "Female"],
+      ["British", "Male"],
+    ] as const
+  ).map(([accent, gender]) => ({
+    label: `${accent} ${gender.toLowerCase()}`,
+    voices: READ_ALOUD_VOICES.filter(
+      (voice) =>
+        READ_ALOUD_VOICE_INFO[voice].accent === accent &&
+        READ_ALOUD_VOICE_INFO[voice].gender === gender,
+    ),
+  })),
+];

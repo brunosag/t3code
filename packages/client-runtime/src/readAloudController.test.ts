@@ -96,7 +96,7 @@ function streamed() {
 describe("ReadAloudController", () => {
   it("plays, pauses, and resumes the same response", async () => {
     const { player, audios } = setup();
-    await player.start("response-1", { environmentId, text: "Hello.", voice: "af_heart" });
+    await player.start("response-1", { environmentId, text: "Hello.", voice: "everly" });
     expect(player.getSnapshot("response-1")?.status).toBe("playing");
     expect(audios[0]!.paused).toBe(false);
 
@@ -114,7 +114,7 @@ describe("ReadAloudController", () => {
     const pending = player.start("response", {
       environmentId,
       text: "One. Two.",
-      voice: "af_heart",
+      voice: "everly",
     });
     expect(player.getSnapshot("response")?.status).toBe("preparing");
 
@@ -146,7 +146,7 @@ describe("ReadAloudController", () => {
     const pending = player.start("response", {
       environmentId,
       text: "One. Two.",
-      voice: "af_heart",
+      voice: "everly",
     });
     generation.emit(4);
     audios[0]!.finish();
@@ -166,7 +166,7 @@ describe("ReadAloudController", () => {
     const pending = player.start("response", {
       environmentId,
       text: "One. Two.",
-      voice: "af_heart",
+      voice: "everly",
     });
     generation.emit(4);
     audios[0]!.finish();
@@ -189,7 +189,7 @@ describe("ReadAloudController", () => {
       onChunk({ audio: new Uint8Array(), duration: 30 });
       onChunk({ audio: new Uint8Array(), duration: 30 });
     });
-    await player.start("response", { environmentId, text: "Hello.", voice: "af_heart" });
+    await player.start("response", { environmentId, text: "Hello.", voice: "everly" });
     audios[0]!.currentTime = 15;
     audios[0]!.dispatchEvent(new Event("timeupdate"));
     expect(player.getSnapshot("response")).toMatchObject({ position: 15, duration: 60 });
@@ -216,21 +216,21 @@ describe("ReadAloudController", () => {
 
   it("adjusts playback speed immediately and retains it for the next response", async () => {
     const { player, audios } = setup();
-    await player.start("first", { environmentId, text: "First.", voice: "af_heart" });
+    await player.start("first", { environmentId, text: "First.", voice: "everly" });
     player.setSpeed(1.5);
     expect(audios[0]!.playbackRate).toBe(1.5);
     player.setSpeed(9);
     player.setSpeed(Number.NaN);
     expect(audios[0]!.playbackRate).toBe(1.5);
     player.stop();
-    await player.start("second", { environmentId, text: "Second.", voice: "af_heart" });
+    await player.start("second", { environmentId, text: "Second.", voice: "everly" });
     expect(player.getSnapshot("second")?.speed).toBe(1.5);
     expect(audios[1]!.playbackRate).toBe(1.5);
   });
 
   it("stops audio and releases its resources", async () => {
     const { player, audios, disposed } = setup();
-    await player.start("response", { environmentId, text: "Hello.", voice: "af_heart" });
+    await player.start("response", { environmentId, text: "Hello.", voice: "everly" });
     player.stop();
     expect(audios[0]!.paused).toBe(true);
     expect(disposed()).toBe(1);
@@ -247,7 +247,7 @@ describe("ReadAloudController", () => {
       progress({ label: "Generating speech…", percent: 50, estimatedDuration: null });
       return generation.generate(request, nextSignal, progress, onChunk);
     });
-    const pending = player.start("response", { environmentId, text: "Hello.", voice: "af_heart" });
+    const pending = player.start("response", { environmentId, text: "Hello.", voice: "everly" });
     expect(player.getSnapshot("response")).toMatchObject({
       status: "preparing",
       progress: { percent: 50 },
@@ -271,8 +271,8 @@ describe("ReadAloudController", () => {
       }
       return oneChunk(request, signal, progress, onChunk);
     });
-    const pending = player.start("first", { environmentId, text: "First.", voice: "af_heart" });
-    await player.start("second", { environmentId, text: "Second.", voice: "af_heart" });
+    const pending = player.start("first", { environmentId, text: "First.", voice: "everly" });
+    await player.start("second", { environmentId, text: "Second.", voice: "everly" });
     const secondSnapshot = player.getSnapshot("second");
     reportFirst({ label: "Stale progress", percent: 99, estimatedDuration: null });
     first.emit(4);
@@ -286,8 +286,8 @@ describe("ReadAloudController", () => {
 
   it("replaces active audio without overlapping responses", async () => {
     const { player, audios, disposed } = setup();
-    await player.start("first", { environmentId, text: "First.", voice: "af_heart" });
-    const second = player.start("second", { environmentId, text: "Second.", voice: "af_heart" });
+    await player.start("first", { environmentId, text: "First.", voice: "everly" });
+    const second = player.start("second", { environmentId, text: "Second.", voice: "everly" });
     expect(audios[0]!.paused).toBe(true);
     expect(disposed()).toBe(1);
     await second;
@@ -299,7 +299,7 @@ describe("ReadAloudController", () => {
 
   it("can replay after reaching the end", async () => {
     const { player, audios } = setup();
-    await player.start("response", { environmentId, text: "Hello.", voice: "af_heart" });
+    await player.start("response", { environmentId, text: "Hello.", voice: "everly" });
     audios[0]!.finish();
     expect(player.getSnapshot("response")?.status).toBe("ended");
     player.seek(30);
@@ -319,12 +319,12 @@ describe("ReadAloudController", () => {
       }
       return oneChunk(request, signal, progress, onChunk);
     });
-    await player.start("response", { environmentId, text: "Hello.", voice: "af_heart" });
+    await player.start("response", { environmentId, text: "Hello.", voice: "everly" });
     expect(player.getSnapshot("response")).toMatchObject({
       status: "error",
       error: "Model download failed.",
     });
-    await player.start("response", { environmentId, text: "Hello.", voice: "af_heart" });
+    await player.start("response", { environmentId, text: "Hello.", voice: "everly" });
     expect(player.getSnapshot("response")?.status).toBe("playing");
   });
 
@@ -334,7 +334,7 @@ describe("ReadAloudController", () => {
     const pending = player.start("response", {
       environmentId,
       text: "One. Two.",
-      voice: "af_heart",
+      voice: "everly",
     });
     generation.emit(4);
     generation.fail(new Error("Unable to prepare local speech."));
@@ -357,7 +357,7 @@ describe("ReadAloudController", () => {
       return play.call(this);
     };
     try {
-      await player.start("response", { environmentId, text: "Hello.", voice: "af_heart" });
+      await player.start("response", { environmentId, text: "Hello.", voice: "everly" });
       expect(player.getSnapshot("response")).toMatchObject({
         status: "paused",
         error: "Speech is ready. Press Play to listen.",

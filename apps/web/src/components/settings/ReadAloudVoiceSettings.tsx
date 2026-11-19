@@ -8,7 +8,12 @@ import {
 
 import { readAloud } from "~/lib/readAloud";
 import { usePrimaryEnvironmentId } from "~/state/environments";
-import { READ_ALOUD_VOICE_GROUPS, READ_ALOUD_VOICE_INFO } from "@t3tools/client-runtime/read-aloud";
+import {
+  READ_ALOUD_VOICE_GROUPS,
+  READ_ALOUD_VOICE_INFO,
+  readAloudVoiceLabel,
+  readAloudVoicePreviewText,
+} from "@t3tools/client-runtime/read-aloud";
 import { Button } from "../ui/button";
 import {
   Select,
@@ -83,9 +88,7 @@ export function ReadAloudVoiceSettings() {
             }}
           >
             <SelectTrigger size="sm" className="w-full sm:w-48" aria-label="Read aloud voice">
-              <SelectValue>
-                {info.name} · {info.accent}
-              </SelectValue>
+              <SelectValue>{readAloudVoiceLabel(voice)}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
               {READ_ALOUD_VOICE_GROUPS.map((group) => (
@@ -93,12 +96,7 @@ export function ReadAloudVoiceSettings() {
                   <SelectGroupLabel>{group.label}</SelectGroupLabel>
                   {group.voices.map((option) => (
                     <SelectItem key={option} value={option}>
-                      <span className="flex items-center justify-between gap-4">
-                        {READ_ALOUD_VOICE_INFO[option].name}
-                        <span className="text-muted-foreground">
-                          {READ_ALOUD_VOICE_INFO[option].grade}
-                        </span>
-                      </span>
+                      {READ_ALOUD_VOICE_INFO[option].name}
                     </SelectItem>
                   ))}
                 </SelectGroup>
@@ -119,7 +117,7 @@ export function ReadAloudVoiceSettings() {
               if (previewEnvironmentId === null) return;
               void readAloud.start(PREVIEW_KEY, {
                 environmentId: previewEnvironmentId,
-                text: `Hi, I'm ${info.name}. This is how responses will sound when read aloud.`,
+                text: readAloudVoicePreviewText(voice),
                 voice,
               });
             }}

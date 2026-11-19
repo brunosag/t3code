@@ -46,6 +46,9 @@ vp test run \
   apps/web/src/components/chat/MessagesTimeline.logic.test.ts \
   packages/client-runtime/src/readAloudController.test.ts \
   apps/mobile/src/features/read-aloud/expoPlaybackAudio.test.ts \
+  apps/server/src/speech/speechText.test.ts \
+  apps/server/src/speech/SpeechSynthesis.test.ts \
+  scripts/lib/cli-external-packages.test.ts \
   packages/client-runtime/src/modelSearch.test.ts \
   packages/client-runtime/src/state/sharedProviderSettings.test.ts \
   apps/web/src/versionSkew.test.ts \

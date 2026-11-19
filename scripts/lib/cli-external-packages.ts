@@ -17,11 +17,8 @@ const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   "@clerk/electron-passkeys",
   "node-gyp-build",
   "node-addon-api",
-  // The speech engine process requires these from disk by resolved path; ONNX
-  // Runtime dlopens its addon, and onnxruntime-common is its runtime dependency.
-  "onnxruntime-node",
-  "onnxruntime-common",
-  "phonemizer",
+  // The speech engine process imports its WebAssembly build from disk by resolved path.
+  "phonon-tts",
   // Keep optional ws native accelerators on disk: inlined loaders cannot find their prebuilds.
   "bufferutil",
   "utf-8-validate",

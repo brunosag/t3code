@@ -803,7 +803,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "read-aloud-voice",
     title: msg("Read aloud voice"),
     to: "/settings/chat",
-    searchTerms: [msg("speech text to speech tts voice listen narrate kokoro preview accent")],
+    searchTerms: [msg("speech text to speech tts voice listen narrate phonon preview accent")],
   },
   {
     id: "follow-up-behavior",

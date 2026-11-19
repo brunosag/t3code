@@ -235,40 +235,50 @@ export const SnapShotSound = Schema.Literals(["soft-pop", "camera-shutter"]);
 export type SnapShotSound = typeof SnapShotSound.Type;
 const DEFAULT_SNAP_SHOT_SOUND: SnapShotSound = "soft-pop";
 
-// Kokoro-82M voices that kokoro-js can phonemize (American and British English).
+// Phonon 31M English voices: the checkpoint's own voice, then gradium/phonon-voices by name.
 export const READ_ALOUD_VOICES = [
-  "af_heart",
-  "af_alloy",
-  "af_aoede",
-  "af_bella",
-  "af_jessica",
-  "af_kore",
-  "af_nicole",
-  "af_nova",
-  "af_river",
-  "af_sarah",
-  "af_sky",
-  "am_adam",
-  "am_echo",
-  "am_eric",
-  "am_fenrir",
-  "am_liam",
-  "am_michael",
-  "am_onyx",
-  "am_puck",
-  "am_santa",
-  "bf_alice",
-  "bf_emma",
-  "bf_isabella",
-  "bf_lily",
-  "bm_daniel",
-  "bm_fable",
-  "bm_george",
-  "bm_lewis",
+  "default",
+  "zoey",
+  "juniper",
+  "everly",
+  "harper",
+  "hadley",
+  "delia",
+  "easton",
+  "micah",
+  "trevor",
+  "russell",
+  "preston",
+  "miles",
+  "maeve",
+  "freya",
+  "pippa",
+  "elodie-rose",
+  "imogen",
+  "lottie",
+  "bryony",
+  "alfie",
+  "hugh",
+  "edwin",
+  "spencer",
+  "toby",
+  "teddy",
 ] as const;
 export const ReadAloudVoice = Schema.Literals(READ_ALOUD_VOICES);
 export type ReadAloudVoice = typeof ReadAloudVoice.Type;
-const DEFAULT_READ_ALOUD_VOICE: ReadAloudVoice = "af_heart";
+const DEFAULT_READ_ALOUD_VOICE: ReadAloudVoice = "default";
+
+// Kokoro voice ids saved before read aloud moved to Phonon, and still sent by older clients.
+const LegacyKokoroVoice = Schema.String.check(Schema.isPattern(/^[ab][fm]_[a-z]+$/)).pipe(
+  Schema.decodeTo(
+    ReadAloudVoice,
+    SchemaTransformation.transform<ReadAloudVoice, string>({
+      decode: () => DEFAULT_READ_ALOUD_VOICE,
+      encode: (voice) => voice,
+    }),
+  ),
+);
+export const ReadAloudVoiceSetting = Schema.Union([ReadAloudVoice, LegacyKokoroVoice]);
 
 export type SnapShotModifierPairShortcut = Extract<SnapShotShortcut, { readonly kind: string }>;
 
@@ -562,7 +572,7 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed("steer")),
   ),
   proactivePanelsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  readAloudVoice: ReadAloudVoice.pipe(
+  readAloudVoice: ReadAloudVoiceSetting.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_READ_ALOUD_VOICE)),
   ),
   showSkillsInSlashMenu: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
@@ -2150,7 +2160,7 @@ export const ClientSettingsPatch = Schema.Struct({
   sendShortcut: Schema.optionalKey(Schema.Literals(["enter", "mod-enter-multiline", "mod-enter"])),
   followUpBehavior: Schema.optionalKey(Schema.Literals(["queue", "steer"])),
   proactivePanelsEnabled: Schema.optionalKey(Schema.Boolean),
-  readAloudVoice: Schema.optionalKey(ReadAloudVoice),
+  readAloudVoice: Schema.optionalKey(ReadAloudVoiceSetting),
   showSkillsInSlashMenu: Schema.optionalKey(Schema.Boolean),
   boringSidebarEnabled: Schema.optionalKey(Schema.Boolean),
   boringSidebarMultilineRows: Schema.optionalKey(Schema.Boolean),

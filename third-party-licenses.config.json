@@ -230,22 +230,6 @@
   ],
   "packageOverrides": [
     {
-      "name": "onnxruntime-node",
-      "version": "1.21.0",
-      "generatedNotice": {
-        "licenseId": "MIT",
-        "copyrights": ["Copyright (c) Microsoft Corporation"]
-      }
-    },
-    {
-      "name": "onnxruntime-common",
-      "version": "1.21.0",
-      "generatedNotice": {
-        "licenseId": "MIT",
-        "copyrights": ["Copyright (c) Microsoft Corporation"]
-      }
-    },
-    {
       "name": "entities",
       "version": "8.1.0",
       "license": "BSD-2-Clause",

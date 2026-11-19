@@ -1,5 +1,10 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import { READ_ALOUD_VOICE_GROUPS, READ_ALOUD_VOICE_INFO } from "@t3tools/client-runtime/read-aloud";
+import {
+  READ_ALOUD_VOICE_GROUPS,
+  READ_ALOUD_VOICE_INFO,
+  readAloudVoiceLabel,
+  readAloudVoicePreviewText,
+} from "@t3tools/client-runtime/read-aloud";
 import { DEFAULT_UNIFIED_SETTINGS, READ_ALOUD_VOICES } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { useEffect, useSyncExternalStore } from "react";
@@ -53,7 +58,6 @@ export function ReadAloudVoiceSection() {
           subactions: group.voices.map((option) => ({
             id: option,
             title: READ_ALOUD_VOICE_INFO[option].name,
-            subtitle: `Grade ${READ_ALOUD_VOICE_INFO[option].grade}`,
             state: option === voice ? "on" : "off",
           })),
         }))}
@@ -64,12 +68,8 @@ export function ReadAloudVoiceSection() {
           savePreferences({ readAloudVoice: next });
         }}
       >
-        <View accessibilityLabel={`Voice, ${info.name}, ${info.accent}`}>
-          <ListRowLayout
-            icon="speaker.wave.2"
-            label="Voice"
-            detail={`${info.name} · ${info.accent}`}
-          />
+        <View accessibilityLabel={`Voice, ${readAloudVoiceLabel(voice)}`}>
+          <ListRowLayout icon="speaker.wave.2" label="Voice" detail={readAloudVoiceLabel(voice)} />
         </View>
       </Menu>
       <View className="border-t border-border-subtle">
@@ -85,7 +85,7 @@ export function ReadAloudVoiceSection() {
             if (!previewEnvironment) return;
             void readAloud.start(PREVIEW_KEY, {
               environmentId: previewEnvironment.environmentId,
-              text: `Hi, I'm ${info.name}. This is how responses will sound when read aloud.`,
+              text: readAloudVoicePreviewText(voice),
               voice,
             });
           }}

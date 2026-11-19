@@ -344,6 +344,19 @@ describe("ClientSettings quit confirmation", () => {
   });
 });
 
+describe("ClientSettings read aloud voice", () => {
+  it("moves a saved Kokoro voice to the default Phonon voice", () => {
+    const settings = decodeClientSettings({ readAloudVoice: "bm_george" });
+
+    expect(settings.readAloudVoice).toBe("default");
+    expect(encodeClientSettings(settings).readAloudVoice).toBe("default");
+    expect(decodeClientSettingsPatch({ readAloudVoice: "af_heart" }).readAloudVoice).toBe(
+      "default",
+    );
+    expect(decodeClientSettings({ readAloudVoice: "everly" }).readAloudVoice).toBe("everly");
+  });
+});
+
 describe("provider enabled defaults", () => {
   it("resolves instance enabled state with explicit false winning", () => {
     const grok = ProviderDriverKind.make("grok");

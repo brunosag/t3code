@@ -61,10 +61,11 @@ describe("selectCliRuntimeExternalDependencies", () => {
         "@cursor/sdk",
         "@ff-labs/fff-node",
         "@napi-rs/keyring",
+        "ffi-rs",
         "node-pty",
-        "onnxruntime-node",
-        "phonemizer",
+        "phonon-tts",
         "playwright-core",
+        "transcribe-cpp",
         "undici",
         "zod",
       ],
@@ -113,12 +114,6 @@ it.layer(NodeServices.layer)("external package dependency closure", (it) => {
 
   const isRuntimeExternal = isRuntimeExternalCliDependency;
 
-  // Dependencies only an install script loads. pnpm never runs onnxruntime-node's
-  // (allowBuilds), and its runtime requires nothing but onnxruntime-common.
-  const INSTALL_SCRIPT_DEPENDENCIES: Readonly<Record<string, ReadonlyArray<string>>> = {
-    "onnxruntime-node": ["global-agent", "tar"],
-  };
-
   it.effect("finds the runtime-external packages on disk", () =>
     Effect.gen(function* () {
       const installed = yield* readInstalledPackages;
@@ -153,7 +148,6 @@ it.layer(NodeServices.layer)("external package dependency closure", (it) => {
           ...manifest.peerDependencies,
         };
         for (const dependency of Object.keys(declared)) {
-          if (INSTALL_SCRIPT_DEPENDENCIES[name]?.includes(dependency)) continue;
           if (!isRuntimeExternal(dependency)) {
             violations.push(`${name} -> ${dependency}`);
           }

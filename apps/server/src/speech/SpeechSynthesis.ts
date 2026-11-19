@@ -7,22 +7,18 @@ import * as Queue from "effect/Queue";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
-import * as KokoroEngine from "./KokoroEngine.ts";
+import * as PhononEngine from "./PhononEngine.ts";
 import {
   encodeWav,
-  estimateSpeechSeconds,
-  finishPhonemes,
-  fitPhonemes,
-  KOKORO_SAMPLE_RATE,
-  modelInputIds,
-  phonemeLanguage,
-  phonemeSections,
+  estimateRemainingSeconds,
+  prepareSpeechText,
+  SPEECH_SAMPLE_RATE,
   splitSpeechText,
-} from "./kokoroText.ts";
+} from "./speechText.ts";
 
 type SpeechSynthesisFailure =
-  | KokoroEngine.SpeechModelDownloadError
-  | KokoroEngine.SpeechEngineError;
+  | PhononEngine.SpeechModelDownloadError
+  | PhononEngine.SpeechEngineError;
 
 export class SpeechSynthesis extends Context.Service<
   SpeechSynthesis,
@@ -37,18 +33,8 @@ export class SpeechSynthesis extends Context.Service<
   }
 >()("t3/speech/SpeechSynthesis") {}
 
-function concatSamples(parts: ReadonlyArray<Float32Array>): Float32Array {
-  const samples = new Float32Array(parts.reduce((total, part) => total + part.length, 0));
-  let offset = 0;
-  for (const part of parts) {
-    samples.set(part, offset);
-    offset += part.length;
-  }
-  return samples;
-}
-
 const make = Effect.gen(function* () {
-  const engine = yield* KokoroEngine.KokoroEngine;
+  const engine = yield* PhononEngine.PhononEngine;
   const permit = yield* Semaphore.make(1);
 
   const synthesize: SpeechSynthesis["Service"]["synthesize"] = ({ text, voice }) =>
@@ -65,23 +51,9 @@ const make = Effect.gen(function* () {
                     onDownloadProgress: (completed, total) =>
                       emit({ type: "progress", stage: "downloading-model", completed, total }),
                   });
-                  const phonemize = (chunk: string) =>
-                    Effect.forEach(phonemeSections(chunk), (section) =>
-                      section.punctuation
-                        ? Effect.succeed(section.text)
-                        : session
-                            .phonemize(section.text, phonemeLanguage(voice))
-                            .pipe(Effect.map((lines) => lines.join(" "))),
-                    ).pipe(Effect.map((sections) => finishPhonemes(sections, voice)));
-                  const chunks = splitSpeechText(text);
-                  const upcoming: string[] = [];
-                  let generatedSeconds = 0;
+                  const chunks = splitSpeechText(prepareSpeechText(text));
+                  const generated = { characters: 0, seconds: 0 };
                   for (const [index, chunk] of chunks.entries()) {
-                    // The rest is phonemized after the first sentence ships, so it costs
-                    // no startup time; the estimate then arrives with the next progress.
-                    if (index === 1) {
-                      upcoming.push(...(yield* Effect.forEach(chunks.slice(1), phonemize)));
-                    }
                     yield* emit({
                       type: "progress",
                       stage: "generating",
@@ -89,26 +61,22 @@ const make = Effect.gen(function* () {
                       total: chunks.length,
                       ...(index > 0
                         ? {
-                            estimatedDurationSeconds: upcoming.reduce(
-                              (seconds, phonemes) => seconds + estimateSpeechSeconds(phonemes),
-                              generatedSeconds,
-                            ),
+                            estimatedDurationSeconds:
+                              generated.seconds +
+                              estimateRemainingSeconds(chunks.slice(index), generated),
                           }
                         : {}),
                     });
-                    const phonemes = upcoming.shift() ?? (yield* phonemize(chunk));
-                    const samples = concatSamples(
-                      yield* Effect.forEach(fitPhonemes(phonemes, session.vocab), (piece) =>
-                        session.infer(modelInputIds(piece, session.vocab)),
-                      ),
-                    );
-                    generatedSeconds += samples.length / KOKORO_SAMPLE_RATE;
+                    const samples = yield* session.speak(chunk);
+                    const seconds = samples.length / SPEECH_SAMPLE_RATE;
+                    generated.characters += chunk.length;
+                    generated.seconds += seconds;
                     // Text with nothing to pronounce, such as a lone symbol, yields no audio.
                     if (samples.length === 0) continue;
                     yield* emit({
                       type: "chunk",
                       audio: encodeWav(samples),
-                      durationSeconds: samples.length / KOKORO_SAMPLE_RATE,
+                      durationSeconds: seconds,
                     });
                   }
                 }),
