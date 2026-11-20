@@ -18,7 +18,8 @@ import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { makePermissionStatusAtom } from "../../lib/permissionStatusAtom";
 import { runtime } from "../../lib/runtime";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
+import { useAtomCommand } from "../../state/use-atom-command";
 import {
   openAndroidLiveUpdateSettings,
   supportsAndroidLiveUpdateSettings,
@@ -70,7 +71,7 @@ export function SettingsNotificationsAndroidScreen() {
   const permission = useAtomValue(notificationPermissionAtom);
   const setPermission = useAtomSet(notificationPermissionAtom);
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const savePreferences = useAtomCommand(saveMobilePreferences);
   const serverStatus = useSyncExternalStore(
     subscribeServerPushStatus,
     getServerPushStatus,
@@ -127,7 +128,7 @@ export function SettingsNotificationsAndroidScreen() {
 
   const handleOngoingChange = async (enabled: boolean) => {
     if (enabled && permission !== "enabled" && !(await requestPermission())) return;
-    savePreferences({ liveActivitiesEnabled: enabled });
+    void savePreferences({ liveActivitiesEnabled: enabled });
   };
 
   return (

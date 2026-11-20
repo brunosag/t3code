@@ -1,4 +1,4 @@
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import {
   READ_ALOUD_VOICE_GROUPS,
   READ_ALOUD_VOICE_INFO,
@@ -14,7 +14,8 @@ import { ListActionRow } from "../../components/ui/ListActionRow";
 import { ListRowLayout } from "../../components/ui/ListRowLayout";
 import { Menu } from "../../components/ui/Menu";
 import { useEnvironments } from "../../state/environments";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { readAloud } from "../read-aloud/readAloud";
 import { SettingsSection } from "./components/SettingsSection";
 
@@ -23,7 +24,7 @@ const getPreview = () => readAloud.getSnapshot(PREVIEW_KEY);
 
 export function ReadAloudVoiceSection() {
   const preferences = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const savePreferences = useAtomCommand(saveMobilePreferences);
   const voice =
     (AsyncResult.isSuccess(preferences) ? preferences.value.readAloudVoice : undefined) ??
     DEFAULT_UNIFIED_SETTINGS.readAloudVoice;
@@ -65,7 +66,7 @@ export function ReadAloudVoiceSection() {
           const next = READ_ALOUD_VOICES.find((option) => option === nativeEvent.event);
           if (!next) return;
           readAloud.stopMessage(PREVIEW_KEY);
-          savePreferences({ readAloudVoice: next });
+          void savePreferences({ readAloudVoice: next });
         }}
       >
         <View accessibilityLabel={`Voice, ${readAloudVoiceLabel(voice)}`}>

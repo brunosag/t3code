@@ -1,17 +1,18 @@
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import { orderedProviders } from "@t3tools/client-runtime/usage-limit-controls";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import type { UsageLimitsLayout } from "../../persistence/mobile-preferences";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
 import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { PROVIDER_ORDER } from "./usageProviders";
 
 /** The Limits view's saved provider order and hidden providers, limits and account rows. */
 export function useUsageLimitsLayout() {
   const preferences = useAtomValue(mobilePreferencesAtom);
-  const save = useAtomSet(updateMobilePreferencesAtom);
+  const save = useAtomCommand(saveMobilePreferences);
   const layout: UsageLimitsLayout = AsyncResult.isSuccess(preferences)
     ? (preferences.value.usageLimitsLayout ?? {})
     : {};
@@ -21,10 +22,11 @@ export function useUsageLimitsLayout() {
     hiddenLimits: new Set(layout.hiddenLimits),
     hiddenAccountRows: new Set(layout.hiddenAccountRows),
     // A transform, so changes to different fields in quick succession all land.
-    update: (patch: Partial<UsageLimitsLayout>) =>
-      save({
+    update: (patch: Partial<UsageLimitsLayout>) => {
+      void save({
         transform: (current) => ({ usageLimitsLayout: { ...current.usageLimitsLayout, ...patch } }),
-      }),
+      });
+    },
   };
 }
 
