@@ -73,4 +73,5 @@ vp test run \
 
 vp run --filter t3 --filter @t3tools/web --filter @t3tools/desktop \
   --filter @t3tools/shared --filter @t3tools/contracts --filter @t3tools/client-runtime \
-  --filter @t3tools/provider-pi --filter @t3tools/provider-core --concurrency-limit 2 typecheck
+  --filter @t3tools/provider-pi --filter @t3tools/provider-core --filter @t3tools/mobile \
+  --concurrency-limit 2 typecheck
