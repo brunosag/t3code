@@ -164,6 +164,17 @@ describe("handoff budget", () => {
       }),
     );
     assert.equal(historyResponseItems([command!], "Activity")[1]?.type, "message");
+    const attributed = historicalMessage(
+      { ...base, type: "command_execution", input: "vp test", output: "", exitCode: 0 },
+      {
+        status: "completed",
+        modelSelection: { instanceId: ProviderInstanceId.make("claude"), model: "claude-opus-5-5" },
+      },
+    );
+    assert.include(
+      JSON.stringify(historyResponseItems([attributed!], "Activity")[1]),
+      "status=failed; run-status=completed; model=claude/claude-opus-5-5]",
+    );
   });
 
   it("omits oversized multilingual items whole, preserves original constraints and recent work", () => {

@@ -6,6 +6,7 @@ import type {
   OrchestrationV2ContextHandoff,
   OrchestrationV2HistoricalMessage,
   OrchestrationV2ProviderThread,
+  OrchestrationV2Run,
   OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import { withMessageSenderNote } from "@t3tools/contracts";
@@ -134,6 +135,7 @@ export function handoffBudget(input: {
 
 export function historicalMessage(
   item: OrchestrationV2TurnItem,
+  run?: Pick<OrchestrationV2Run, "status" | "modelSelection">,
 ): OrchestrationV2HistoricalMessage | null {
   let text: string;
   switch (item.type) {
@@ -174,11 +176,17 @@ export function historicalMessage(
     providerThreadId: item.providerThreadId,
     status: item.status,
     kind: item.type,
+    ...(run === undefined
+      ? {}
+      : {
+          runStatus: run.status,
+          model: `${run.modelSelection.instanceId}/${run.modelSelection.model}`,
+        }),
   };
 }
 
 function renderHistoricalMessage(message: OrchestrationV2HistoricalMessage): string {
-  return `[Historical ${message.role}; ${message.kind}; thread=${message.threadId}; run=${message.runId ?? "imported"}; item=${message.itemId}; provider-thread=${message.providerThreadId ?? "none"}; status=${message.status}${message.runStatus === undefined ? "" : `; run-status=${message.runStatus}`}]\n${message.text}`;
+  return `[Historical ${message.role}; ${message.kind}; thread=${message.threadId}; run=${message.runId ?? "imported"}; item=${message.itemId}; provider-thread=${message.providerThreadId ?? "none"}; status=${message.status}${message.runStatus === undefined ? "" : `; run-status=${message.runStatus}`}${message.model === undefined ? "" : `; model=${message.model}`}]\n${message.text}`;
 }
 
 export function historyResponseItems(

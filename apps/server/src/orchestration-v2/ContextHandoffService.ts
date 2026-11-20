@@ -523,22 +523,18 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
               }),
           ),
         );
-      const runStatuses = new Map(input.runs?.map((run) => [run.id, run.status]));
-      const coverage = handoffCoverage({
+      const runs = new Map(input.runs?.map((run) => [run.id, run]));
+      const coverage = `${handoffCoverage({
         ...input,
         threadId: input.sourceThreadId ?? input.threadId,
-      });
+      })}\nmodel= names the provider instance and model that produced an item, which may not be you.`;
       const selected = selectHistory({
         messages: input.items.flatMap((item) => {
-          const message = historicalMessage(item);
-          return message === null
-            ? []
-            : [
-                {
-                  ...message,
-                  ...(item.runId === null ? {} : { runStatus: runStatuses.get(item.runId) }),
-                },
-              ];
+          const message = historicalMessage(
+            item,
+            item.runId === null ? undefined : runs.get(item.runId),
+          );
+          return message === null ? [] : [message];
         }),
         coverage,
         budget: tokenCap,

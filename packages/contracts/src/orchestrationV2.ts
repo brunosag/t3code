@@ -1212,6 +1212,8 @@ export const OrchestrationV2HistoricalMessage = Schema.Struct({
   role: Schema.Literals(["user", "assistant"]),
   text: Schema.String,
   runStatus: Schema.optional(Schema.String),
+  /** `instance/model` of the run that produced the item. */
+  model: Schema.optional(Schema.String),
   threadId: ThreadId,
   runId: Schema.NullOr(RunId),
   itemId: TurnItemId,
