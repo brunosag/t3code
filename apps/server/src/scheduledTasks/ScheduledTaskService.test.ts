@@ -422,9 +422,10 @@ it.effect("thread cleanup notifies subscribers and a finishing run cannot recrea
 );
 
 it.effect.each([
-  { status: "failed", error: "Weekly usage limit reached" },
-  { status: "interrupted", error: "The run was stopped." },
-  { status: "cancelled", error: "The run was cancelled." },
+  { status: "failed", error: "Weekly usage limit reached", heldWarning: false },
+  { status: "failed", error: "Weekly usage limit reached", heldWarning: true },
+  { status: "interrupted", error: "The run was stopped.", heldWarning: false },
+  { status: "cancelled", error: "The run was cancelled.", heldWarning: false },
 ] as const)("a run that ends $status after its message was accepted records it", (outcome) =>
   Effect.gen(function* () {
     const projectId = ProjectId.make("project:test");
@@ -495,9 +496,15 @@ it.effect.each([
         interactionMode: "default",
       });
       yield* service.runNow({ id: task.id });
+      if (outcome.heldWarning) {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`UPDATE scheduled_tasks SET last_run_status = 'failed',
+          last_run_error = 'A previous occurrence is held in the thread queue. Resume or remove it to run this task again.'
+          WHERE task_id = ${task.id}`;
+      }
       const failed = yield* service.subscribeList().pipe(
         Stream.map(({ tasks }) => tasks.find((candidate) => candidate.id === task.id)),
-        Stream.filter((current) => current?.lastRunStatus === "failed"),
+        Stream.filter((current) => current?.lastRunError === outcome.error),
         Stream.runHead,
         Effect.forkChild,
       );
@@ -693,7 +700,6 @@ it.effect("a one-time task is removed once its turn completes", () =>
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
-
 it.effect("a paused one-time task run by hand before its time is kept", () =>
   Effect.gen(function* () {
     yield* TestClock.setTime(Date.parse("2026-11-01T07:00:00.000Z"));
@@ -759,7 +765,6 @@ it.effect("a paused one-time task run by hand before its time is kept", () =>
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
-
 
 it.effect(
   "a one-time task's past time is refused, and a run that fails to start keeps it with its error",

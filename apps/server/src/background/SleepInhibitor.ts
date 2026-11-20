@@ -24,7 +24,7 @@ import { forkParked } from "../serverActivation.ts";
 import * as Settings from "../serverSettings.ts";
 
 const SYSTEMD_INHIBIT_ARGS = [
-  "--what=sleep:idle:handle-lid-switch",
+  "--what=sleep:handle-lid-switch",
   "--who=T3 Code",
   "--why=Agent work is running",
   "--mode=block",
