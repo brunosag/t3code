@@ -10,6 +10,7 @@ import type {
   OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
 import { withMessageSenderNote } from "@t3tools/contracts";
+import { formatModelSlugName } from "@t3tools/shared/model";
 
 import * as Config from "effect/Config";
 
@@ -133,8 +134,9 @@ export function handoffBudget(input: {
   );
 }
 
+/** A model's name, such as "Claude Opus 5.5", from its slug. */
 export const modelLabel = (selection: ModelSelection): string =>
-  `${selection.instanceId}/${selection.model}`;
+  formatModelSlugName(selection.model);
 
 export function historicalMessage(
   item: OrchestrationV2TurnItem,

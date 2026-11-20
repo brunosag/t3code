@@ -173,7 +173,7 @@ describe("handoff budget", () => {
     );
     assert.include(
       JSON.stringify(historyResponseItems([attributed!], "Activity")[1]),
-      "status=failed; run-status=completed; model=claude/claude-opus-5-5]",
+      "status=failed; run-status=completed; model=Claude Opus 5.5]",
     );
   });
 

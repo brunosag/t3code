@@ -137,7 +137,7 @@ describe("modelChangeNote", () => {
 
   it("names the model that wrote the thread's latest turn, on any provider", () => {
     expect(note([written(1, "a"), written(2, "b")], "c")).toBe(
-      "Model change: earlier assistant turns in this conversation were written by codex/b. You are codex/c, continuing from here.",
+      "Model change: earlier assistant turns in this conversation were written by b. You are c, continuing from here.",
     );
     expect(note([written(1, "a"), written(2, "b")], "b")).toBe("");
     expect(note([], "b")).toBe("");
@@ -148,7 +148,7 @@ describe("modelChangeNote", () => {
       model: "claude-opus-5-5",
     };
     expect(note([written(1, "gpt-5.6"), claude], "gpt-5.6")).toBe(
-      "Model change: earlier assistant turns in this conversation were written by claude/claude-opus-5-5. You are codex/gpt-5.6, continuing from here.",
+      "Model change: earlier assistant turns in this conversation were written by Claude Opus 5.5. You are GPT-5.6, continuing from here.",
     );
     expect(note([claude, written(3, "gpt-5.6")], "gpt-5.6")).toBe("");
   });

@@ -527,7 +527,7 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
       const coverage = `${handoffCoverage({
         ...input,
         threadId: input.sourceThreadId ?? input.threadId,
-      })}\nmodel= names the provider instance and model that produced an item, which may not be you.`;
+      })}\nmodel= names the model that produced an item, which may not be you.`;
       const selected = selectHistory({
         messages: input.items.flatMap((item) => {
           const message = historicalMessage(
