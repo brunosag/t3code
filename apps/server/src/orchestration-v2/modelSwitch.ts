@@ -1,9 +1,11 @@
 import {
   isCompactionCommandMessage,
   type ModelSelection,
+  type ProviderThreadId,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
+import { modelLabel } from "@t3tools/provider-core/server/handoffBudget";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 
@@ -52,4 +54,45 @@ export function modelSwitchSince(
   }
   const from = previous?.modelSelection ?? baseline;
   return from === undefined || modelSelectionsEqual(from, to) ? {} : { modelSwitch: { from, to } };
+}
+
+/**
+ * Tells a provider thread's model when another model wrote its earlier turns. Effort changes
+ * keep the model, so they need no note.
+ */
+export function modelChangeNote(input: {
+  readonly projection: Pick<OrchestrationV2ThreadProjection, "runs" | "attempts" | "providerTurns">;
+  readonly providerThreadId: ProviderThreadId;
+  readonly run: Pick<ModelSwitchRun, "ordinal" | "modelSelection">;
+}): string {
+  const acceptedAttemptIds = new Set(
+    input.projection.providerTurns.flatMap((turn) =>
+      turn.providerThreadId === input.providerThreadId && turn.runAttemptId !== null
+        ? [turn.runAttemptId]
+        : [],
+    ),
+  );
+  const writtenRunIds = new Set(
+    input.projection.attempts.flatMap((attempt) =>
+      attempt.providerThreadId === input.providerThreadId && acceptedAttemptIds.has(attempt.id)
+        ? [attempt.runId]
+        : [],
+    ),
+  );
+  let previous: ModelSwitchRun | undefined;
+  for (const run of input.projection.runs) {
+    if (
+      writtenRunIds.has(run.id) &&
+      run.status !== "rolled_back" &&
+      run.ordinal < input.run.ordinal &&
+      (previous === undefined || run.ordinal > previous.ordinal)
+    )
+      previous = run;
+  }
+  if (previous === undefined) return "";
+  const from = modelLabel(previous.modelSelection);
+  const to = modelLabel(input.run.modelSelection);
+  return from === to
+    ? ""
+    : `Model change: earlier assistant turns in this conversation were written by ${from}. You are ${to}, continuing from here.`;
 }

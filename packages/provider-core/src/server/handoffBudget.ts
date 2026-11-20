@@ -133,6 +133,9 @@ export function handoffBudget(input: {
   );
 }
 
+export const modelLabel = (selection: ModelSelection): string =>
+  `${selection.instanceId}/${selection.model}`;
+
 export function historicalMessage(
   item: OrchestrationV2TurnItem,
   run?: Pick<OrchestrationV2Run, "status" | "modelSelection">,
@@ -180,7 +183,7 @@ export function historicalMessage(
       ? {}
       : {
           runStatus: run.status,
-          model: `${run.modelSelection.instanceId}/${run.modelSelection.model}`,
+          model: modelLabel(run.modelSelection),
         }),
   };
 }

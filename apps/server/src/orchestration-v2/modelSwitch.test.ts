@@ -2,11 +2,14 @@ import {
   ContextHandoffId,
   MessageId,
   ProviderInstanceId,
+  ProviderThreadId,
+  RunAttemptId,
+  RunId,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { modelSwitchSince } from "./modelSwitch.ts";
+import { modelChangeNote, modelSwitchSince } from "./modelSwitch.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
 const selection = (model: string) => ({ instanceId, model });
@@ -103,5 +106,54 @@ describe("modelSwitchSince", () => {
     expect(
       modelSwitchSince({ runs: [run("first", 1, "a")], turnItems: shown("first") }, selection("a")),
     ).toEqual({});
+  });
+});
+
+describe("modelChangeNote", () => {
+  const providerThreadId = ProviderThreadId.make("provider-thread:a");
+  const written = (
+    ordinal: number,
+    model: string,
+    status: OrchestrationV2ThreadProjection["runs"][number]["status"] = "completed",
+    thread = providerThreadId,
+  ) => ({
+    run: { ...run(`m${ordinal}`, ordinal, model, status), id: RunId.make(`run:${ordinal}`) },
+    attempt: {
+      id: RunAttemptId.make(`attempt:${ordinal}`),
+      runId: RunId.make(`run:${ordinal}`),
+      providerThreadId: thread,
+    },
+    turn: { providerThreadId: thread, runAttemptId: RunAttemptId.make(`attempt:${ordinal}`) },
+  });
+  const note = (history: ReadonlyArray<ReturnType<typeof written>>, model: string) =>
+    modelChangeNote({
+      projection: {
+        runs: history.map((entry) => entry.run),
+        attempts: history.map((entry) => entry.attempt),
+        providerTurns: history.map((entry) => entry.turn),
+      } as unknown as Parameters<typeof modelChangeNote>[0]["projection"],
+      providerThreadId,
+      run: { ordinal: 10, modelSelection: selection(model) },
+    });
+
+  it("names the model that last wrote to the provider thread", () => {
+    expect(note([written(1, "a"), written(2, "b")], "c")).toBe(
+      "Model change: earlier assistant turns in this conversation were written by codex/b. You are codex/c, continuing from here.",
+    );
+    expect(note([written(1, "a"), written(2, "b")], "b")).toBe("");
+    expect(note([], "b")).toBe("");
+  });
+
+  it("ignores undone runs and other provider threads", () => {
+    expect(
+      note(
+        [
+          written(1, "a"),
+          written(2, "b", "rolled_back"),
+          written(3, "c", "completed", ProviderThreadId.make("provider-thread:other")),
+        ],
+        "a",
+      ),
+    ).toBe("");
   });
 });
