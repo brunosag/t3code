@@ -1027,7 +1027,7 @@ export const layer: Layer.Layer<
         restartCancelledWork.length === 0
           ? ""
           : restartCancelledBackgroundWorkNote(restartCancelledWork);
-      const modelNote = modelChangeNote({ projection, providerThreadId: providerThread.id, run });
+      const modelNote = modelChangeNote({ projection, run });
       const tokenCap = yield* handoffTokenCapConfig.pipe(
         Effect.orElseSucceed(() => DEFAULT_HANDOFF_TOKEN_CAP),
       );

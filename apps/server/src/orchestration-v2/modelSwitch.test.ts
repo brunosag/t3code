@@ -132,28 +132,28 @@ describe("modelChangeNote", () => {
         attempts: history.map((entry) => entry.attempt),
         providerTurns: history.map((entry) => entry.turn),
       } as unknown as Parameters<typeof modelChangeNote>[0]["projection"],
-      providerThreadId,
       run: { ordinal: 10, modelSelection: selection(model) },
     });
 
-  it("names the model that last wrote to the provider thread", () => {
+  it("names the model that wrote the thread's latest turn, on any provider", () => {
     expect(note([written(1, "a"), written(2, "b")], "c")).toBe(
       "Model change: earlier assistant turns in this conversation were written by codex/b. You are codex/c, continuing from here.",
     );
     expect(note([written(1, "a"), written(2, "b")], "b")).toBe("");
     expect(note([], "b")).toBe("");
+    // Claude wrote the latest turn on its own provider thread; Codex takes over.
+    const claude = written(2, "claude-opus-5-5", "completed", ProviderThreadId.make("pt:claude"));
+    claude.run.modelSelection = {
+      instanceId: ProviderInstanceId.make("claude"),
+      model: "claude-opus-5-5",
+    };
+    expect(note([written(1, "gpt-5.6"), claude], "gpt-5.6")).toBe(
+      "Model change: earlier assistant turns in this conversation were written by claude/claude-opus-5-5. You are codex/gpt-5.6, continuing from here.",
+    );
+    expect(note([claude, written(3, "gpt-5.6")], "gpt-5.6")).toBe("");
   });
 
-  it("ignores undone runs and other provider threads", () => {
-    expect(
-      note(
-        [
-          written(1, "a"),
-          written(2, "b", "rolled_back"),
-          written(3, "c", "completed", ProviderThreadId.make("provider-thread:other")),
-        ],
-        "a",
-      ),
-    ).toBe("");
+  it("ignores undone runs", () => {
+    expect(note([written(1, "a"), written(2, "b", "rolled_back")], "a")).toBe("");
   });
 });

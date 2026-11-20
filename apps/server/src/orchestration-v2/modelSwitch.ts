@@ -1,7 +1,6 @@
 import {
   isCompactionCommandMessage,
   type ModelSelection,
-  type ProviderThreadId,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
@@ -57,26 +56,21 @@ export function modelSwitchSince(
 }
 
 /**
- * Tells a provider thread's model when another model wrote its earlier turns. Effort changes
- * keep the model, so they need no note.
+ * Tells the model taking over a thread which model wrote its latest accepted turn, on any
+ * provider. Effort changes keep the model, so they need no note.
  */
 export function modelChangeNote(input: {
   readonly projection: Pick<OrchestrationV2ThreadProjection, "runs" | "attempts" | "providerTurns">;
-  readonly providerThreadId: ProviderThreadId;
   readonly run: Pick<ModelSwitchRun, "ordinal" | "modelSelection">;
 }): string {
   const acceptedAttemptIds = new Set(
     input.projection.providerTurns.flatMap((turn) =>
-      turn.providerThreadId === input.providerThreadId && turn.runAttemptId !== null
-        ? [turn.runAttemptId]
-        : [],
+      turn.runAttemptId === null ? [] : [turn.runAttemptId],
     ),
   );
   const writtenRunIds = new Set(
     input.projection.attempts.flatMap((attempt) =>
-      attempt.providerThreadId === input.providerThreadId && acceptedAttemptIds.has(attempt.id)
-        ? [attempt.runId]
-        : [],
+      acceptedAttemptIds.has(attempt.id) ? [attempt.runId] : [],
     ),
   );
   let previous: ModelSwitchRun | undefined;
