@@ -1,14 +1,14 @@
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { Menu } from "../../components/ui/Menu";
-import { Progress } from "../../components/ui/Progress";
 import { useThreadShell } from "../../state/entities";
 import { useOpenLinkedThread } from "../threads/useOpenLinkedThread";
 import { readAloud, readAloudSourceThread } from "./readAloud";
+import { ReadAloudTimeline } from "./ReadAloudTimeline";
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const getSnapshot = () => readAloud.getSnapshot();
@@ -55,6 +55,8 @@ export function ReadAloudPlayer(props: { readonly threadRef: ScopedThreadRef }) 
       : null;
   const sourceShell = useThreadShell(otherThread);
   const openThread = useOpenLinkedThread();
+  // The dragged position while the user scrubs, so playback ticks don't move the thumb back.
+  const [scrub, setScrub] = useState<number | null>(null);
 
   if (!state) return null;
   const preparing = state.status === "preparing";
@@ -97,7 +99,7 @@ export function ReadAloudPlayer(props: { readonly threadRef: ScopedThreadRef }) 
           className="min-w-0 flex-1 text-xs tabular-nums text-foreground-muted"
           numberOfLines={1}
         >
-          {status ?? `${formatTime(state.position)} / ${total}`}
+          {status ?? `${formatTime(scrub ?? state.position)} / ${total}`}
         </Text>
         <Menu
           title="Reading speed"
@@ -130,7 +132,14 @@ export function ReadAloudPlayer(props: { readonly threadRef: ScopedThreadRef }) 
         <ControlButton label="Stop reading" icon="xmark" onPress={() => readAloud.stop()} />
       </View>
       {playable && length > 0 ? (
-        <Progress value={state.position / length} label="Reading position" />
+        <ReadAloudTimeline
+          position={scrub ?? state.position}
+          length={length}
+          seekable={state.duration}
+          valueLabel={`${formatTime(scrub ?? state.position)} of ${total}`}
+          onScrub={setScrub}
+          onSeek={(position) => readAloud.seek(position)}
+        />
       ) : null}
     </View>
   );
