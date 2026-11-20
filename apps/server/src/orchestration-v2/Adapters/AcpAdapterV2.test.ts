@@ -2792,16 +2792,18 @@ describe("AcpAdapterV2", () => {
   );
 
   it.live.each([
-    { active: "plan", target: "compact", allowed: true },
-    { active: "compact", target: "plan", allowed: false },
-    { active: "compact", target: undefined, allowed: false },
+    { active: "plan", target: "compact", allowed: true, afterReply: false },
+    { active: "plan", target: "compact", allowed: true, afterReply: true },
+    { active: "compact", target: "plan", allowed: false, afterReply: false },
+    { active: "compact", target: undefined, allowed: false, afterReply: false },
   ])(
-    "validates the target session's compact command ($active -> $target)",
-    ({ active, target, allowed }) =>
+    "validates the target session's compact command ($active -> $target, after reply $afterReply)",
+    ({ active, target, allowed, afterReply }) =>
       Effect.gen(function* () {
         const harness = yield* makeAdvertisedCompactionHarness({
           T3_ACP_AVAILABLE_COMMANDS: active,
           ...(target === undefined ? {} : { T3_ACP_LOADED_COMMANDS: target }),
+          ...(afterReply ? { T3_ACP_LOADED_COMMANDS_AFTER_REPLY: "1" } : {}),
         });
         const result = yield* harness.compact(true);
         assert.equal(Exit.isSuccess(result), allowed);

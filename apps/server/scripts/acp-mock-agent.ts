@@ -29,6 +29,8 @@ const advertisedCommandNames = (process.env.T3_ACP_AVAILABLE_COMMANDS ?? "")
   .map((name) => name.trim())
   .filter((name) => name.length > 0);
 const loadedCommandNames = process.env.T3_ACP_LOADED_COMMANDS?.split(",").filter(Boolean);
+// Antigravity advertises a resumed session's commands just after its reply.
+const loadedCommandsAfterReply = process.env.T3_ACP_LOADED_COMMANDS_AFTER_REPLY === "1";
 const emitToolCalls = process.env.T3_ACP_EMIT_TOOL_CALLS === "1";
 const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
@@ -699,13 +701,22 @@ const program = Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
       sessionsLoading.add(requestedSessionId);
       if (loadedCommandNames !== undefined) {
-        yield* agent.client.sessionUpdate({
+        const advertise = agent.client.sessionUpdate({
           sessionId: requestedSessionId,
           update: {
             sessionUpdate: "available_commands_update",
             availableCommands: loadedCommandNames.map((name) => ({ name, description: name })),
           },
         });
+        if (loadedCommandsAfterReply) {
+          yield* Effect.sleep("100 millis").pipe(
+            Effect.andThen(advertise),
+            Effect.ignore,
+            Effect.forkDetach,
+          );
+        } else {
+          yield* advertise;
+        }
       }
       if (failLoadSession) {
         return yield* AcpError.AcpRequestError.internalError("Mock load session failure");

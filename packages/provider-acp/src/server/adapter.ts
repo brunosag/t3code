@@ -64,6 +64,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpProtocol from "effect-acp/protocol";
@@ -901,6 +902,8 @@ function canSwitchModelInSession(
 }
 
 const STEER_DELIVERY_BOUND = "2 seconds";
+// Antigravity advertises a resumed session's commands just after answering the resume.
+const ADVERTISED_COMMANDS_BOUND = "2 seconds";
 
 /**
  * `session/fork` `_meta` for a fork from `providerTurnId`: none for the session head,
@@ -2280,7 +2283,19 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             new Map(current).set(sessionId, Symbol()),
           );
         });
-        const advertisedCommandNames = yield* Ref.make(new Map<string, ReadonlySet<string>>());
+        const advertisedCommandNames = yield* SubscriptionRef.make(
+          new Map<string, ReadonlySet<string>>(),
+        );
+        const advertisesCommand = (sessionId: string, command: string) =>
+          SubscriptionRef.changes(advertisedCommandNames).pipe(
+            Stream.map((names) => names.get(sessionId)),
+            Stream.filter((names) => names !== undefined),
+            Stream.runHead,
+            Effect.timeoutOption(ADVERTISED_COMMANDS_BOUND),
+            Effect.map((names) =>
+              Option.flatten(names).pipe(Option.exists((commands) => commands.has(command))),
+            ),
+          );
         const compactsContext =
           flavor.supportsCompaction === true ||
           flavor.compactSession !== undefined ||
@@ -6991,7 +7006,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               if (notification.update.sessionUpdate === "available_commands_update") {
                 const sessionId = rawNotification.sessionId;
                 const advertisedCommands = notification.update.availableCommands;
-                yield* Ref.update(advertisedCommandNames, (current) => {
+                yield* SubscriptionRef.update(advertisedCommandNames, (current) => {
                   const updated = new Map(current);
                   updated.set(
                     sessionId,
@@ -9201,8 +9216,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             if (
               isCompactionMessage(turnInput.message) &&
               ((flavor.compactViaAdvertisedCommand === true &&
-                (yield* Ref.get(advertisedCommandNames)).get(requestedSessionId)?.has("compact") !==
-                  true) ||
+                !(yield* advertisesCommand(requestedSessionId, "compact"))) ||
                 (flavor.compactSession !== undefined &&
                   (compactionSetup === null ||
                     !flavor.compactSession.supported(compactionSetup.initializeResult))))

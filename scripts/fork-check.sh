@@ -67,6 +67,7 @@ vp test run \
   apps/server/src/cli/config.test.ts \
   apps/desktop/src/backend/DesktopBackendConfiguration.test.ts \
   apps/server/src/orchestration-v2/IdleCompaction.test.ts \
+  apps/server/src/orchestration-v2/Adapters/AcpAdapterV2.test.ts \
   apps/server/src/orchestration-v2/runtimeLayer.test.ts \
   scripts/lib/memory-headroom.test.ts \
   scripts/dev-runner.test.ts
