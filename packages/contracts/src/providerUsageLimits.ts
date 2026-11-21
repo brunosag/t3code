@@ -113,6 +113,8 @@ export const UsageLimitSourceAccount = Schema.Struct({
   priority: Schema.optional(Schema.Int),
   /** The hub routes nothing to this login. */
   disabled: Schema.optional(Schema.Boolean),
+  /** The models the hub routes to this account. */
+  models: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   usageLimits: ServerProviderUsageLimits,
 });
 export type UsageLimitSourceAccount = typeof UsageLimitSourceAccount.Type;

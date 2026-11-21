@@ -32,7 +32,8 @@ import {
   formatDuration,
 } from "@t3tools/shared/usageLimitsCopy";
 import { type ReactNode, useState } from "react";
-import { Linking, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
+import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
@@ -570,7 +571,7 @@ export function UsageLimitsSection({
           <Pressable
             accessibilityRole="link"
             className="min-h-11 justify-center"
-            onPress={() => void Linking.openURL(link.url).catch(() => undefined)}
+            onPress={() => void tryOpenExternalUrl(link.url)}
           >
             <Text className="text-sm font-t3-medium text-primary">Manage usage</Text>
           </Pressable>

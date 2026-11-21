@@ -93,6 +93,9 @@ const AuthFileCooldowns = Schema.Struct({
     }),
   ),
 });
+const AuthFileModels = Schema.Struct({
+  models: Schema.Array(Schema.Struct({ id: Schema.String })),
+});
 const ApiResponse = Schema.Struct({ status_code: Schema.Number, body: Schema.String });
 const CodexWindow = Schema.Struct({
   used_percent: Schema.Number,
@@ -179,6 +182,7 @@ const authPriority = (account: AuthFile) =>
     ? account.priority
     : 0;
 const decodeAuthFileCooldowns = Schema.decodeUnknownEffect(AuthFileCooldowns);
+const decodeAuthFileModels = Schema.decodeUnknownEffect(AuthFileModels);
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 const decodeApiResponse = Schema.decodeUnknownEffect(ApiResponse);
 const decodeCreditList = Schema.decodeUnknownEffect(Schema.fromJsonString(CreditList));
@@ -680,6 +684,20 @@ export const makeCliproxyApi = Effect.gen(function* () {
     return ends.length > 0 ? Math.min(...ends) : undefined;
   });
 
+  // Older hubs lack this endpoint; the account then counts for every model of its driver.
+  const routedModels = Effect.fn("CliproxyApi.routedModels")(function* (
+    hub: CliproxyHub,
+    account: AuthFile,
+  ) {
+    const response = yield* management(
+      hub,
+      `auth-files/models?name=${encodeURIComponent(account.id)}`,
+    );
+    return (yield* decodeAuthFileModels(response)).models.flatMap(({ id }) =>
+      id.trim() ? [id.trim()] : [],
+    );
+  });
+
   const apiCall = Effect.fn("CliproxyApi.apiCall")(function* (
     hub: CliproxyHub,
     account: AuthFile,
@@ -731,25 +749,40 @@ export const makeCliproxyApi = Effect.gen(function* () {
     const { tiers, caches } = cacheFor(hub);
     let cache = caches.get(account.id);
     if (!cache) caches.set(account.id, (cache = {}));
-    const reading = yield* provider
+    const read = provider
       .read({ account, call, checkedAt, claudeTiers: tiers, claudeCache: cache })
       .pipe(
         Effect.provideService(Digest.Digest, digest),
-        Effect.orElseSucceed(() => ({
-          ...listedIdentity(account),
-          usageLimits: makeUnavailableUsageLimits({
-            checkedAt,
-            reason: "probeFailed",
-            message: "The hub could not read this account's usage.",
+        Effect.catch((error) =>
+          Effect.succeed({
+            ...listedIdentity(account),
+            usageLimits: makeUnavailableUsageLimits({
+              checkedAt,
+              reason: "probeFailed",
+              // Source-error details are already credential-free (status codes only).
+              message: isUsageLimitSourceError(error)
+                ? error.detail
+                : "The hub could not read this account's usage.",
+            }),
           }),
-        })),
+        ),
       );
+    // Model lists are optional, so their lookup stops at a short deadline that a slow hub
+    // cannot push a refresh past; a switched-off login routes nothing, so it needs none.
+    const listModels = account.disabled
+      ? Effect.succeed(Option.none<ReadonlyArray<string>>())
+      : routedModels(hub, account).pipe(
+          Effect.timeoutOption("2 seconds"),
+          Effect.orElseSucceed(() => Option.none<ReadonlyArray<string>>()),
+        );
+    const [reading, models] = yield* Effect.all([read, listModels], { concurrency: 2 });
     return {
       id: account.id,
       driver: provider.driver,
       priority: authPriority(account),
       ...(account.disabled ? { disabled: true } : {}),
       ...reading,
+      ...(Option.isSome(models) ? { models: models.value } : {}),
     };
   });
 
