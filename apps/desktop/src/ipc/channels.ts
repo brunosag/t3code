@@ -141,6 +141,8 @@ export const CHECK_SYSTEM_PERMISSION_CHANNEL = "desktop:check-system-permission"
 export const APPLE_SPEECH_AVAILABLE_CHANNEL = "desktop:apple-speech-available";
 export const APPLE_SPEECH_PREPARE_CHANNEL = "desktop:apple-speech-prepare";
 export const APPLE_SPEECH_TRANSCRIBE_CHANNEL = "desktop:apple-speech-transcribe";
+export const SPELL_CHECK_LIST_WORDS_CHANNEL = "desktop:spell-check-list-words";
+export const SPELL_CHECK_REMOVE_WORD_CHANNEL = "desktop:spell-check-remove-word";
 
 export const PREVIEW_RECORDING_INPUT_CHANNEL = "desktop:preview-recording-input";
 

@@ -1248,6 +1248,11 @@ export interface DesktopBridge {
     prepare: (locale: string) => Promise<DesktopAppleSpeechResult>;
     transcribe: (input: { locale: string; pcm: Uint8Array }) => Promise<DesktopAppleSpeechResult>;
   };
+  /** Words added to the spellchecker's dictionary; absent in older desktop builds. */
+  spellCheck?: {
+    listWords: () => Promise<readonly string[]>;
+    removeWord: (word: string) => Promise<void>;
+  };
 }
 
 /** Renderer callback invoked by Electron with a fresh user gesture before display-media capture. */

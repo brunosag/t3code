@@ -794,6 +794,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("composer rich text tiptap bold italic markdown styled wysiwyg")],
   },
   {
+    id: "spell-check-dictionary",
+    title: msg("Spelling dictionary"),
+    to: "/settings/chat",
+    searchTerms: [msg("spellcheck spelling dictionary words add remove misspelled typo")],
+    desktopOnly: true,
+  },
+  {
     id: "send-shortcut",
     title: msg("Send shortcut"),
     to: "/settings/chat",

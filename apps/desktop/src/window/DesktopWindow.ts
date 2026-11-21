@@ -693,6 +693,16 @@ export const make = Effect.gen(function* () {
           if (params.dictionarySuggestions.length === 0) {
             menuTemplate.push({ label: m(msg("No suggestions")), enabled: false });
           }
+          // Settings lists the app session's words, so previews (other sessions) don't offer it.
+          if (!isBrowserContents) {
+            const word = params.misspelledWord;
+            menuTemplate.push({
+              label: "Add to Dictionary",
+              click: () => {
+                contents.session.addWordToSpellCheckerDictionary(word);
+              },
+            });
+          }
           menuTemplate.push({ type: "separator" });
         }
 

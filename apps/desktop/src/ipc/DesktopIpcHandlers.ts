@@ -8,6 +8,7 @@ import {
   appleSpeechTranscribe,
 } from "./methods/appleSpeech.ts";
 import * as DesktopIpc from "./DesktopIpc.ts";
+import { listSpellCheckWords, removeSpellCheckWord } from "./methods/spellCheck.ts";
 import { installNotificationBadge } from "./methods/notificationBadge.ts";
 import { getClientSettings, setClientSettings } from "./methods/clientSettings.ts";
 import { getConnectionCatalog, setConnectionCatalog } from "./methods/connectionCatalog.ts";
@@ -170,6 +171,8 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(appleSpeechAvailable);
   yield* ipc.handle(appleSpeechPrepare);
   yield* ipc.handle(appleSpeechTranscribe);
+  yield* ipc.handle(listSpellCheckWords);
+  yield* ipc.handle(removeSpellCheckWord);
   yield* ipc.handle(pasteAsText);
   yield* ipc.handle(revealWindow);
   yield* ipc.handle(resetWindowZoom);
