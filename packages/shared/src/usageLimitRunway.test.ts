@@ -225,5 +225,25 @@ describe("limitRunway", () => {
       out: { at: now + 10 * 60_000, until: now + 3 * HOUR },
       pace: null,
     });
+
+    // The session restarted 30 minutes ago; the later dip to 9.5 is the reading wavering, not a reset.
+    const wavering = limitRunway(
+      {
+        members: [
+          session({
+            usedPercent: 12,
+            resetsAt: iso(now + 4.5 * HOUR),
+            history: {
+              startsAt: iso(now - HOUR),
+              stepMins: 10,
+              usedPercent: [null, 40, 45, 2, 10, 9.5],
+            },
+          }),
+        ],
+      },
+      now,
+    );
+    // 5% before the reset, 2% at it, then 10% up to 12%, over 40 minutes.
+    expect(wavering?.burnPerDay).toBeCloseTo((17 * 1440) / 40, 6);
   });
 });

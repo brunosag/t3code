@@ -168,6 +168,27 @@ function readings(window: ServerProviderUsageWindow, now: number) {
   ];
 }
 
+/** Spend from `base` on. Readings waver, so outside a reset only a new high is spent. */
+function spending(
+  samples: ReadonlyArray<{ readonly at: number; readonly used: number }>,
+  base: number,
+  resetBetween: (from: number, to: number) => boolean,
+) {
+  let spent = 0;
+  let peak = samples[base]!.used;
+  let lastSpendAt = -Infinity;
+  for (let index = base + 1; index < samples.length; index++) {
+    const previous = samples[index - 1]!;
+    const current = samples[index]!;
+    const reset = current.used < previous.used && resetBetween(previous.at, current.at);
+    const rise = reset ? current.used : Math.max(0, current.used - peak);
+    peak = reset ? current.used : Math.max(peak, current.used);
+    spent += rise;
+    if (rise > 0) lastSpendAt = current.at;
+  }
+  return { spent, lastSpendAt };
+}
+
 function burnPerDay(pool: Pool, now: number): number | null {
   let total = 0;
   let dayLong = false;
@@ -182,18 +203,8 @@ function burnPerDay(pool: Pool, now: number): number | null {
     // A reading is dated to its hour's end, so a reset may fall up to an hour before it.
     const resetBetween = (from: number, to: number) =>
       [1, 2, 3].some((k) => from - HOUR < reset - k * period && reset - k * period <= to);
-    let spent = 0;
     // An account first read within the day joined the pool then; what it spent since is the day's.
-    for (let index = Math.max(base, 0) + 1; index < samples.length; index++) {
-      const previous = samples[index - 1]!;
-      const current = samples[index]!;
-      spent +=
-        current.used < previous.used
-          ? resetBetween(previous.at, current.at)
-            ? current.used
-            : 0
-          : current.used - previous.used;
-    }
+    const { spent } = spending(samples, Math.max(base, 0), resetBetween);
     total += (shareOf(pool, member) * spent) / (base < 0 ? 1 : (now - samples[base]!.at) / DAY);
   }
   return dayLong ? total : null;
@@ -212,15 +223,16 @@ function recentBurnPerDay(pool: Pool, now: number): number | null {
     );
     const span = now - samples[base]!.at;
     if (span <= 0) continue;
-    let spent = 0;
-    for (let index = base + 1; index < samples.length; index++) {
-      const previous = samples[index - 1]!;
-      const current = samples[index]!;
-      // A session's balance only drops back at its reset, when the new session starts from zero.
-      const rise = current.used < previous.used ? current.used : current.used - previous.used;
-      spent += rise;
-      if (rise > 0 && current.at > now - IN_USE) inUse = true;
-    }
+    const reset = member.window.resetsAt ? Date.parse(member.window.resetsAt) : Number.NaN;
+    const period = (member.window.windowDurationMins ?? 0) * MINUTE;
+    const step = (member.window.history?.stepMins ?? 60) * MINUTE;
+    // A session restarts from zero no later than its current window's start, which its first use sets.
+    const { spent, lastSpendAt } = spending(
+      samples,
+      base,
+      (from) => Number.isNaN(reset) || from - step < reset - period,
+    );
+    if (lastSpendAt > now - IN_USE) inUse = true;
     total += (shareOf(pool, member) * spent) / (span / DAY);
   }
   return inUse ? total : null;
