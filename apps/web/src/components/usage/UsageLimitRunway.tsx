@@ -95,7 +95,11 @@ export function BalanceCard({
   readonly now: number;
 }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
-  const next = pool.resets.find((reset) => reset.restoresPercent > 0);
+  // The chart labels its refills at the current burn, so the text does too.
+  const refill = runway?.refills[0];
+  const next = refill
+    ? { at: refill.at, restoresPercent: Math.round(refill.percent) }
+    : pool.resets.find((reset) => reset.restoresPercent > 0);
   const out = pool.remainingPercent === 0;
   const burn = out ? null : (runway?.burnPerDay ?? null);
   const runsOut = runway?.out ?? null;
