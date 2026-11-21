@@ -101,6 +101,22 @@ function tableRowSentences(table: SpeechNode): string[] {
   );
 }
 
+/** The reply without what is never read aloud: artifact templates, collapsed details, citations. */
+function speechMarkdown(markdown: string): string {
+  return markdown
+    .replace(/^::artifact-template\b.*$/gm, "")
+    .replace(/<(details|script|style|oai-mem-citation)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+    .trim();
+}
+
+/** What to send to read `markdown` aloud: rule-based text, and the reply for a rewriting host. */
+export function speechInputFromMarkdown(markdown: string): {
+  readonly text: string;
+  readonly markdown: string;
+} {
+  return { text: speechTextFromMarkdown(markdown), markdown: speechMarkdown(markdown) };
+}
+
 /** Extracts assistant prose only; callers must never pass work-log or tool output. */
 export function speechTextFromMarkdown(markdown: string): string {
   const blocks: string[] = [];
@@ -124,10 +140,7 @@ export function speechTextFromMarkdown(markdown: string): string {
         break;
     }
   }
-  const source = markdown
-    .replace(/^::artifact-template\b.*$/gm, "")
-    .replace(/<(details|script|style|oai-mem-citation)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
-    .replace(/\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]/g, " ");
+  const source = speechMarkdown(markdown).replace(/\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]/g, " ");
   visit(parser.runSync(parser.parse(source)));
   return blocks.join("\n\n");
 }

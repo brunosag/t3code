@@ -2,7 +2,7 @@ import { useSyncExternalStore, type CSSProperties } from "react";
 import { Link } from "@tanstack/react-router";
 import { PauseIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
-import { speechTextFromMarkdown } from "@t3tools/client-runtime/read-aloud";
+import { speechInputFromMarkdown } from "@t3tools/client-runtime/read-aloud";
 
 import { getClientSettings } from "~/hooks/useSettings";
 import { readAloud } from "~/lib/readAloud";
@@ -57,7 +57,7 @@ export function ReadAloudButton({
               else {
                 void readAloud.start(key, {
                   environmentId,
-                  text: speechTextFromMarkdown(text),
+                  ...speechInputFromMarkdown(text),
                   voice: getClientSettings().readAloudVoice,
                 });
               }

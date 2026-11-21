@@ -8,6 +8,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import * as PhononEngine from "./PhononEngine.ts";
+import * as ReadAloudScript from "./readAloudScript.ts";
 import {
   encodeWav,
   estimateRemainingSeconds,
@@ -17,6 +18,7 @@ import {
 } from "./speechText.ts";
 
 type SpeechSynthesisFailure =
+  | ReadAloudScript.ReadAloudScriptError
   | PhononEngine.SpeechModelDownloadError
   | PhononEngine.SpeechEngineError;
 
@@ -24,8 +26,9 @@ export class SpeechSynthesis extends Context.Service<
   SpeechSynthesis,
   {
     /**
-     * Speaks `text` on this host, one sentence-sized WAV chunk at a time. Requests run
-     * one after another because a single synthesis already uses the cores it can.
+     * Speaks `text` on this host, one sentence-sized WAV chunk at a time, or `markdown` as the
+     * read aloud model rewrites it when one is set. Syntheses run one after another because a
+     * single one already uses the cores it can; rewrites don't wait for them.
      */
     readonly synthesize: (
       input: SpeechSynthesisInput,
@@ -35,14 +38,27 @@ export class SpeechSynthesis extends Context.Service<
 
 const make = Effect.gen(function* () {
   const engine = yield* PhononEngine.PhononEngine;
+  const script = yield* ReadAloudScript.ReadAloudScript;
   const permit = yield* Semaphore.make(1);
 
-  const synthesize: SpeechSynthesis["Service"]["synthesize"] = ({ text, voice }) =>
+  const synthesize: SpeechSynthesis["Service"]["synthesize"] = ({ text, markdown, voice }) =>
     Stream.callback<SpeechSynthesisEvent, SpeechSynthesisFailure>(
       (queue: Queue.Queue<SpeechSynthesisEvent, SpeechSynthesisFailure | Cause.Done>) => {
         const emit = (event: SpeechSynthesisEvent) => Queue.offer(queue, event).pipe(Effect.asVoid);
-        return emit({ type: "progress", stage: "starting", completed: 0, total: null }).pipe(
-          Effect.andThen(
+        const spoken =
+          markdown === undefined
+            ? Effect.succeed(text)
+            : script
+                .write(
+                  markdown,
+                  emit({ type: "progress", stage: "wording", completed: 0, total: null }),
+                )
+                .pipe(Effect.map((written) => written ?? text));
+        return spoken.pipe(
+          Effect.tap(() =>
+            emit({ type: "progress", stage: "starting", completed: 0, total: null }),
+          ),
+          Effect.flatMap((speech) =>
             permit.withPermit(
               Effect.scoped(
                 Effect.gen(function* () {
@@ -51,7 +67,7 @@ const make = Effect.gen(function* () {
                     onDownloadProgress: (completed, total) =>
                       emit({ type: "progress", stage: "downloading-model", completed, total }),
                   });
-                  const chunks = splitSpeechText(prepareSpeechText(text));
+                  const chunks = splitSpeechText(prepareSpeechText(speech));
                   const generated = { characters: 0, seconds: 0 };
                   for (const [index, chunk] of chunks.entries()) {
                     yield* emit({

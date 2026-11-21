@@ -16,6 +16,8 @@ function describeProgress(
 ): SpeechGenerationProgress {
   const percent = event.total ? Math.round((event.completed / event.total) * 100) : null;
   switch (event.stage) {
+    case "wording":
+      return { label: "Rewriting for speech…", percent: null, estimatedDuration: null };
     case "downloading-model":
       return { label: "Downloading speech model…", percent, estimatedDuration: null };
     case "starting":
@@ -48,7 +50,11 @@ export function environmentSpeechGenerator(
         yield* registry
           .runStream(
             request.environmentId,
-            runStream(WS_METHODS.speechSynthesize, { text: request.text, voice: request.voice }),
+            runStream(WS_METHODS.speechSynthesize, {
+              text: request.text,
+              ...(request.markdown === undefined ? {} : { markdown: request.markdown }),
+              voice: request.voice,
+            }),
           )
           .pipe(
             Stream.runForEach((event) =>

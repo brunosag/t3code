@@ -1,6 +1,7 @@
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m as resolveMessage } from "~/i18n/messages";
 import { ReadAloudVoiceSettings } from "./ReadAloudVoiceSettings";
+import { TaskModelRow } from "./TaskModelRow";
 import { useAtomValue } from "@effect/atom-react";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
@@ -1410,6 +1411,17 @@ export function ChatSettingsPanel() {
 
       <SettingsSection id="read-aloud" title={gt("Read aloud")}>
         <ReadAloudVoiceSettings />
+        <TaskModelRow
+          settingKey="readAloudModelSelection"
+          searchId="read-aloud-model"
+          title="Rewriting model"
+          description="Rewrites each reply for listening before it's read: code, paths, maths, symbols, tables and code blocks become what you'd say aloud. When disabled, replies are read with built-in rules."
+          switchLabel="Rewrite replies with a model before reading them"
+          notSavedTitle="Rewriting model not saved"
+          resolve={(settings) =>
+            settings.readAloudModelSelection ?? settings.textGenerationModelSelection
+          }
+        />
       </SettingsSection>
 
       <SettingsSection id="side-threads" title={gt("Subagents and side chats")}>

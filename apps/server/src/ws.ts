@@ -2844,6 +2844,13 @@ export const layerWsRpc = (
         [WS_METHODS.speechSynthesize]: (input) =>
           speechSynthesis.synthesize(input).pipe(
             Stream.catchTags({
+              ReadAloudScriptError: (error) =>
+                Stream.fail(
+                  new SpeechSynthesisError({
+                    reason: "wording",
+                    message: `Couldn't rewrite this reply for speech: ${error.detail}`,
+                  }),
+                ),
               SpeechModelDownloadError: () =>
                 Stream.fail(
                   new SpeechSynthesisError({

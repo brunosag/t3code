@@ -7,6 +7,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import * as PhononEngine from "./PhononEngine.ts";
+import * as ReadAloudScript from "./readAloudScript.ts";
 import { SPEECH_SAMPLE_RATE } from "./speechText.ts";
 import * as SpeechSynthesis from "./SpeechSynthesis.ts";
 
@@ -14,11 +15,19 @@ interface FakeEngineOptions {
   readonly onAcquire?: Effect.Effect<void>;
   readonly onSpeak?: (text: string) => Effect.Effect<void, PhononEngine.SpeechEngineError>;
   readonly downloadProgress?: ReadonlyArray<readonly [number, number]>;
+  readonly write?: ReadAloudScript.ReadAloudScript["Service"]["write"];
 }
 
-/** Speaks 100 samples per letter or sentence mark, so digits and dashes yield no audio. */
-function layerFakeEngine(options: FakeEngineOptions = {}) {
-  return Layer.succeed(
+/**
+ * Speaks 100 samples per letter or sentence mark, so digits and dashes yield no audio. Without
+ * `write`, no read aloud model is set.
+ */
+function layerFakes(options: FakeEngineOptions = {}) {
+  const script = Layer.succeed(
+    ReadAloudScript.ReadAloudScript,
+    ReadAloudScript.ReadAloudScript.of({ write: options.write ?? (() => Effect.succeed(null)) }),
+  );
+  const engine = Layer.succeed(
     PhononEngine.PhononEngine,
     PhononEngine.PhononEngine.of({
       acquire: ({ onDownloadProgress }) =>
@@ -38,12 +47,15 @@ function layerFakeEngine(options: FakeEngineOptions = {}) {
         }),
     }),
   );
+  return Layer.merge(engine, script);
 }
 
-const synthesize = (text: string) =>
+const synthesize = (text: string, markdown?: string) =>
   Effect.gen(function* () {
     const speech = yield* SpeechSynthesis.SpeechSynthesis;
-    return yield* speech.synthesize({ text, voice: "default" }).pipe(Stream.runCollect);
+    return yield* speech
+      .synthesize({ text, ...(markdown === undefined ? {} : { markdown }), voice: "default" })
+      .pipe(Stream.runCollect);
   });
 
 const summarize = (events: ReadonlyArray<SpeechSynthesisEvent>) =>
@@ -69,8 +81,36 @@ describe("SpeechSynthesis", () => {
       expect(chunk?.type === "chunk" && new TextDecoder().decode(chunk.audio.subarray(0, 4))).toBe(
         "RIFF",
       );
-    }).pipe(Effect.provide(SpeechSynthesis.layer.pipe(Layer.provide(layerFakeEngine())))),
+    }).pipe(Effect.provide(SpeechSynthesis.layer.pipe(Layer.provide(layerFakes())))),
   );
+
+  it.effect("speaks the reply as the read aloud model rewrites it, or the text without one", () => {
+    const spoken: string[] = [];
+    const layer = (written: string | null) =>
+      SpeechSynthesis.layer.pipe(
+        Layer.provide(
+          layerFakes({
+            onSpeak: (text) => Effect.sync(() => spoken.push(text)),
+            write: (markdown, onWriting) =>
+              written === null
+                ? Effect.succeed(null)
+                : onWriting.pipe(Effect.as(`${written}, from ${markdown.length} characters.`)),
+          }),
+        ),
+      );
+    return Effect.gen(function* () {
+      const rewritten = yield* synthesize("Run vp i.", "Run `vp i`.").pipe(
+        Effect.provide(layer("Run V P install")),
+      );
+      expect(summarize(rewritten).slice(0, 3)).toEqual([
+        "wording 0/null",
+        "starting 0/null",
+        "generating 0/1",
+      ]);
+      yield* synthesize("Run vp i.", "Run `vp i`.").pipe(Effect.provide(layer(null)));
+      expect(spoken).toEqual(["Run V P install, from 11 characters.", "Run vp i."]);
+    });
+  });
 
   it.effect("estimates the whole response at the rate of the audio generated so far", () =>
     Effect.gen(function* () {
@@ -88,7 +128,7 @@ describe("SpeechSynthesis", () => {
       expect(estimates[2]).toBeCloseTo(
         1300 / SPEECH_SAMPLE_RATE + (3 * 1300) / SPEECH_SAMPLE_RATE / 15,
       );
-    }).pipe(Effect.provide(SpeechSynthesis.layer.pipe(Layer.provide(layerFakeEngine())))),
+    }).pipe(Effect.provide(SpeechSynthesis.layer.pipe(Layer.provide(layerFakes())))),
   );
 
   it.effect("reports model download progress before generating", () =>
@@ -103,7 +143,7 @@ describe("SpeechSynthesis", () => {
       Effect.provide(
         SpeechSynthesis.layer.pipe(
           Layer.provide(
-            layerFakeEngine({
+            layerFakes({
               downloadProgress: [
                 [10, 100],
                 [100, 100],
@@ -119,7 +159,7 @@ describe("SpeechSynthesis", () => {
     Effect.gen(function* () {
       const events = yield* synthesize("Hello. 123 ---");
       expect(summarize(events).filter((line) => line.startsWith("chunk"))).toEqual(["chunk 600"]);
-    }).pipe(Effect.provide(SpeechSynthesis.layer.pipe(Layer.provide(layerFakeEngine())))),
+    }).pipe(Effect.provide(SpeechSynthesis.layer.pipe(Layer.provide(layerFakes())))),
   );
 
   it.effect("fails the stream when the engine fails", () =>
@@ -130,7 +170,7 @@ describe("SpeechSynthesis", () => {
       Effect.provide(
         SpeechSynthesis.layer.pipe(
           Layer.provide(
-            layerFakeEngine({
+            layerFakes({
               onSpeak: () =>
                 Effect.fail(new PhononEngine.SpeechEngineError({ operation: "speak" })),
             }),
@@ -161,7 +201,7 @@ describe("SpeechSynthesis", () => {
       Effect.provide(
         SpeechSynthesis.layer.pipe(
           Layer.provide(
-            layerFakeEngine({
+            layerFakes({
               onAcquire: Effect.sync(() => log.push("acquire")),
               onSpeak: () =>
                 log.length === 1

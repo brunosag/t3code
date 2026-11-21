@@ -1,13 +1,18 @@
 import * as Schema from "effect/Schema";
 
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt } from "./baseSchemas.ts";
 import { ReadAloudVoiceSetting } from "./settings.ts";
 
 /** Upper bound on one request; a long agent response is a few tens of thousands of characters. */
 const SPEECH_SYNTHESIS_MAX_TEXT_LENGTH = 200_000;
 
 export const SpeechSynthesisInput = Schema.Struct({
-  text: TrimmedNonEmptyString.check(Schema.isMaxLength(SPEECH_SYNTHESIS_MAX_TEXT_LENGTH)),
+  /** Spoken as is unless the host rewrites `markdown`; empty when only that rewrite has words. */
+  text: Schema.String.check(Schema.isMaxLength(SPEECH_SYNTHESIS_MAX_TEXT_LENGTH)),
+  /** The reply itself, which a host with a read aloud model rewrites for speech instead of `text`. */
+  markdown: Schema.optionalKey(
+    Schema.String.check(Schema.isMaxLength(SPEECH_SYNTHESIS_MAX_TEXT_LENGTH)),
+  ),
   voice: ReadAloudVoiceSetting,
 });
 export type SpeechSynthesisInput = typeof SpeechSynthesisInput.Type;
@@ -19,7 +24,7 @@ export type SpeechSynthesisInput = typeof SpeechSynthesisInput.Type;
 export const SpeechSynthesisEvent = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("progress"),
-    stage: Schema.Literals(["downloading-model", "starting", "generating"]),
+    stage: Schema.Literals(["wording", "downloading-model", "starting", "generating"]),
     completed: NonNegativeInt,
     /** Null when the size of the stage is unknown. */
     total: Schema.NullOr(NonNegativeInt),
@@ -38,7 +43,7 @@ export type SpeechSynthesisEvent = typeof SpeechSynthesisEvent.Type;
 export class SpeechSynthesisError extends Schema.TaggedError<SpeechSynthesisError>()(
   "SpeechSynthesisError",
   {
-    reason: Schema.Literals(["model-download", "engine"]),
+    reason: Schema.Literals(["wording", "model-download", "engine"]),
     message: Schema.String,
   },
 ) {}

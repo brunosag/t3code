@@ -1093,5 +1093,10 @@ describe("resolveSpeechPostProcessingModelSelection", () => {
       applyServerSettingsPatch(pinned, { speechPostProcessingModelSelection: null })
         .speechPostProcessingModelSelection,
     ).toBeNull();
+    const reading = applyServerSettingsPatch(base, { readAloudModelSelection: cleanup });
+    expect(reading.readAloudModelSelection).toEqual(cleanup);
+    expect(
+      applyServerSettingsPatch(reading, { readAloudModelSelection: null }).readAloudModelSelection,
+    ).toBeNull();
   });
 });

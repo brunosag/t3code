@@ -813,6 +813,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("speech text to speech tts voice listen narrate phonon preview accent")],
   },
   {
+    id: "read-aloud-model",
+    title: msg("Rewriting model"),
+    to: "/settings/chat",
+    scope: "environment",
+    searchTerms: [msg("read aloud speech tts rewrite model sonnet code maths listen")],
+  },
+  {
     id: "follow-up-behavior",
     title: msg("Follow-up behavior"),
     to: "/settings/chat",

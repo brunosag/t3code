@@ -30,7 +30,6 @@ import {
   type SpeechModelUnloadTimeout,
   type VoiceShortcutMode,
 } from "@t3tools/contracts";
-import { createModelSelection, pickModelSelection } from "@t3tools/shared/model";
 import { resolveSpeechPostProcessingModelSelection } from "@t3tools/shared/serverSettings";
 import {
   cloudSpeechLanguages,
@@ -80,24 +79,16 @@ import {
 } from "../../speech/voiceConsent";
 import { updateClientSettings, useClientSettings } from "../../hooks/useSettings";
 import { runEnvironmentSpeech } from "../../speech/runEnvironmentSpeech";
-import {
-  getTextGenerationModelOptionsByInstance,
-  resolveAppModelSelectionState,
-} from "../../modelSelection";
-import { useTextGenerationTargets } from "../../textGenerators";
-import { useEnvironmentProviders, useEnvironments } from "../../state/environments";
+import { useEnvironments } from "../../state/environments";
 import { useEnvironmentScope } from "../../state/session";
-import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import {
   useEnvironmentSpeechInput,
   APPLE_SPEECH_LABEL,
   useVoiceTranscriptionDestination,
 } from "../../speech/useEnvironmentSpeechInput";
 import { ComposerSpeechRecordingPill } from "../chat/ComposerSpeechButton";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { ProviderPackageIcon } from "../chat/ProviderPackageIcon";
-import { TraitsPicker } from "../chat/TraitsPicker";
 import { VoiceInputSetup } from "../chat/VoiceInputSetup";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -136,16 +127,15 @@ import { ModelBenchmarks, orderSpeechLanguages } from "./SpeechModelComparison";
 import { languageLabel, SpeechLanguageSelect } from "./SpeechLanguageSelect";
 import { filterSpeechModels, type SpeechModelSort } from "./speechModelBrowser";
 import { AdvancedSettings } from "./AdvancedSettings";
+import { TaskModelRow } from "./TaskModelRow";
 import {
-  SETTINGS_PICKER_TRIGGER_CLASSNAME,
   SettingsPageContainer,
   SettingsRow,
   SettingsSearchTarget,
   SettingsSection,
 } from "./settingsLayout";
 import { useSearchableSetting } from "./settingsSearch";
-import { useOptionalSettingsScope, useSettingsScope } from "./SettingsScopeContext";
-import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
+import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 const OFF = "off";
@@ -551,128 +541,18 @@ function ProjectDictionaryRow() {
 
 /** Cleanup runs on the draft's environment, so its model is an environment setting there. */
 function CleanupModelRow() {
-  const setting = useSearchableSetting();
   const gt = useGT();
-  const { environment, connectedEnvironments } = useSettingsScope();
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
-  const providersByEnvironment = useEnvironmentProviders();
-  const providers =
-    (environment?.serverConfig
-      ? providersByEnvironment.get(environment.environmentId)
-      : undefined) ?? EMPTY_SERVER_PROVIDERS;
-  const targets = useTextGenerationTargets({
-    environmentId: environment?.environmentId ?? null,
-    settings,
-    providers: providers.filter((provider) => provider.supportsTextGeneration !== false),
-    projectId: null,
-    selections: [
-      settings.speechPostProcessingModelSelection,
-      settings.textGenerationModelSelection,
-    ],
-  });
-  const textGenerationProviders = targets.providers;
-  const instanceEntries = targets.entries;
-  const hasProvider = instanceEntries.some((entry) => entry.enabled && entry.isAvailable);
-  const dedicated = settings.speechPostProcessingModelSelection !== null;
-  const selection = resolveAppModelSelectionState(
-    {
-      ...settings,
-      textGenerationModelSelection: resolveSpeechPostProcessingModelSelection(
-        settings,
-        textGenerationProviders,
-      ),
-    },
-    textGenerationProviders,
-  );
-  const modelOptionsByInstance = getTextGenerationModelOptionsByInstance(
-    settings,
-    textGenerationProviders,
-    selection.instanceId,
-    selection.model,
-  );
-  const instanceEntry = instanceEntries.find((entry) => entry.instanceId === selection.instanceId);
-  const modelDisabledReason = useScopedModelDisabledReason(settings, instanceEntries, true);
-  const setModel = (next: ReturnType<typeof createModelSelection>) => {
-    const reason = modelDisabledReason(next.instanceId, next.model);
-    if (reason) {
-      toastManager.add({
-        type: "error",
-        title: gt("Cleanup model not saved"),
-        description: reason,
-      });
-      return;
-    }
-    updateSettings({ speechPostProcessingModelSelection: next });
-  };
   return (
-    <SettingsRow
-      serverScoped
-      settingKeys={["speechPostProcessingModelSelection"]}
-      {...setting("speech-post-processing-model")}
+    <TaskModelRow
+      settingKey="speechPostProcessingModelSelection"
+      searchId="speech-post-processing-model"
       title={gt("Cleanup model")}
       description={gt(
         "Model for transcript cleanup, such as a cheaper or faster one. When disabled, use the text generation model configured for this environment.",
       )}
-      control={
-        connectedEnvironments.length === 0 ? (
-          <span className="text-sm text-muted-foreground">
-            <T>Connect an environment first.</T>
-          </span>
-        ) : (
-          <div className="flex min-w-0 flex-wrap items-center gap-2 @min-[32rem]/settings-row:justify-end">
-            {dedicated && (!hasProvider || !instanceEntry) ? (
-              <span className="text-sm text-muted-foreground">
-                <T>No text generation providers available.</T>
-              </span>
-            ) : null}
-            {dedicated && hasProvider && instanceEntry ? (
-              <>
-                <ProviderModelPicker
-                  environmentId={environment?.environmentId ?? null}
-                  activeInstanceId={selection.instanceId}
-                  model={selection.model}
-                  lockedProvider={null}
-                  instanceEntries={instanceEntries}
-                  modelOptionsByInstance={modelOptionsByInstance}
-                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  getModelDisabledReason={modelDisabledReason}
-                  onInstanceModelChange={(instanceId, model) =>
-                    setModel(pickModelSelection(selection, instanceId, model))
-                  }
-                />
-                <TraitsPicker
-                  provider={instanceEntry.driverKind}
-                  models={instanceEntry.models}
-                  model={selection.model}
-                  modelOptions={selection.options ?? []}
-                  allowPromptInjectedEffort={false}
-                  triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                  onModelOptionsChange={(options) =>
-                    setModel(createModelSelection(selection.instanceId, selection.model, options))
-                  }
-                />
-              </>
-            ) : null}
-            <Switch
-              checked={dedicated}
-              disabled={!dedicated && !hasProvider}
-              onCheckedChange={(checked) =>
-                updateSettings({
-                  speechPostProcessingModelSelection: checked
-                    ? createModelSelection(
-                        settings.textGenerationModelSelection.instanceId,
-                        settings.textGenerationModelSelection.model,
-                        settings.textGenerationModelSelection.options,
-                      )
-                    : null,
-                })
-              }
-              aria-label={gt("Use a separate cleanup model")}
-            />
-          </div>
-        )
-      }
+      switchLabel={gt("Use a separate cleanup model")}
+      notSavedTitle={gt("Cleanup model not saved")}
+      resolve={resolveSpeechPostProcessingModelSelection}
     />
   );
 }

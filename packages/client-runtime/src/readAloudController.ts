@@ -4,6 +4,8 @@ export interface SpeechRequest {
   /** The environment whose host generates the speech, normally the thread's own. */
   readonly environmentId: EnvironmentId;
   readonly text: string;
+  /** The reply itself, for a host whose read aloud model rewrites it in place of `text`. */
+  readonly markdown?: string;
   readonly voice: ReadAloudVoice;
 }
 
@@ -249,7 +251,8 @@ export class ReadAloudController {
     });
     const plays: Promise<void>[] = [];
     try {
-      if (!request.text.trim()) throw new Error("This response has no text suitable for speech.");
+      if (!request.text.trim() && !request.markdown?.trim())
+        throw new Error("This response has no text suitable for speech.");
       await this.backend.generate(
         request,
         generation.signal,

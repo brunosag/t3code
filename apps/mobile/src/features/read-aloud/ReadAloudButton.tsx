@@ -1,4 +1,4 @@
-import { speechTextFromMarkdown } from "@t3tools/client-runtime/read-aloud";
+import { speechInputFromMarkdown } from "@t3tools/client-runtime/read-aloud";
 import { DEFAULT_UNIFIED_SETTINGS, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { memo, useSyncExternalStore } from "react";
@@ -42,7 +42,7 @@ export const ReadAloudButton = memo(function ReadAloudButton(props: {
         }
         void readAloud.start(key, {
           environmentId: props.environmentId,
-          text: speechTextFromMarkdown(props.markdown),
+          ...speechInputFromMarkdown(props.markdown),
           voice: readAloudVoice(),
         });
       }}

@@ -609,6 +609,9 @@ export function applyServerSettingsPatch(
     ...(patch.speechPostProcessingModelSelection !== undefined
       ? { speechPostProcessingModelSelection: patch.speechPostProcessingModelSelection }
       : {}),
+    ...(patch.readAloudModelSelection !== undefined
+      ? { readAloudModelSelection: patch.readAloudModelSelection }
+      : {}),
     ...(patch.defaultProjectScripts !== undefined
       ? { defaultProjectScripts: patch.defaultProjectScripts }
       : {}),
