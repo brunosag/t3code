@@ -281,8 +281,15 @@ function pastBalance(pool: Pool, from: number, now: number): RunwayPoint[][] {
   const stretches: RunwayPoint[][] = [];
   for (const [index, point] of points.entries()) {
     const previous = points[index - 1];
-    if (previous && point.at - previous.at <= step) stretches.at(-1)!.push(point);
-    else stretches.push([point]);
+    if (!previous || point.at - previous.at > step) {
+      stretches.push([point]);
+      continue;
+    }
+    // A refill shows up at a reading, so it draws as a jump there, not a climb from the one before.
+    if (point.remaining > previous.remaining) {
+      stretches.at(-1)!.push({ at: point.at, remaining: previous.remaining });
+    }
+    stretches.at(-1)!.push(point);
   }
   return stretches.filter((stretch) => stretch.length > 1);
 }

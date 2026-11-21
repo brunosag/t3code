@@ -66,6 +66,14 @@ describe("limitRunway", () => {
     // A spent 5% after the reset and 15% since; B spent nothing.
     expect(runway?.burnPerDay).toBeCloseTo(10, 6);
     expect(runway?.past.at(-1)?.at(-1)).toEqual({ at: now, remaining: 40 });
+    // The reset draws as a jump at the first reading after it.
+    const past = runway?.past.flat() ?? [];
+    const jump = past.findIndex((point) => point.at === now - 11 * HOUR);
+    expect(past.slice(jump - 1, jump + 2)).toEqual([
+      { at: now - 12 * HOUR, remaining: 5 },
+      { at: now - 11 * HOUR, remaining: 5 },
+      { at: now - 11 * HOUR, remaining: 47.5 },
+    ]);
 
     const young = limitRunway(
       { members: [weekly(20, 3 * DAY, hourly(Array.from({ length: 12 }, () => 10)))] },
@@ -97,7 +105,7 @@ describe("limitRunway", () => {
     const past = runway?.past.flat() ?? [];
     expect(past[0]?.at).toBe(now - 2 * DAY + HOUR);
     // The Pro account adds its quota from its first reading.
-    const joined = past.findIndex((point) => point.at === now - 5 * HOUR);
+    const joined = past.findLastIndex((point) => point.at === now - 5 * HOUR);
     expect(past[joined]!.remaining - past[joined - 1]!.remaining).toBeCloseTo(
       90 / 11 - 5 / 11 / 2,
       6,
