@@ -160,7 +160,10 @@ the message to read it from stdin.
 To choose the model, pass `--provider <instance-id> --model <slug>`. Add
 `--option id=value` for each model option, such as `--option effort=high`.
 Option ids and values depend on the model; `true` and `false` set on/off
-options.
+options. `t3 thread models` lists the providers, models and options this
+environment has. `t3 thread model <id>` prints what a thread runs on, and with
+the same flags moves it to another model for its next turns: a turn already
+running keeps its own, and a thread can't change provider while one runs.
 
 `--wait` prints the agent's reply. It exits 1 when the run fails or stops, and
 2 when the agent waits for an answer you give in the app. Add `--json` for a

@@ -427,6 +427,147 @@ it.effect("start rejects a repeated --option before reaching the server", () =>
   ),
 );
 
+/** Runs `t3 thread` against a server whose tools answer with `answer`, and lists the calls made. */
+const runThreadCommand = Effect.fn("test.runThreadCommand")(function* (
+  args: ReadonlyArray<string>,
+  answer: (args: Readonly<Record<string, unknown>>) => unknown,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-thread-command-" });
+  yield* persistServerRuntimeState({
+    path: path.join(baseDir, "userdata", "server-runtime.json"),
+    state: yield* makePersistedServerRuntimeState({
+      config: { host: "127.0.0.1", devUrl: undefined },
+      port: 3_773,
+    }),
+  });
+  const calls: Array<{ readonly tool: string; readonly args: unknown }> = [];
+  using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(
+    Effect.succeed({
+      call: (tool, toolArgs) => {
+        calls.push({ tool, args: toolArgs });
+        return Effect.succeed({ structuredContent: answer(toolArgs) });
+      },
+    }),
+  );
+  yield* Command.runWith(threadCommand, { version: "0.0.0" })([...args, "--base-dir", baseDir]);
+  return calls;
+});
+const commandLayer = Layer.mergeAll(
+  NodeServices.layer,
+  NodeCrypto.layer,
+  NetService.layer,
+  ConfigProvider.layer(ConfigProvider.fromEnv({ env: { T3CODE_PORT: "3773" } })),
+);
+
+it.effect("model sets a thread's model and options, then prints what it runs on", () =>
+  Effect.gen(function* () {
+    const modelSelection = {
+      instanceId: "claude",
+      model: "claude-fable-5-2",
+      options: [{ id: "effort", value: "xhigh" }],
+    };
+    const calls = yield* runThreadCommand(
+      [
+        "model",
+        threadId,
+        "--provider",
+        "claude",
+        "--model",
+        "claude-fable-5-2",
+        "--option",
+        "effort=xhigh",
+      ],
+      // The server answers a set with its sequence and a read with the selection.
+      (args) => ("modelSelection" in args ? { sequence: 7 } : { threadId, modelSelection }),
+    );
+
+    assert.deepStrictEqual(calls, [
+      { tool: "t3_thread_configure", args: { threadId, modelSelection } },
+      { tool: "t3_thread_configure", args: { threadId } },
+    ]);
+    assert.strictEqual(
+      (yield* TestConsole.logLines).at(-1),
+      "claude/claude-fable-5-2 effort=xhigh",
+    );
+  }).pipe(Effect.scoped, Effect.provide(commandLayer)),
+);
+
+it.effect("model without flags only reads", () =>
+  Effect.gen(function* () {
+    const configuration = {
+      threadId,
+      modelSelection: { instanceId: "antigravity", model: "gemini-4-neon" },
+    };
+    const calls = yield* runThreadCommand(["model", threadId, "--json"], () => configuration);
+
+    assert.deepStrictEqual(calls, [{ tool: "t3_thread_configure", args: { threadId } }]);
+    assert.strictEqual((yield* TestConsole.logLines).at(-1), JSON.stringify(configuration));
+  }).pipe(Effect.scoped, Effect.provide(commandLayer)),
+);
+
+it.effect("models lists each usable provider's models with their options", () =>
+  Effect.gen(function* () {
+    const provider = {
+      driverKind: "claudeAgent",
+      displayName: "Claude",
+      canRunChildTask: true,
+      canRunCrossProviderChildTask: true,
+    };
+    const calls = yield* runThreadCommand(["models", "--search", "fable"], () => ({
+      parentThreadId: null,
+      inheritedProviderInstanceId: null,
+      inheritedModel: null,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      providers: [
+        {
+          ...provider,
+          providerInstanceId: "claude",
+          models: [
+            {
+              id: "claude-fable-5-2",
+              label: "Claude Fable 5.2",
+              options: [
+                { id: "effort", values: ["high", "xhigh"], default: "high" },
+                { id: "ultracode", values: [false, true] },
+              ],
+            },
+          ],
+          constraints: [],
+        },
+        {
+          ...provider,
+          providerInstanceId: "claude-2",
+          models: [],
+          canRunChildTask: false,
+          canRunCrossProviderChildTask: false,
+          constraints: ["Provider instance is disabled."],
+        },
+      ],
+      features: {
+        appOwnedSubagents: true,
+        asyncPolling: true,
+        cancellation: true,
+        batchThreadCreation: true,
+        threadManagement: true,
+        incrementalThreadRead: true,
+        scheduledTasks: true,
+        maxBatchThreads: 20,
+      },
+    }));
+
+    assert.deepStrictEqual(calls, [
+      { tool: "orchestrator_capabilities", args: { search: "fable" } },
+    ]);
+    assert.deepStrictEqual((yield* TestConsole.logLines).slice(-2), [
+      "claude  claude-fable-5-2  effort=high|xhigh (default high)  ultracode=false|true",
+      "claude-2  unavailable: Provider instance is disabled.",
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(commandLayer)),
+);
+
 /** Serves t3_thread_read pages the way the server does: positions count every item. */
 const timelineTools = (types: ReadonlyArray<string>) => {
   const items = types.map((type, position) => ({ position, itemId: `item-${position}`, type }));

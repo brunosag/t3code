@@ -1,4 +1,6 @@
 import {
+  ModelSelection,
+  OrchestratorMcpCapabilitiesResult,
   OrchestratorMcpFailure,
   OrchestratorMcpThreadListResult,
   OrchestratorMcpThreadReadResult,
@@ -1010,6 +1012,15 @@ const threadSendCommand = Command.make("send", {
   ),
 );
 
+const ThreadConfiguration = Schema.Struct({ threadId: ThreadId, modelSelection: ModelSelection });
+const readModelSelection = (tools: ThreadTools, threadId: ThreadId) =>
+  tools.call("t3_thread_configure", { threadId }, ThreadConfiguration);
+const modelSelectionText = (selection: ModelSelection) =>
+  [
+    `${selection.instanceId}/${selection.model}`,
+    ...(selection.options ?? []).map((option) => `${option.id}=${option.value}`),
+  ].join(" ");
+
 const threadShowCommand = Command.make("show", {
   ...projectLocationFlags,
   thread: threadArgument,
@@ -1041,14 +1052,14 @@ const threadShowCommand = Command.make("show", {
             ),
           );
           const error = yield* latestRunError(tools, thread);
+          // The thread's read has its model but not that model's options, such as effort.
+          const { modelSelection } = yield* readModelSelection(tools, threadId);
           if (flags.json) {
-            return yield* printJson({ thread, messages, error });
+            return yield* printJson({ thread, modelSelection, messages, error });
           }
           yield* Console.log(thread.title);
           yield* Console.log(
-            [thread.threadId, thread.status, `${thread.providerInstanceId}/${thread.model}`].join(
-              "  ",
-            ),
+            [thread.threadId, thread.status, modelSelectionText(modelSelection)].join("  "),
           );
           if (thread.worktreePath !== null) {
             yield* Console.log(`${thread.branch ?? "(no branch)"}  ${thread.worktreePath}`);
@@ -1068,6 +1079,93 @@ const threadShowCommand = Command.make("show", {
   ),
 );
 
+const threadModelCommand = Command.make("model", {
+  ...projectLocationFlags,
+  thread: threadArgument,
+  provider: Flag.String("provider").pipe(
+    Flag.withDescription("Provider instance id to move the thread to. Pass with --model."),
+    Flag.optional,
+  ),
+  model: Flag.String("model").pipe(
+    Flag.withDescription("Model slug to move the thread to. `t3 thread models` lists them."),
+    Flag.optional,
+  ),
+  option: Flag.String("option").pipe(
+    Flag.withDescription(
+      "Model option as id=value, such as effort=high. Repeat for more. Needs --provider and --model; options left out go back to the model's defaults.",
+    ),
+    Flag.atLeast(0),
+  ),
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Show the model and options a thread runs on, or with --provider and --model set them for its next turns. A turn already running keeps its own, and a thread can't change provider while one runs.",
+  ),
+  Command.withHandler((flags) =>
+    Effect.gen(function* () {
+      const threadId = yield* decodeThreadId(flags.thread);
+      const modelSelection = yield* launchModelSelection(flags);
+      yield* withThreadTools(
+        flags,
+        Effect.fn("cli.thread.model")(function* (tools) {
+          if (modelSelection !== undefined) {
+            yield* tools.call("t3_thread_configure", { threadId, modelSelection }, Schema.Unknown);
+          }
+          const configuration = yield* readModelSelection(tools, threadId);
+          yield* flags.json
+            ? printJson(configuration)
+            : Console.log(modelSelectionText(configuration.modelSelection));
+        }),
+      );
+    }).pipe(reportThreadErrors),
+  ),
+);
+
+const threadModelsCommand = Command.make("models", {
+  ...projectLocationFlags,
+  search: Flag.String("search").pipe(
+    Flag.withDescription(
+      "Match model ids and names. Without it, each provider lists its usual models.",
+    ),
+    Flag.optional,
+  ),
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "List the providers and models a thread can run on, with each model's options, for --provider, --model and --option.",
+  ),
+  Command.withHandler((flags) =>
+    withThreadTools(
+      flags,
+      Effect.fn("cli.thread.models")(function* (tools) {
+        const { providers } = yield* tools.call(
+          "orchestrator_capabilities",
+          Option.match(flags.search, { onNone: () => ({}), onSome: (search) => ({ search }) }),
+          OrchestratorMcpCapabilitiesResult,
+        );
+        if (flags.json) {
+          return yield* printJson({ providers });
+        }
+        for (const provider of providers) {
+          if (provider.constraints.length > 0) {
+            yield* Console.log(
+              `${provider.providerInstanceId}  unavailable: ${provider.constraints.join(" ")}`,
+            );
+            continue;
+          }
+          for (const model of provider.models) {
+            const options = (model.options ?? []).map(
+              (option) =>
+                `${option.id}=${option.values.join("|")}${option.default === undefined ? "" : ` (default ${option.default})`}`,
+            );
+            yield* Console.log([provider.providerInstanceId, model.id, ...options].join("  "));
+          }
+        }
+      }),
+    ).pipe(reportThreadErrors),
+  ),
+);
+
 export const threadCommand = Command.make("thread").pipe(
   Command.withDescription("Start, message, and read threads on the running server."),
   Command.withSubcommands([
@@ -1075,5 +1173,7 @@ export const threadCommand = Command.make("thread").pipe(
     threadStartCommand,
     threadSendCommand,
     threadShowCommand,
+    threadModelCommand,
+    threadModelsCommand,
   ]),
 );
