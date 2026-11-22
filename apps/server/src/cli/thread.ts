@@ -1099,7 +1099,7 @@ const threadModelCommand = Command.make("model", {
   json: jsonFlag,
 }).pipe(
   Command.withDescription(
-    "Show the model and options a thread runs on, or with --provider and --model set them for its next turns. A turn already running keeps its own, and a thread can't change provider while one runs.",
+    "Show the model and options a thread runs on, or with --provider and --model set them for its next turns. A turn already running keeps its model, though some providers apply new options to it at once, and a thread can't change provider while one runs.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {

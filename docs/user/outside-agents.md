@@ -163,7 +163,8 @@ Option ids and values depend on the model; `true` and `false` set on/off
 options. `t3 thread models` lists the providers, models and options this
 environment has. `t3 thread model <id>` prints what a thread runs on, and with
 the same flags moves it to another model for its next turns: a turn already
-running keeps its own, and a thread can't change provider while one runs.
+running keeps its model, though some providers apply new options to it at once,
+and a thread can't change provider while one runs.
 
 `--wait` prints the agent's reply. It exits 1 when the run fails or stops, and
 2 when the agent waits for an answer you give in the app. Add `--json` for a
