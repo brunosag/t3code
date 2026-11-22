@@ -2,7 +2,6 @@ import { useSyncExternalStore, type CSSProperties } from "react";
 import { Link } from "@tanstack/react-router";
 import { PauseIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
-import { speechInputFromMarkdown } from "@t3tools/client-runtime/read-aloud";
 
 import { getClientSettings } from "~/hooks/useSettings";
 import { readAloud } from "~/lib/readAloud";
@@ -55,11 +54,15 @@ export function ReadAloudButton({
             onClick={() => {
               if (active) readAloud.stopMessage(key);
               else {
-                void readAloud.start(key, {
-                  environmentId,
-                  ...speechInputFromMarkdown(text),
-                  voice: getClientSettings().readAloudVoice,
-                });
+                // Loaded on demand so the remark parser stays out of the main web bundle.
+                void import("@t3tools/client-runtime/read-aloud").then(
+                  ({ speechInputFromMarkdown }) =>
+                    readAloud.start(key, {
+                      environmentId,
+                      ...speechInputFromMarkdown(text),
+                      voice: getClientSettings().readAloudVoice,
+                    }),
+                );
               }
             }}
           />
