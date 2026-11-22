@@ -168,7 +168,7 @@ function readings(window: ServerProviderUsageWindow, now: number) {
   ];
 }
 
-/** Spend from `base` on. Readings waver, so outside a reset only a new high is spent. */
+/** Spend from `base` on. Readings waver by a point or two, so outside a refill only a new high is spent. */
 function spending(
   samples: ReadonlyArray<{ readonly at: number; readonly used: number }>,
   base: number,
@@ -180,9 +180,11 @@ function spending(
   for (let index = base + 1; index < samples.length; index++) {
     const previous = samples[index - 1]!;
     const current = samples[index]!;
-    const reset = current.used < previous.used && resetBetween(previous.at, current.at);
+    // A refill at least halves the reading; one off its reset clock, such as an upgrade, spends nothing.
+    const refill = current.used < previous.used / 2;
+    const reset = refill && resetBetween(previous.at, current.at);
     const rise = reset ? current.used : Math.max(0, current.used - peak);
-    peak = reset ? current.used : Math.max(peak, current.used);
+    peak = refill ? current.used : Math.max(peak, current.used);
     spent += rise;
     if (rise > 0) lastSpendAt = current.at;
   }

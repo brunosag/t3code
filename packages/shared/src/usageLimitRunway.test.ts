@@ -234,7 +234,7 @@ describe("limitRunway", () => {
       pace: null,
     });
 
-    // The session restarted 30 minutes ago; the later dip to 9.5 is the reading wavering, not a reset.
+    // The session restarted 30 minutes ago; the dips to 44 and 9.5 are the reading wavering, not resets.
     const wavering = limitRunway(
       {
         members: [
@@ -244,14 +244,14 @@ describe("limitRunway", () => {
             history: {
               startsAt: iso(now - HOUR),
               stepMins: 10,
-              usedPercent: [null, 40, 45, 2, 10, 9.5],
+              usedPercent: [null, 45, 44, 2, 10, 9.5],
             },
           }),
         ],
       },
       now,
     );
-    // 5% before the reset, 2% at it, then 10% up to 12%, over 40 minutes.
-    expect(wavering?.burnPerDay).toBeCloseTo((17 * 1440) / 40, 6);
+    // 2% at the reset, then 10% up to 12%, over 40 minutes.
+    expect(wavering?.burnPerDay).toBeCloseTo((12 * 1440) / 40, 6);
   });
 });
