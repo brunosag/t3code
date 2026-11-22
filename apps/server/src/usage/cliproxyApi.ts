@@ -158,13 +158,26 @@ const ClaudeProfile = Schema.Struct({
     ),
   ),
 });
+type HubPlan = { readonly plan: string; readonly capacity?: number };
 // Max quotas are multiples of Pro's; pooled meters weight accounts by them.
-const CLAUDE_TIERS: Record<string, { readonly plan: string; readonly capacity: number }> = {
+const CLAUDE_TIERS: Record<string, HubPlan> = {
   default_claude_ai: { plan: "Claude Pro", capacity: 1 },
   default_claude_max_5x: { plan: "Claude Max 5x", capacity: 5 },
   default_claude_max_20x: { plan: "Claude Max 20x", capacity: 20 },
 };
-type ClaudeTier = (typeof CLAUDE_TIERS)[string];
+// Google's two Ultra plans give 5 and 20 times Pro's Antigravity limits.
+const ANTIGRAVITY_TIERS: Record<string, HubPlan> = {
+  "g1-pro-tier": { plan: "Google AI Pro", capacity: 1 },
+  "g1-ultra-lite-tier": { plan: "Google AI Ultra 5x", capacity: 5 },
+  "g1-ultra-tier": { plan: "Google AI Ultra 20x", capacity: 20 },
+};
+const decodeCodeAssist = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    paidTier: Schema.optional(
+      Schema.Struct({ id: Schema.String, name: Schema.optional(Schema.String) }),
+    ),
+  }),
+);
 const CreditList = Schema.Struct({
   credits: Schema.Array(
     Schema.Struct({
@@ -280,8 +293,8 @@ interface HubProvider {
     readonly account: AuthFile;
     readonly call: HubCall;
     readonly checkedAt: string;
-    readonly claudeTiers: Map<string, ClaudeTier>;
-    readonly claudeCache: ClaudeCache;
+    readonly plans: Map<string, HubPlan>;
+    readonly cache: AccountCache;
   }) => Effect.Effect<HubReading, UsageLimitSourceError | Schema.SchemaError, Digest.Digest>;
 }
 
@@ -365,23 +378,23 @@ const CODEX_HUB: HubProvider = {
   }),
 };
 
-// A plan rarely changes, so each account's is read once per process.
+// Read with the hourly usage refresh, so an upgrade shows; a failed read keeps the last plan.
 const claudeTier = Effect.fnUntraced(function* (
-  cache: Map<string, ClaudeTier>,
+  cache: Map<string, HubPlan>,
   account: AuthFile,
   call: HubCall,
 ) {
-  const known = cache.get(account.id);
-  if (known) return known;
   const profile = yield* decodeClaudeProfile(yield* call(CLAUDE_PROFILE_URL));
   const tier = CLAUDE_TIERS[profile.organization?.rate_limit_tier ?? ""];
   if (tier) cache.set(account.id, tier);
   return tier;
 });
 
-const CLAUDE_REFRESH_MS = 60 * 60 * 1000;
-type ClaudeCache = {
+const HOUR_MS = 60 * 60 * 1000;
+const CLAUDE_REFRESH_MS = HOUR_MS;
+type AccountCache = {
   attemptedAt?: number;
+  planAttemptedAt?: number;
   observedAfter?: number;
   usage?: typeof ClaudeUsage.Type;
   usageAt?: number;
@@ -462,30 +475,26 @@ const CLAUDE_HUB: HubProvider = {
     // The OAuth usage endpoint can return 429 without a Claude Code user agent.
     "User-Agent": `claude-cli/${hub.claudeVersion ?? FALLBACK_CLAUDE_VERSION} (external, cli)`,
   }),
-  read: Effect.fnUntraced(function* ({ account, call, checkedAt, claudeTiers, claudeCache }) {
+  read: Effect.fnUntraced(function* ({ account, call, checkedAt, plans, cache }) {
     const now = DateTime.toEpochMillis(yield* DateTime.now);
-    const five = claudeHeaderWindow(account, "5h", now, claudeCache.observedAfter);
-    const seven = claudeHeaderWindow(account, "7d", now, claudeCache.observedAfter);
-    const scoped = claudeHeaderWindow(account, "7d_oi", now, claudeCache.observedAfter);
-    if (
-      claudeCache.attemptedAt === undefined ||
-      now - claudeCache.attemptedAt >= CLAUDE_REFRESH_MS
-    ) {
+    const five = claudeHeaderWindow(account, "5h", now, cache.observedAfter);
+    const seven = claudeHeaderWindow(account, "7d", now, cache.observedAfter);
+    const scoped = claudeHeaderWindow(account, "7d_oi", now, cache.observedAfter);
+    if (cache.attemptedAt === undefined || now - cache.attemptedAt >= CLAUDE_REFRESH_MS) {
       // Cache failures too: repeated refreshes must not hammer a rate-limited login.
-      claudeCache.attemptedAt = now;
+      cache.attemptedAt = now;
       const fresh = yield* call(CLAUDE_USAGE_URL).pipe(
         Effect.flatMap(decodeClaudeUsage),
         Effect.option,
       );
       if (Option.isSome(fresh)) {
-        claudeCache.usage = fresh.value;
-        claudeCache.usageAt = now;
+        cache.usage = fresh.value;
+        cache.usageAt = now;
       }
-      yield* claudeTier(claudeTiers, account, call).pipe(Effect.ignore);
+      yield* claudeTier(plans, account, call).pipe(Effect.ignore);
     }
-    const usage = claudeCache.usage ?? {};
-    const endpointCurrent =
-      claudeCache.usageAt !== undefined && now - claudeCache.usageAt < CLAUDE_REFRESH_MS;
+    const usage = cache.usage ?? {};
+    const endpointCurrent = cache.usageAt !== undefined && now - cache.usageAt < CLAUDE_REFRESH_MS;
     const currentWindow = (
       header: ReturnType<typeof claudeHeaderWindow>,
       endpoint: typeof ClaudeWindow.Type | null | undefined,
@@ -539,11 +548,11 @@ const CLAUDE_HUB: HubProvider = {
       spend: usage.spend,
       extra_usage: usage.extra_usage ?? null,
     };
-    const tier = claudeTiers.get(account.id);
+    const tier = plans.get(account.id);
     return {
       ...listedIdentity(account),
       plan: tier?.plan ?? "Claude Subscription",
-      ...(tier ? { capacity: tier.capacity } : {}),
+      ...(tier?.capacity ? { capacity: tier.capacity } : {}),
       usageLimits: {
         ...claudeUsageResponseToLimits({
           checkedAt,
@@ -558,6 +567,8 @@ const CLAUDE_HUB: HubProvider = {
 const GROK_CLI_VERSION = "1.0.77";
 const ANTIGRAVITY_SUMMARY_URL =
   "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary";
+const ANTIGRAVITY_CODE_ASSIST_URL =
+  "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
 
 // Keyed by the auth-files `provider`; accounts of any other provider are skipped.
 const HUB_PROVIDERS = new Map<string, HubProvider>([
@@ -591,7 +602,7 @@ const HUB_PROVIDERS = new Map<string, HubProvider>([
         "Content-Type": "application/json",
         "User-Agent": antigravityUserAgent(platform, architecture),
       }),
-      read: Effect.fnUntraced(function* ({ account, call, checkedAt }) {
+      read: Effect.fnUntraced(function* ({ account, call, checkedAt, plans, cache }) {
         const project = account.project_id?.trim();
         if (!project) {
           return yield* new UsageLimitSourceError({ detail: "No Antigravity project reported." });
@@ -608,13 +619,45 @@ const HUB_PROVIDERS = new Map<string, HubProvider>([
           Effect.flatMap(antigravityAccountFingerprint),
           Effect.option,
         );
+        if (cache.planAttemptedAt === undefined || requestedAt - cache.planAttemptedAt >= HOUR_MS) {
+          cache.planAttemptedAt = requestedAt;
+          yield* call(ANTIGRAVITY_CODE_ASSIST_URL, {
+            cloudaicompanionProject: project,
+            metadata: {
+              ideType: "ANTIGRAVITY",
+              platform: "PLATFORM_UNSPECIFIED",
+              pluginType: "GEMINI",
+            },
+          }).pipe(
+            Effect.flatMap(decodeJson),
+            Effect.flatMap(decodeCodeAssist),
+            Effect.tap(({ paidTier }) =>
+              Effect.sync(() => {
+                if (!paidTier) plans.delete(account.id);
+                else
+                  plans.set(
+                    account.id,
+                    ANTIGRAVITY_TIERS[paidTier.id] ?? {
+                      plan: paidTier.name?.trim() || paidTier.id,
+                    },
+                  );
+              }),
+            ),
+            Effect.ignore,
+          );
+        }
+        const plan = plans.get(account.id);
         const usageLimits = makeUsageLimits({ checkedAt, windows });
-        return Option.match(fingerprint, {
-          onNone: () => ({ ...listedIdentity(account), usageLimits }),
-          onSome: (credentialFingerprint) => ({
-            usageLimits: { ...usageLimits, credentialFingerprint },
+        return {
+          ...(plan ? { plan: plan.plan } : {}),
+          ...(plan?.capacity ? { capacity: plan.capacity } : {}),
+          ...Option.match(fingerprint, {
+            onNone: () => ({ ...listedIdentity(account), usageLimits }),
+            onSome: (credentialFingerprint) => ({
+              usageLimits: { ...usageLimits, credentialFingerprint },
+            }),
           }),
-        });
+        };
       }),
     },
   ],
@@ -728,15 +771,15 @@ export const makeCliproxyApi = Effect.gen(function* () {
     (hub: CliproxyHub, account: AuthFile, provider: HubProvider): HubCall =>
     (url, data) =>
       apiCall(hub, account, provider.header(account, platform, architecture, hub), url, data);
-  const claudeTiers = new Map<string, Map<string, ClaudeTier>>();
-  const claudeCaches = new Map<string, Map<string, ClaudeCache>>();
+  const hubPlans = new Map<string, Map<string, HubPlan>>();
+  const hubCaches = new Map<string, Map<string, AccountCache>>();
   const cacheFor = (hub: CliproxyHub) => {
     const key = `${hub.url}:${hub.managementKey}`;
-    let tiers = claudeTiers.get(key);
-    if (!tiers) claudeTiers.set(key, (tiers = new Map()));
-    let caches = claudeCaches.get(key);
-    if (!caches) claudeCaches.set(key, (caches = new Map()));
-    return { tiers, caches };
+    let plans = hubPlans.get(key);
+    if (!plans) hubPlans.set(key, (plans = new Map()));
+    let caches = hubCaches.get(key);
+    if (!caches) hubCaches.set(key, (caches = new Map()));
+    return { plans, caches };
   };
 
   const readAccount = Effect.fn("CliproxyApi.readAccount")(function* (
@@ -746,27 +789,25 @@ export const makeCliproxyApi = Effect.gen(function* () {
   ) {
     const checkedAt = DateTime.formatIso(yield* DateTime.now);
     const call = hubCall(hub, account, provider);
-    const { tiers, caches } = cacheFor(hub);
+    const { plans, caches } = cacheFor(hub);
     let cache = caches.get(account.id);
     if (!cache) caches.set(account.id, (cache = {}));
-    const read = provider
-      .read({ account, call, checkedAt, claudeTiers: tiers, claudeCache: cache })
-      .pipe(
-        Effect.provideService(Digest.Digest, digest),
-        Effect.catch((error) =>
-          Effect.succeed({
-            ...listedIdentity(account),
-            usageLimits: makeUnavailableUsageLimits({
-              checkedAt,
-              reason: "probeFailed",
-              // Source-error details are already credential-free (status codes only).
-              message: isUsageLimitSourceError(error)
-                ? error.detail
-                : "The hub could not read this account's usage.",
-            }),
+    const read = provider.read({ account, call, checkedAt, plans, cache }).pipe(
+      Effect.provideService(Digest.Digest, digest),
+      Effect.catch((error) =>
+        Effect.succeed({
+          ...listedIdentity(account),
+          usageLimits: makeUnavailableUsageLimits({
+            checkedAt,
+            reason: "probeFailed",
+            // Source-error details are already credential-free (status codes only).
+            message: isUsageLimitSourceError(error)
+              ? error.detail
+              : "The hub could not read this account's usage.",
           }),
-        ),
-      );
+        }),
+      ),
+    );
     // Model lists are optional, so their lookup stops at a short deadline that a slow hub
     // cannot push a refresh past; a switched-off login routes nothing, so it needs none.
     const listModels = account.disabled

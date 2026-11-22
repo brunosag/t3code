@@ -430,10 +430,14 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
       creditSources.set(key, next);
     }
     const previousPlan = planSources.get(key);
+    // A plan with a known size beats a sign-in label such as a local Antigravity's "Google account".
+    const sized = (account: LimitAccount) => account.capacity !== undefined;
     if (
       next.plan &&
       (!previousPlan ||
-        Date.parse(next.limits.checkedAt) > Date.parse(previousPlan.limits.checkedAt))
+        (sized(next) === sized(previousPlan)
+          ? Date.parse(next.limits.checkedAt) > Date.parse(previousPlan.limits.checkedAt)
+          : sized(next)))
     ) {
       planSources.set(key, next);
     }
@@ -465,7 +469,7 @@ export function collectLimitAccounts(presentations: LimitPresentations): readonl
           ? null
           : displayName,
       plan: planSources.get(key)?.plan ?? previous.plan ?? next.plan,
-      capacity: previous.capacity ?? next.capacity,
+      capacity: planSources.get(key)?.capacity ?? previous.capacity ?? next.capacity,
       accentColor: previous.accentColor ?? next.accentColor,
       image: previous.image ?? next.image,
       environments,

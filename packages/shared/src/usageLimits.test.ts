@@ -453,9 +453,9 @@ describe("pools", () => {
     const local = provider({
       driver: antigravity,
       instanceId: ProviderInstanceId.make("antigravity"),
-      auth: { status: "authenticated" },
+      auth: { status: "authenticated", label: "Google account" },
       usageLimits: {
-        checkedAt,
+        checkedAt: "2026-09-03T11:30:00.000Z",
         credentialFingerprint: "google-key",
         windows: [{ ...window, id: "gemini-weekly", usedPercent: 20 }],
       },
@@ -463,8 +463,10 @@ describe("pools", () => {
     const hubAccount = {
       id: "antigravity-g@example.com.json",
       driver: antigravity,
+      plan: "Google AI Ultra 5x",
+      capacity: 5,
       usageLimits: {
-        checkedAt: "2026-09-03T11:30:00.000Z",
+        checkedAt,
         credentialFingerprint: "google-key",
         windows: [{ ...window, id: "gemini-weekly", usedPercent: 30 }],
       },
@@ -484,7 +486,9 @@ describe("pools", () => {
       ]),
     );
     expect(accounts).toHaveLength(1);
-    expect(accounts[0]?.limits.windows[0]?.usedPercent).toBe(30);
+    // The fresher local reading wins, but the hub's sized plan beats the local sign-in label.
+    expect(accounts[0]).toMatchObject({ plan: "Google AI Ultra 5x", capacity: 5 });
+    expect(accounts[0]?.limits.windows[0]?.usedPercent).toBe(20);
   });
 
   it("takes windows from a fresher hub read but credits and redeem from the native instance", () => {

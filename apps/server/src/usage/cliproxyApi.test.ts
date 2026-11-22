@@ -676,6 +676,7 @@ describe("CLIProxyAPI built-in management API", () => {
 
   it.effect("reads an Antigravity summary and keys the account by its Google ID", () =>
     Effect.gen(function* () {
+      let paidTier = { id: "g1-pro-tier", name: "Google AI Pro" };
       const test = fixture({
         accounts: [
           {
@@ -688,12 +689,30 @@ describe("CLIProxyAPI built-in management API", () => {
         ],
         upstream: (request) => ({
           status: 200,
-          body: request.url?.endsWith("/userinfo") ? { id: "google-42" } : antigravitySummary,
+          body: request.url?.endsWith("/userinfo")
+            ? { id: "google-42" }
+            : request.url?.endsWith(":loadCodeAssist")
+              ? { paidTier }
+              : antigravitySummary,
         }),
       });
-      const [account] = yield* (yield* test.api).readAccounts(config);
+      const api = yield* test.api;
+      const [account] = yield* api.readAccounts(config);
       expect(account?.driver).toBe("antigravity");
       expect(account?.email).toBeUndefined();
+      expect(account).toMatchObject({ plan: "Google AI Pro", capacity: 1 });
+      // The plan is read hourly, so an upgrade shows within the hour.
+      paidTier = { id: "g1-ultra-lite-tier", name: "Google AI Ultra" };
+      expect((yield* api.readAccounts(config))[0]?.plan).toBe("Google AI Pro");
+      yield* TestClock.adjust("1 hour");
+      expect((yield* api.readAccounts(config))[0]).toMatchObject({
+        plan: "Google AI Ultra 5x",
+        capacity: 5,
+      });
+      const planCalls = test.requests.filter((request) =>
+        request.body?.url?.endsWith(":loadCodeAssist"),
+      );
+      expect(planCalls).toHaveLength(2);
       expect(account?.usageLimits.credentialFingerprint).toBe(
         // sha256("google-account\0google-42"), as a local Antigravity probe reports it.
         "136d4952771fd67a3600053f37492cbd05828712e0b1c89ebab03d4c22ab6554",
@@ -719,7 +738,7 @@ describe("CLIProxyAPI built-in management API", () => {
       const identityCalls = test.requests.filter((request) =>
         request.body?.url?.endsWith("/userinfo"),
       );
-      expect(identityCalls).toHaveLength(1);
+      expect(identityCalls).toHaveLength(3);
       expect(identityCalls[0]?.body).toMatchObject({
         method: "GET",
         url: "https://www.googleapis.com/oauth2/v2/userinfo",
