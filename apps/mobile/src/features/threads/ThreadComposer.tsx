@@ -81,6 +81,8 @@ import {
   ComposerToolbarRow,
 } from "../../components/ComposerToolbar";
 import { formatTokens } from "@t3tools/shared/usageFormat";
+import type { ContextWindowUsage } from "@t3tools/client-runtime/state/context-window";
+import { ComposerContextMeter } from "./ComposerContextMeter";
 import { ComposerModelControl } from "../../components/ComposerModelControl";
 import {
   composerStripAttachments,
@@ -151,6 +153,10 @@ export interface ThreadComposerProps {
     readonly keepFullHistory: boolean;
     readonly toggleKeepFullHistory: () => void;
   } | null;
+  /** The thread's context use; the gauge opens the usage card. */
+  readonly contextWindow?: ContextWindowUsage | null;
+  readonly contextWindowOpen?: boolean;
+  readonly onPressContextWindow?: () => void;
   /** Arms a fresh session for the next message; absent where `/clear` is unavailable. */
   readonly onFreshSession?: () => void;
   readonly offersSideChat?: boolean;
@@ -723,6 +729,20 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         onPress={compactBeforeSend.toggleKeepFullHistory}
       />
     ) : null;
+  // The compact control already carries the token count, and thumbnails take the collapsed row.
+  const contextControl =
+    props.contextWindow &&
+    props.onPressContextWindow &&
+    compactControl === null &&
+    queuedEdit === null &&
+    (isExpanded || stripAttachments.length === 0) ? (
+      <ComposerContextMeter
+        size={usesLargeControls ? "large" : "regular"}
+        usage={props.contextWindow}
+        open={props.contextWindowOpen === true}
+        onPress={props.onPressContextWindow}
+      />
+    ) : null;
 
   return (
     <Animated.View
@@ -848,7 +868,8 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                     minWidth:
                       compactEditor.isExpanded ||
                       stripAttachments.length > 0 ||
-                      compactControl !== null
+                      compactControl !== null ||
+                      contextControl !== null
                         ? 0
                         : INLINE_EDITOR_MIN_WIDTH,
                   },
@@ -1028,6 +1049,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                   entering={compactEditor.toolbarControlsEntering}
                 >
                   {compactControl}
+                  {contextControl}
                   {modelControl}
                 </Animated.View>
                 <ComposerDictationStartAction

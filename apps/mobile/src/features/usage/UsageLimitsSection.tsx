@@ -55,6 +55,71 @@ function useBarColor(driver: Driver): string | null {
   return kind ? colors[kind] : null;
 }
 
+/** A limit bar. A tick splits it, with a gap on either side. */
+export function UsageBar(props: {
+  /** From 0 to 100. */
+  readonly fill: number;
+  readonly fillClassName: string;
+  readonly fillColor?: string | null;
+  /** A marker on the bar, from 0 to 100. */
+  readonly tick: number | null;
+}) {
+  const [barWidth, setBarWidth] = useState(0);
+  const tickX =
+    props.tick === null || barWidth < 6
+      ? null
+      : Math.min(Math.max((barWidth * props.tick) / 100, 3), barWidth - 3);
+  const bar = (
+    <View
+      className="h-1.5 flex-row overflow-hidden rounded-full bg-subtle"
+      style={barWidth > 0 ? { width: barWidth } : undefined}
+    >
+      <View
+        className={`h-full rounded-full ${props.fillClassName}`}
+        style={[
+          { flex: props.fill },
+          props.fillColor ? { backgroundColor: props.fillColor } : null,
+        ]}
+      />
+      <View style={{ flex: 100 - props.fill }} />
+    </View>
+  );
+  return (
+    <View
+      className="h-3 justify-center"
+      onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}
+    >
+      {tickX === null ? (
+        bar
+      ) : (
+        <View className="h-1.5">
+          {/* Clip the same full-width bar so neither fill proportions nor corner radii change. */}
+          {(
+            [
+              [0, tickX - 3],
+              [tickX + 3, barWidth],
+            ] as const
+          ).map(([start, end]) => (
+            <View
+              key={start}
+              className="absolute top-0 bottom-0 overflow-hidden"
+              style={{ left: start, width: end - start }}
+            >
+              <View style={{ marginLeft: -start }}>{bar}</View>
+            </View>
+          ))}
+        </View>
+      )}
+      {tickX !== null ? (
+        <View
+          className="absolute top-px bottom-px w-0.5 rounded-full bg-foreground"
+          style={{ left: tickX - 1 }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
 function WindowRow(props: {
   readonly window: ServerProviderUsageWindow;
   readonly color: string | null;
@@ -66,32 +131,6 @@ function WindowRow(props: {
   const pace = paceOf(window, now);
   const m = useMessages();
   const resetsIn = resetLabels(window, now, m)?.full;
-  const [barWidth, setBarWidth] = useState(0);
-  const tickX =
-    timeLeft === null || barWidth < 6
-      ? null
-      : Math.min(Math.max((barWidth * timeLeft) / 100, 3), barWidth - 3);
-  const bar = (
-    <View
-      className="h-1.5 flex-row overflow-hidden rounded-full bg-subtle"
-      style={barWidth > 0 ? { width: barWidth } : undefined}
-    >
-      <View
-        className={
-          remaining <= 10
-            ? "h-full rounded-full bg-red-500"
-            : remaining <= 30
-              ? "h-full rounded-full bg-amber-500"
-              : "h-full rounded-full bg-foreground"
-        }
-        style={[
-          { flex: remaining },
-          remaining > 30 && props.color ? { backgroundColor: props.color } : null,
-        ]}
-      />
-      <View style={{ flex: 100 - remaining }} />
-    </View>
-  );
   return (
     <View className="gap-1">
       <View className="flex-row items-baseline justify-between gap-3">
@@ -102,38 +141,14 @@ function WindowRow(props: {
           </T>
         </Text>
       </View>
-      <View
-        className="h-3 justify-center"
-        onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}
-      >
-        {tickX === null ? (
-          bar
-        ) : (
-          <View className="h-1.5">
-            {/* Clip the same full-width bar so neither fill proportions nor corner radii change. */}
-            {(
-              [
-                [0, tickX - 3],
-                [tickX + 3, barWidth],
-              ] as const
-            ).map(([start, end]) => (
-              <View
-                key={start}
-                className="absolute top-0 bottom-0 overflow-hidden"
-                style={{ left: start, width: end - start }}
-              >
-                <View style={{ marginLeft: -start }}>{bar}</View>
-              </View>
-            ))}
-          </View>
-        )}
-        {tickX !== null ? (
-          <View
-            className="absolute top-px bottom-px w-0.5 rounded-full bg-foreground"
-            style={{ left: tickX - 1 }}
-          />
-        ) : null}
-      </View>
+      <UsageBar
+        fill={remaining}
+        fillClassName={
+          remaining <= 10 ? "bg-red-500" : remaining <= 30 ? "bg-amber-500" : "bg-foreground"
+        }
+        fillColor={remaining > 30 ? props.color : null}
+        tick={timeLeft}
+      />
       {pace || resetsIn ? (
         <View className="flex-row justify-between gap-3">
           <Text className="text-xs text-foreground-tertiary">

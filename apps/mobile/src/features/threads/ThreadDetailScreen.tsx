@@ -185,6 +185,7 @@ import { ComposerErrorNotice } from "./ComposerErrorNotice";
 import { ManagedRuntimeModeNotice } from "./ManagedRuntimeModeNotice";
 import { FreshSessionNotice } from "./FreshSessionNotice";
 import { ComposerFeedback } from "./ComposerFeedback";
+import type { ContextWindowUsage } from "@t3tools/client-runtime/state/context-window";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
 import { PendingUserInputCard } from "./PendingUserInputCard";
 import { ProviderSubagentBar } from "./ProviderSubagentBar";
@@ -261,6 +262,7 @@ export interface ThreadDetailScreenProps {
   readonly isCompacting: boolean;
   /** Set while the next send compacts the thread first. */
   readonly compactBeforeSend?: ThreadComposerProps["compactBeforeSend"];
+  readonly contextWindow?: ContextWindowUsage | null;
   readonly creationState:
     | {
         readonly kind: "preparing";
@@ -1011,16 +1013,16 @@ function ThreadDetailBody(
   if (usageLimitsPanel !== null && usageLimitsPanel.key !== usageLimitsKey) {
     setUsageLimitsPanel(null);
   }
-  const usageLimitsReport =
-    usageLimitsPanel !== null && usageLimitsPanel.key === usageLimitsKey
-      ? collectProviderUsageLimits(
-          props.selectedThread.modelSelection.instanceId,
-          props.serverConfig?.providers ?? [],
-          props.serverConfig?.usageLimitSources ?? [],
-          usageLimitsPanel.now,
-          props.selectedThread.modelSelection.model,
-        )
-      : null;
+  const usageLimitsShown = usageLimitsPanel !== null && usageLimitsPanel.key === usageLimitsKey;
+  const usageLimitsReport = usageLimitsShown
+    ? collectProviderUsageLimits(
+        props.selectedThread.modelSelection.instanceId,
+        props.serverConfig?.providers ?? [],
+        props.serverConfig?.usageLimitSources ?? [],
+        usageLimitsPanel.now,
+        props.selectedThread.modelSelection.model,
+      )
+    : null;
   const showUsageLimits = (report: UsageLimitsReport | null) =>
     setUsageLimitsPanel(
       report === null
@@ -1032,6 +1034,12 @@ function ThreadDetailBody(
           },
     );
   const dismissUsageLimits = () => setUsageLimitsPanel(null);
+  const toggleUsageLimits = () =>
+    setUsageLimitsPanel((current) =>
+      current !== null
+        ? null
+        : { key: usageLimitsKey, threadKey: selectedThreadKey, now: Date.now() },
+    );
   // Late sends clear only their originating thread's limits panel.
   const clearUsageLimitsFor = (threadKey: string) =>
     setUsageLimitsPanel((current) =>
@@ -1109,7 +1117,11 @@ function ThreadDetailBody(
   // The usage panel stacks with the composer and any approval card, so it gets
   // whatever room they leave below the header. Measured only while it is open
   // so typing in the composer does not re-render the screen.
-  const usageLimitsOpen = usageLimitsReport !== null && activeUserInputRequestId === null;
+  // The context gauge opens the card too, for providers that report no limits.
+  const usageLimitsOpen =
+    usageLimitsShown &&
+    (usageLimitsReport !== null || props.contextWindow != null) &&
+    activeUserInputRequestId === null;
   const [usageLimitsLayout, setUsageLimitsLayout] = useState({ overlay: 0, panel: 0 });
   const handleComposerOverlayLayout = (event: LayoutChangeEvent) => {
     if (!questionInFlow) onComposerLayout(event);
@@ -1785,7 +1797,7 @@ function ThreadDetailBody(
                         />
                       </Animated.View>
                     ) : null}
-                    {usageLimitsReport && activeUserInputRequestId === null ? (
+                    {usageLimitsOpen ? (
                       <Animated.View
                         className="shrink-0 px-4"
                         style={{ paddingBottom: USAGE_LIMITS_PANEL_GAP }}
@@ -1795,6 +1807,7 @@ function ThreadDetailBody(
                       >
                         <ComposerUsageLimits
                           report={usageLimitsReport}
+                          contextWindow={props.contextWindow ?? null}
                           environmentId={props.environmentId}
                           maxHeight={usageLimitsMaxHeight}
                           onClose={dismissUsageLimits}
@@ -1939,6 +1952,9 @@ function ThreadDetailBody(
                         environmentLabel={props.environmentLabel}
                         selectedThread={props.selectedThread}
                         compactBeforeSend={props.compactBeforeSend ?? null}
+                        contextWindow={props.contextWindow ?? null}
+                        contextWindowOpen={usageLimitsOpen}
+                        onPressContextWindow={toggleUsageLimits}
                         hasCompactableConversation={
                           hasCompactableConversation && !props.isCompacting
                         }

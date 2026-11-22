@@ -364,3 +364,55 @@ export function compactBeforeSendTokens(input: {
     ? contextWindow.usedTokens
     : null;
 }
+
+/** The context window of a thread's active conversation, or null until a provider reports one. */
+export function threadContextWindowSnapshot(
+  projection: Pick<
+    ThreadStructure,
+    "thread" | "contextTransfers" | "providerThreads" | "providerTurns"
+  >,
+  visibleTurnItems: ReadonlyArray<{ readonly item: ThreadStructureTurnItem }>,
+): ContextWindowSnapshot | null {
+  const providerThread = projection.providerThreads.find(
+    (thread) => thread.id === projection.thread.activeProviderThreadId,
+  );
+  return deriveLatestContextWindowSnapshot(
+    visibleTurnItems,
+    latestProviderTurnTokenUsage(projection.providerTurns, projection, providerThread),
+    providerThread,
+  );
+}
+
+/** What a context meter shows. All primitives, so clients can keep one stable across renders. */
+export type ContextWindowUsage = Pick<
+  ContextWindowSnapshot,
+  "usedTokens" | "maxTokens" | "usedPercentage" | "autoCompactThreshold"
+>;
+
+export interface ContextWindowMeter {
+  /** Whole percent of the window in use; null when the provider reports no window size. */
+  readonly usedPercent: number | null;
+  /** Where auto-compaction starts, as a percent of the window; null when unknown. */
+  readonly compactsAtPercent: number | null;
+  readonly tone: "error" | "warning" | null;
+}
+
+/** What a context bar draws. The thresholds match web's thread details row. */
+export function contextWindowMeter(
+  usage: Omit<ContextWindowUsage, "usedTokens">,
+): ContextWindowMeter {
+  const maxTokens = usage.maxTokens != null && usage.maxTokens > 0 ? usage.maxTokens : null;
+  if (maxTokens === null || usage.usedPercentage === null) {
+    return { usedPercent: null, compactsAtPercent: null, tone: null };
+  }
+  const usedPercent = Math.round(Math.max(0, Math.min(100, usage.usedPercentage)));
+  const threshold = usage.autoCompactThreshold ?? null;
+  return {
+    usedPercent,
+    compactsAtPercent:
+      threshold !== null && threshold > 0 && threshold < maxTokens
+        ? (threshold / maxTokens) * 100
+        : null,
+    tone: usedPercent >= 90 ? "error" : usedPercent >= 80 ? "warning" : null,
+  };
+}

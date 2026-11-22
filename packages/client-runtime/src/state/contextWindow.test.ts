@@ -14,7 +14,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { compactBeforeSendTokens } from "./contextWindow.ts";
+import { compactBeforeSendTokens, contextWindowMeter } from "./contextWindow.ts";
 import type { ThreadStructure } from "./models.ts";
 import { v2Projection } from "./orchestrationV2TestFixtures.ts";
 
@@ -260,5 +260,37 @@ describe("compactBeforeSendTokens", () => {
     expect(compactBeforeSendTokens(sendInput(overrides as Parameters<typeof sendInput>[0]))).toBe(
       expected ? 293_611 : null,
     );
+  });
+});
+
+describe("contextWindowMeter", () => {
+  it.each([
+    {
+      name: "fills by use and marks where auto-compaction starts",
+      usage: { maxTokens: 200_000, usedPercentage: 62.6, autoCompactThreshold: 160_000 },
+      expected: { usedPercent: 63, compactsAtPercent: 80, tone: null },
+    },
+    {
+      name: "warns from 80% used",
+      usage: { maxTokens: 200_000, usedPercentage: 80, autoCompactThreshold: null },
+      expected: { usedPercent: 80, compactsAtPercent: null, tone: "warning" },
+    },
+    {
+      name: "turns to an error from 90% used",
+      usage: { maxTokens: 200_000, usedPercentage: 140, autoCompactThreshold: null },
+      expected: { usedPercent: 100, compactsAtPercent: null, tone: "error" },
+    },
+    {
+      name: "drops a compaction mark at or past the window's end",
+      usage: { maxTokens: 200_000, usedPercentage: 10, autoCompactThreshold: 200_000 },
+      expected: { usedPercent: 10, compactsAtPercent: null, tone: null },
+    },
+    {
+      name: "has no bar when the provider reports no window size",
+      usage: { maxTokens: null, usedPercentage: null, autoCompactThreshold: 160_000 },
+      expected: { usedPercent: null, compactsAtPercent: null, tone: null },
+    },
+  ] as const)("$name", ({ usage, expected }) => {
+    expect(contextWindowMeter(usage)).toEqual(expected);
   });
 });

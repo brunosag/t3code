@@ -1,4 +1,5 @@
 import { providerClients } from "@t3tools/client-runtime/provider-clients";
+import type { ContextWindowUsage } from "@t3tools/client-runtime/state/context-window";
 import type { EnvironmentId, UsageLimitsReport } from "@t3tools/contracts";
 import { T, useGT } from "gt-react-native";
 import { Pressable, ScrollView, View } from "react-native";
@@ -6,20 +7,24 @@ import { Pressable, ScrollView, View } from "react-native";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { AccountLimits, ResetCredits } from "../usage/UsageLimitsSection";
+import { ContextWindowSection } from "./ComposerContextMeter";
 
 export function ComposerUsageLimits({
   report,
+  contextWindow,
   environmentId,
   maxHeight,
   onClose,
 }: {
-  readonly report: UsageLimitsReport;
+  readonly report: UsageLimitsReport | null;
+  readonly contextWindow: ContextWindowUsage | null;
   readonly environmentId: EnvironmentId;
   readonly maxHeight: number;
   readonly onClose: () => void;
 }) {
   const gt = useGT();
-  const now = Date.parse(report.createdAt);
+  const accounts = report?.accounts ?? [];
+  const now = report ? Date.parse(report.createdAt) : 0;
   const close = (
     <Pressable
       accessibilityLabel={gt("Dismiss usage limits")}
@@ -34,7 +39,8 @@ export function ComposerUsageLimits({
   return (
     <View className="overflow-hidden rounded-[20px] border-continuous bg-card">
       <ScrollView bounces={false} showsVerticalScrollIndicator={false} style={{ maxHeight }}>
-        {report.accounts.map((account, index) => {
+        {contextWindow ? <ContextWindowSection usage={contextWindow} trailing={close} /> : null}
+        {accounts.map((account, index) => {
           const resetCreditInput =
             account.resetCreditInput ??
             (account.instanceId ? { instanceId: account.instanceId } : undefined);
@@ -43,7 +49,7 @@ export function ComposerUsageLimits({
             <AccountLimits
               key={account.id}
               dense
-              first={index === 0}
+              first={index === 0 && !contextWindow}
               driver={account.driver}
               accentColor={account.accentColor}
               label={driverLabel}
@@ -58,7 +64,7 @@ export function ComposerUsageLimits({
               detail={account.plan}
               limits={account.limits}
               now={now}
-              trailing={index === 0 ? close : undefined}
+              trailing={index === 0 && !contextWindow ? close : undefined}
               footer={
                 resetCreditInput && account.limits.resetCredits ? (
                   <ResetCredits
@@ -73,7 +79,7 @@ export function ComposerUsageLimits({
             />
           );
         })}
-        {report.accounts.length === 0 ? (
+        {accounts.length === 0 && !contextWindow ? (
           <View className="flex-row items-center gap-3 px-4 pt-3">
             <Text className="min-w-0 flex-1 text-base text-foreground">
               <T>Usage limits</T>
@@ -81,11 +87,11 @@ export function ComposerUsageLimits({
             {close}
           </View>
         ) : null}
-        {report.notices.map((notice) => (
+        {report?.notices.map((notice) => (
           <Text
             key={notice}
             className={
-              report.accounts.length === 0
+              accounts.length === 0 && !contextWindow
                 ? "px-4 py-3 text-xs text-foreground-muted"
                 : "border-t border-border-subtle px-4 py-3 text-xs text-foreground-muted"
             }

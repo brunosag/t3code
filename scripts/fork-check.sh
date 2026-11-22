@@ -58,6 +58,7 @@ vp test run \
   apps/web/src/components/usage/usagePagePreferences.test.ts \
   apps/web/src/components/usage/usageProviders.test.ts \
   packages/client-runtime/src/usageLimitControls.test.ts \
+  packages/client-runtime/src/state/contextWindow.test.ts \
   packages/contracts/src/settings.test.ts \
   apps/desktop/src/app/DesktopEnvironment.test.ts \
   apps/desktop/src/window/DesktopWindow.test.ts \

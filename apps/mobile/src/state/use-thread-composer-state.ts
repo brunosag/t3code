@@ -5,7 +5,11 @@ import * as Dialog from "../components/ui/Dialog";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { readEnvironmentScope } from "./session";
 import { useAtomValue } from "@effect/atom-react";
-import { compactBeforeSendTokens } from "@t3tools/client-runtime/state/context-window";
+import {
+  compactBeforeSendTokens,
+  threadContextWindowSnapshot,
+  type ContextWindowUsage,
+} from "@t3tools/client-runtime/state/context-window";
 import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/shell";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
 import { threadSteersDuringCompaction } from "@t3tools/client-runtime/state/thread-workflows";
@@ -480,6 +484,23 @@ export function useThreadComposerState(input: {
           now,
         })
       : null;
+  const contextSnapshot =
+    selectedThreadProjection === null
+      ? null
+      : threadContextWindowSnapshot(
+          selectedThreadProjection.projection,
+          selectedThreadVisibleTurnItems,
+        );
+  // Rebuilt from primitives so a streamed delta doesn't hand the composer a new object.
+  const contextWindow: ContextWindowUsage | null =
+    contextSnapshot === null
+      ? null
+      : {
+          usedTokens: contextSnapshot.usedTokens,
+          maxTokens: contextSnapshot.maxTokens,
+          usedPercentage: contextSnapshot.usedPercentage,
+          autoCompactThreshold: contextSnapshot.autoCompactThreshold,
+        };
   const nowMinuteMs = useNowMinuteMs();
   const compactTokens =
     selectedDraft.freshContext === true
@@ -1061,6 +1082,7 @@ export function useThreadComposerState(input: {
     ),
     providerSubagentStatus,
     isCompacting,
+    contextWindow,
     compactBeforeSend:
       compactTokens === null || selectedThreadKey === null
         ? null
