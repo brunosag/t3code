@@ -59,6 +59,7 @@ const AuthFile = Schema.Struct({
   provider: Schema.String,
   email: Schema.optional(Schema.String),
   disabled: Schema.optional(Schema.Boolean),
+  status_message: Schema.optional(Schema.String),
   // Unknown so an odd hand-edited value cannot break the Limits view.
   priority: Schema.optional(Schema.Unknown),
   project_id: Schema.optional(Schema.String),
@@ -393,12 +394,15 @@ const claudeTier = Effect.fnUntraced(function* (
 const HOUR_MS = 60 * 60 * 1000;
 const CLAUDE_REFRESH_MS = HOUR_MS;
 type AccountCache = {
-  attemptedAt?: number;
-  planAttemptedAt?: number;
-  observedAfter?: number;
-  usage?: typeof ClaudeUsage.Type;
-  usageAt?: number;
+  attemptedAt?: number | undefined;
+  planAttemptedAt?: number | undefined;
+  observedAfter?: number | undefined;
+  usage?: typeof ClaudeUsage.Type | undefined;
+  usageAt?: number | undefined;
+  authError?: UsageLimitSourceError | undefined;
+  authErrorStatus?: string | undefined;
 };
+const AUTH_FAILURE_DETAIL = /\(HTTP (?:401|403)\)\.$/;
 const QuotaObservations = Schema.Record(
   Schema.String,
   Schema.Struct({
@@ -417,6 +421,16 @@ const decodeCooldowns = Schema.decodeUnknownOption(
     }),
   ),
 );
+
+const latestHeaderAt = (account: AuthFile, now: number, after = -Infinity) => {
+  const observations = Option.getOrUndefined(decodeObservations(account.model_quotas));
+  let latest = -Infinity;
+  for (const observation of Object.values(observations ?? {})) {
+    const at = Date.parse(observation.observed_at);
+    if (Number.isFinite(at) && at <= now && at > after && at > latest) latest = at;
+  }
+  return latest;
+};
 
 // Signals are sparse: a newer non-Fable response must not erase the last Fable observation.
 const claudeHeaderWindow = (account: AuthFile, window: string, now: number, after = -Infinity) => {
@@ -443,11 +457,11 @@ const claudeHeaderWindow = (account: AuthFile, window: string, now: number, afte
     !Number.isFinite(utilization) ||
     utilization < 0 ||
     !Number.isFinite(reset) ||
-    reset <= now ||
     reset <= used.at ||
     reset <= resetSignal.at
   )
     return undefined;
+  if (reset <= now) return { expired: true as const };
   const latest = { at: used.at, reset, utilization, status: signals.get(`${prefix}status`)?.value };
   const cooldowns = Option.getOrUndefined(decodeCooldowns(account.cooldowns)) ?? [];
   const blocked =
@@ -461,6 +475,7 @@ const claudeHeaderWindow = (account: AuthFile, window: string, now: number, afte
         Math.abs(Date.parse(cooldown.retry_at) - latest.reset) < 60_000,
     );
   return {
+    expired: false as const,
     at: latest.at,
     utilization: blocked ? 100 : Math.min(100, latest.utilization * 100),
     resets_at: DateTime.formatIso(DateTime.makeUnsafe(latest.reset)),
@@ -477,26 +492,53 @@ const CLAUDE_HUB: HubProvider = {
   }),
   read: Effect.fnUntraced(function* ({ account, call, checkedAt, plans, cache }) {
     const now = DateTime.toEpochMillis(yield* DateTime.now);
-    const five = claudeHeaderWindow(account, "5h", now, cache.observedAfter);
-    const seven = claudeHeaderWindow(account, "7d", now, cache.observedAfter);
-    const scoped = claudeHeaderWindow(account, "7d_oi", now, cache.observedAfter);
-    if (cache.attemptedAt === undefined || now - cache.attemptedAt >= CLAUDE_REFRESH_MS) {
+    const fiveSignal = claudeHeaderWindow(account, "5h", now, cache.observedAfter);
+    const sevenSignal = claudeHeaderWindow(account, "7d", now, cache.observedAfter);
+    const scopedSignal = claudeHeaderWindow(account, "7d_oi", now, cache.observedAfter);
+    const five = fiveSignal && !fiveSignal.expired ? fiveSignal : undefined;
+    const seven = sevenSignal && !sevenSignal.expired ? sevenSignal : undefined;
+    const scoped = scopedSignal && !scopedSignal.expired ? scopedSignal : undefined;
+    const authRecovered =
+      cache.authError !== undefined &&
+      (account.status_message !== cache.authErrorStatus ||
+        latestHeaderAt(account, now, cache.observedAfter) > (cache.attemptedAt ?? -Infinity));
+    if (
+      cache.attemptedAt === undefined ||
+      now - cache.attemptedAt >= CLAUDE_REFRESH_MS ||
+      authRecovered
+    ) {
       // Cache failures too: repeated refreshes must not hammer a rate-limited login.
       cache.attemptedAt = now;
       const fresh = yield* call(CLAUDE_USAGE_URL).pipe(
         Effect.flatMap(decodeClaudeUsage),
-        Effect.option,
+        Effect.result,
       );
-      if (Option.isSome(fresh)) {
-        cache.usage = fresh.value;
+      if (fresh._tag === "Success") {
+        cache.authError = undefined;
+        cache.authErrorStatus = undefined;
+        cache.usage = fresh.success;
         cache.usageAt = now;
+      } else if (
+        isUsageLimitSourceError(fresh.failure) &&
+        AUTH_FAILURE_DETAIL.test(fresh.failure.detail)
+      ) {
+        // An expired or revoked login cannot serve requests or redeem credits, even if old headers remain.
+        cache.authError = fresh.failure;
+        cache.authErrorStatus = account.status_message;
+        cache.usage = undefined;
+        cache.usageAt = undefined;
       }
-      yield* claudeTier(plans, account, call).pipe(Effect.ignore);
+      if (!cache.authError) {
+        yield* claudeTier(plans, account, call).pipe(Effect.ignore);
+      }
+    }
+    if (cache.authError) {
+      return yield* cache.authError;
     }
     const usage = cache.usage ?? {};
     const endpointCurrent = cache.usageAt !== undefined && now - cache.usageAt < CLAUDE_REFRESH_MS;
     const currentWindow = (
-      header: ReturnType<typeof claudeHeaderWindow>,
+      header: typeof five,
       endpoint: typeof ClaudeWindow.Type | null | undefined,
     ) => {
       if (header) return header;
@@ -506,7 +548,7 @@ const CLAUDE_HUB: HubProvider = {
         (!endpoint.resets_at || Date.parse(endpoint.resets_at) > now)
       )
         return endpoint;
-      return header ?? null;
+      return null;
     };
     if (!five && !seven && !scoped && !endpointCurrent) {
       return yield* new UsageLimitSourceError({ detail: "No current Claude quota observation." });
@@ -541,8 +583,12 @@ const CLAUDE_HUB: HubProvider = {
         { display_name: name, utilization: scoped.utilization, resets_at: scoped.resets_at },
       ];
     }
+    // A 5-hour header whose reset has passed while the week is still current means the session refilled.
+    const fiveHour =
+      currentWindow(five, usage.five_hour) ??
+      (fiveSignal?.expired && (seven || scoped) ? { utilization: 0, resets_at: null } : null);
     const rateLimits = {
-      five_hour: currentWindow(five, usage.five_hour),
+      five_hour: fiveHour,
       seven_day: currentWindow(seven, usage.seven_day),
       model_scoped,
       spend: usage.spend,

@@ -1351,6 +1351,7 @@ describe("pooled account columns", () => {
   // regression: #20349 sessions stay visible while the weekly quota is exhausted
   it.each([
     ["claudeAgent", "13:00", 40, "14:00", 100],
+    ["claudeAgent", undefined, 0, "14:00", 100],
     ["codex", "14:00", 100, "14:00", 100],
     ["claudeAgent", "15:00", 100, "15:00", 100],
     ["codex", "15:00", 40, "14:00", 60],
@@ -1364,7 +1365,7 @@ describe("pooled account columns", () => {
             ...window,
             id: driver === "codex" ? "primary" : window.id,
             usedPercent,
-            resetsAt: at(sessionReset),
+            resetsAt: sessionReset === undefined ? undefined : at(sessionReset),
           },
           {
             ...weekly,
@@ -2224,6 +2225,17 @@ describe("external usage settings", () => {
     expect(collectLimitNotices(new Map([[EnvironmentId.make("a"), desktop]]))).toEqual([
       "hub · tg@example.com: The provider refused the hub request (HTTP 429).",
     ]);
+    // A switched-off hub login does not raise a notice when its read fails.
+    expect(
+      collectLimitNotices(
+        new Map([
+          [
+            EnvironmentId.make("a"),
+            { ...desktop, serverConfig: hub([{ ...failed, disabled: true }]) },
+          ],
+        ]),
+      ),
+    ).toEqual([]);
     expect(
       collectLimitNotices(
         new Map([

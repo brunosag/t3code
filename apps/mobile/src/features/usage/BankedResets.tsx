@@ -9,6 +9,7 @@ import { useState } from "react";
 import { Pressable } from "react-native";
 
 import * as Dialog from "../../components/ui/Dialog";
+import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { cn } from "../../lib/cn";
 import { serverEnvironment } from "../../state/server";
@@ -82,9 +83,10 @@ export function BankedResetButton({
       disabled={busy}
       onPress={open}
       hitSlop={8}
-      className="flex-row items-center gap-1.5 rounded-full bg-subtle px-2 py-0.5 active:opacity-60"
+      className="flex-row items-center gap-1 rounded-full border border-border bg-subtle-strong px-2 py-0.5 active:opacity-60"
     >
       {chip ? <AccountChip email={chip.email} image={chip.image} /> : null}
+      <SymbolView name="arrow.clockwise" size={11} tintColorClassName="accent-foreground-muted" />
       <Text className="text-xs font-t3-medium tabular-nums text-foreground">
         {busy ? "…" : reset.availableCount}
       </Text>

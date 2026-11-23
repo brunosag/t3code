@@ -108,7 +108,7 @@ it.effect("keeps malformed source URLs encodable for config subscribers", () =>
 
 it.effect("keeps a login's last good reading through failed reads for an hour", () =>
   Effect.gen(function* () {
-    let refused = false;
+    let status = 200;
     const sources = yield* UsageLimitSources.make.pipe(
       Effect.provide(
         Layer.succeed(
@@ -124,7 +124,7 @@ it.effect("keeps a login's last good reading through failed reads for an hour", 
                       ],
                     })
                   : Response.json({
-                      status_code: refused ? 429 : 200,
+                      status_code: status,
                       body: JSON.stringify({
                         plan_type: "pro",
                         rate_limit: {
@@ -143,7 +143,7 @@ it.effect("keeps a login's last good reading through failed reads for an hour", 
     const reading = good?.accounts[0]?.usageLimits;
     expect(reading?.windows.map((window) => window.usedPercent)).toEqual([40]);
 
-    refused = true;
+    status = 429;
     yield* TestClock.adjust("30 minutes");
     yield* sources.refresh;
     const [carried] = yield* sources.current;
@@ -152,7 +152,19 @@ it.effect("keeps a login's last good reading through failed reads for an hour", 
       usageLimits: reading,
     });
 
-    yield* TestClock.adjust("31 minutes");
+    // Auth failures surface immediately instead of carrying a stale good reading.
+    status = 401;
+    yield* sources.refresh;
+    const [unauthenticated] = yield* sources.current;
+    expect(unauthenticated?.accounts[0]?.usageLimits.unavailable).toEqual({
+      reason: "probeFailed",
+      message: "The provider refused the hub request (HTTP 401).",
+    });
+
+    status = 200;
+    yield* sources.refresh;
+    status = 429;
+    yield* TestClock.adjust("61 minutes");
     yield* sources.refresh;
     const [expired] = yield* sources.current;
     expect(expired?.accounts[0]?.usageLimits.unavailable?.reason).toBe("probeFailed");

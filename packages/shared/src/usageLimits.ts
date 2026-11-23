@@ -629,6 +629,7 @@ export function unshownFailedHubAccounts(
   for (const [environmentId, presentation] of presentations) {
     for (const source of presentation.serverConfig?.usageLimitSources ?? []) {
       for (const account of source.accounts) {
+        if (account.disabled) continue;
         if (account.usageLimits.unavailable?.reason !== "probeFailed") continue;
         if (shownRows.has(hubRowKey(resolveKey, environmentId, source, account))) continue;
         failed.set(account, account.email ?? hubAccountName(account));
@@ -831,24 +832,26 @@ function poolMember(
   const weeklyReset = resetMillis(spentWeekly);
   const sessionReset = resetMillis(reported);
   const cutoff = Math.max(now, Date.parse(account.limits.checkedAt));
+  const idleSession = reported.resetsAt === undefined && reported.usedPercent === 0;
   let resetsAt: string | undefined;
   let refillPercent = 0;
-  // A stale or missing clock cannot tell us when blocked quota becomes usable.
-  if (
-    weeklyReset !== null &&
-    sessionReset !== null &&
-    weeklyReset > cutoff &&
-    sessionReset > cutoff
-  ) {
-    if (sessionReset <= weeklyReset) {
+  // A stale or missing clock cannot tell us when blocked quota becomes usable,
+  // except an unused session that has not started a clock yet.
+  if (weeklyReset !== null && weeklyReset > cutoff) {
+    if (idleSession) {
       resetsAt = spentWeekly.resetsAt;
       refillPercent = 100;
-    } else if (reported.usedPercent >= 100) {
-      resetsAt = reported.resetsAt;
-      refillPercent = 100;
-    } else {
-      resetsAt = spentWeekly.resetsAt;
-      refillPercent = 100 - Math.max(0, Math.min(100, reported.usedPercent));
+    } else if (sessionReset !== null && sessionReset > cutoff) {
+      if (sessionReset <= weeklyReset) {
+        resetsAt = spentWeekly.resetsAt;
+        refillPercent = 100;
+      } else if (reported.usedPercent >= 100) {
+        resetsAt = reported.resetsAt;
+        refillPercent = 100;
+      } else {
+        resetsAt = spentWeekly.resetsAt;
+        refillPercent = 100 - Math.max(0, Math.min(100, reported.usedPercent));
+      }
     }
   }
   return {

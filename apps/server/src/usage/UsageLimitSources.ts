@@ -225,6 +225,7 @@ export const make = Effect.gen(function* () {
       accounts: accounts.success.map((account) => {
         const kept =
           account.usageLimits.unavailable?.reason === "probeFailed" &&
+          !/\(HTTP (?:401|403)\)\.$/.test(account.usageLimits.unavailable.message ?? "") &&
           // Without a listed login, a reused auth file name cannot be told apart from the old one.
           (account.email !== undefined || account.workspaceId !== undefined)
             ? previous?.find(

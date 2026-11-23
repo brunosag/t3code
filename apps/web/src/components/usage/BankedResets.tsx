@@ -6,6 +6,7 @@ import {
   RESET_EXPIRY_SOON_MS,
 } from "@t3tools/shared/usageLimits";
 import { useMessages } from "gt-react";
+import { RotateCcwIcon } from "lucide-react";
 import { useState } from "react";
 
 import { cn } from "../../lib/utils";
@@ -78,12 +79,13 @@ export function BankedResetButton({
         render={
           <button
             type="button"
-            className="inline-flex h-6 items-center gap-1.5 justify-self-start rounded-md border border-transparent px-1.5 text-xs whitespace-nowrap text-muted-foreground tabular-nums outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-popup-open:border-border data-popup-open:bg-accent"
+            className="inline-flex h-6 cursor-pointer items-center gap-1.5 justify-self-start rounded-md border border-border bg-secondary/60 px-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-popup-open:border-border data-popup-open:bg-accent"
           />
         }
         aria-label={`${accountName}: ${reset.availableCount} ${reset.label.toLowerCase()}${reset.availableCount === 1 ? "" : "s"}${next === undefined ? "" : `, next expires in ${formatExpiresIn(next - now)}`}`}
       >
         {chip ? <AccountChip email={chip.email} image={chip.image} /> : null}
+        <RotateCcwIcon aria-hidden className="size-3 shrink-0" />
         <span className="font-medium text-foreground">{reset.availableCount}</span>
         {next === undefined ? null : (
           <span className={cn(soon(next, now) && "text-warning")}>

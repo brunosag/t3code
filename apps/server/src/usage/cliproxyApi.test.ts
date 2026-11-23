@@ -67,6 +67,7 @@ function fixture(
       provider: string;
       email?: string;
       disabled?: boolean;
+      status_message?: string;
       priority?: unknown;
       project_id?: string;
       model_quotas?: unknown;
@@ -452,13 +453,94 @@ describe("CLIProxyAPI built-in management API", () => {
       expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/"))).toHaveLength(2);
       yield* TestClock.adjust("55 minutes");
       const result = yield* api.readAccounts(config);
-      expect(result[0]?.usageLimits.windows.some((w) => w.id === "five_hour")).toBe(false);
+      const resetSession = result[0]?.usageLimits.windows.find((w) => w.id === "five_hour");
+      expect(resetSession?.usedPercent).toBe(0);
+      expect(resetSession?.resetsAt).toBeUndefined();
       expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/"))).toHaveLength(4);
       yield* TestClock.adjust("24 hours");
       expect((yield* api.readAccounts(config))[0]?.usageLimits.unavailable?.reason).toBe(
         "probeFailed",
       );
     }),
+  );
+
+  it.effect(
+    "fails a Claude hub login on HTTP 401 instead of reusing old headers and recovers on re-auth",
+    () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse("2026-11-17T11:00:00Z"));
+        let status = 200;
+        const account: {
+          id: string;
+          auth_index: string;
+          provider: string;
+          email?: string;
+          status_message?: string;
+          model_quotas?: unknown;
+        } = {
+          ...accounts[0]!,
+          provider: "claude",
+          model_quotas: {
+            haiku: {
+              observed_at: "2026-11-17T10:00:00Z",
+              signals: {
+                "Anthropic-Ratelimit-Unified-7d-Utilization": "0.5",
+                "Anthropic-Ratelimit-Unified-7d-Reset": String(
+                  Date.parse("2026-11-20T11:00:00Z") / 1000,
+                ),
+              },
+            },
+          },
+        };
+        const test = fixture({
+          accounts: [account],
+          upstream: (request) =>
+            status !== 200
+              ? { status, body: { error: { type: "authentication_error" } } }
+              : {
+                  status: 200,
+                  body: request.url?.endsWith("/oauth/profile")
+                    ? { organization: { rate_limit_tier: "default_claude_max_5x" } }
+                    : {
+                        five_hour: { utilization: 10, resets_at: null },
+                        seven_day: { utilization: 50, resets_at: "2026-11-20T11:00:00Z" },
+                        cedar_ember: cedarEmber([{ id: "launch", resets_left: 1 }]),
+                      },
+                },
+        });
+        const api = yield* test.api;
+        const initial = yield* api.readAccounts(config);
+        expect(initial[0]?.usageLimits.resetCredits?.availableCount).toBe(1);
+
+        status = 401;
+        account.status_message = "invalid grant (retrying)";
+        yield* TestClock.adjust("1 hour");
+        const expired = yield* api.readAccounts(config);
+        expect(expired[0]?.usageLimits.unavailable).toEqual({
+          reason: "probeFailed",
+          message: "The provider refused the hub request (HTTP 401).",
+        });
+        expect(expired[0]?.usageLimits.resetCredits).toBeUndefined();
+        const callsAfter401 = test.requests.filter((r) => r.body?.url?.includes("/oauth/")).length;
+
+        // While the hub still reports the same auth error, refreshes stay throttled.
+        yield* TestClock.adjust("5 minutes");
+        expect((yield* api.readAccounts(config))[0]?.usageLimits.unavailable?.reason).toBe(
+          "probeFailed",
+        );
+        expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/"))).toHaveLength(
+          callsAfter401,
+        );
+
+        // Once re-authenticated on the hub, the next refresh probes immediately.
+        status = 200;
+        delete account.status_message;
+        const recovered = yield* api.readAccounts(config);
+        expect(recovered[0]?.usageLimits.unavailable).toBeUndefined();
+        expect(recovered[0]?.usageLimits.windows.find((w) => w.id === "five_hour")).toMatchObject({
+          usedPercent: 10,
+        });
+      }),
   );
 
   it.effect("probes Claude once over twelve five-minute refreshes even without observations", () =>
