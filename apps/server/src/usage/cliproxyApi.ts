@@ -432,6 +432,17 @@ const latestHeaderAt = (account: AuthFile, now: number, after = -Infinity) => {
   return latest;
 };
 
+// The hub's cooldown for the window that ends at `reset` means the login cannot use it until then.
+const claudeQuotaBlocked = (account: AuthFile, window: string, reset: number) =>
+  (Option.getOrUndefined(decodeCooldowns(account.cooldowns)) ?? []).some(
+    (cooldown) =>
+      (cooldown.reason === "credential_quota" || cooldown.reason === "quota") &&
+      (window === "7d_oi"
+        ? cooldown.model_key?.includes("fable")
+        : cooldown.scope === "credential") &&
+      Math.abs(Date.parse(cooldown.retry_at) - reset) < 60_000,
+  );
+
 // Signals are sparse: a newer non-Fable response must not erase the last Fable observation.
 const claudeHeaderWindow = (account: AuthFile, window: string, now: number, after = -Infinity) => {
   const observations = Option.getOrUndefined(decodeObservations(account.model_quotas));
@@ -462,23 +473,14 @@ const claudeHeaderWindow = (account: AuthFile, window: string, now: number, afte
   )
     return undefined;
   if (reset <= now) return { expired: true as const };
-  const latest = { at: used.at, reset, utilization, status: signals.get(`${prefix}status`)?.value };
-  const cooldowns = Option.getOrUndefined(decodeCooldowns(account.cooldowns)) ?? [];
   const blocked =
-    latest.status === "rejected" ||
-    cooldowns.some(
-      (cooldown) =>
-        (cooldown.reason === "credential_quota" || cooldown.reason === "quota") &&
-        (window === "7d_oi"
-          ? cooldown.model_key?.includes("fable")
-          : cooldown.scope === "credential") &&
-        Math.abs(Date.parse(cooldown.retry_at) - latest.reset) < 60_000,
-    );
+    signals.get(`${prefix}status`)?.value === "rejected" ||
+    claudeQuotaBlocked(account, window, reset);
   return {
     expired: false as const,
-    at: latest.at,
-    utilization: blocked ? 100 : Math.min(100, latest.utilization * 100),
-    resets_at: DateTime.formatIso(DateTime.makeUnsafe(latest.reset)),
+    at: used.at,
+    utilization: blocked ? 100 : Math.min(100, utilization * 100),
+    resets_at: DateTime.formatIso(DateTime.makeUnsafe(reset)),
   };
 };
 
@@ -551,7 +553,15 @@ const CLAUDE_HUB: HubProvider = {
     // A reset redeemed outside this server moves a window without new traffic, so the newer reading wins.
     const headerIsNewer = (header: typeof five) =>
       header !== undefined && header.at >= (cache.usageAt ?? -Infinity);
+    const endpointWindow = <W extends { resets_at: string | null; utilization: number | null }>(
+      window: string,
+      endpoint: W,
+    ) =>
+      endpoint.resets_at && claudeQuotaBlocked(account, window, Date.parse(endpoint.resets_at))
+        ? { ...endpoint, utilization: 100 }
+        : endpoint;
     const currentWindow = (
+      window: string,
       header: typeof five,
       endpoint: typeof ClaudeWindow.Type | null | undefined,
     ) => {
@@ -560,7 +570,7 @@ const CLAUDE_HUB: HubProvider = {
         endpoint &&
         (!endpoint.resets_at || Date.parse(endpoint.resets_at) > now);
       if (header && (!endpointLive || headerIsNewer(header))) return header;
-      return endpointLive ? endpoint : null;
+      return endpointLive ? endpointWindow(window, endpoint) : null;
     };
     if (!five && !seven && !scoped && !endpointCurrent) {
       return yield* new UsageLimitSourceError({ detail: "No current Claude quota observation." });
@@ -575,11 +585,14 @@ const CLAUDE_HUB: HubProvider = {
       typeof limit.percent === "number" &&
       (!limit.resets_at || Date.parse(limit.resets_at) > now)
         ? [
-            {
-              display_name: limit.scope.model.display_name,
-              utilization: limit.percent,
-              resets_at: limit.resets_at ?? null,
-            },
+            endpointWindow(
+              limit.scope.model.display_name.toLowerCase().includes("fable") ? "7d_oi" : "7d",
+              {
+                display_name: limit.scope.model.display_name,
+                utilization: limit.percent,
+                resets_at: limit.resets_at ?? null,
+              },
+            ),
           ]
         : [],
     );
@@ -600,11 +613,11 @@ const CLAUDE_HUB: HubProvider = {
     }
     // A 5-hour header whose reset has passed while the week is still current means the session refilled.
     const fiveHour =
-      currentWindow(five, usage.five_hour) ??
+      currentWindow("5h", five, usage.five_hour) ??
       (fiveSignal?.expired && (seven || scoped) ? { utilization: 0, resets_at: null } : null);
     const rateLimits = {
       five_hour: fiveHour,
-      seven_day: currentWindow(seven, usage.seven_day),
+      seven_day: currentWindow("7d", seven, usage.seven_day),
       model_scoped,
       spend: usage.spend,
       extra_usage: usage.extra_usage ?? null,

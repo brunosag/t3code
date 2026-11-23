@@ -567,18 +567,39 @@ describe("CLIProxyAPI built-in management API", () => {
           },
         },
       };
+      const quotaCooldowns = (retry_at: string) => [
+        { scope: "credential", reason: "credential_quota", retry_at },
+        { scope: "model", model_key: "claude-fable-5-2", reason: "quota", retry_at },
+      ];
       const test = fixture({
-        accounts: [{ ...accounts[0]!, provider: "claude", model_quotas: quotas }],
+        accounts: [
+          {
+            ...accounts[0]!,
+            provider: "claude",
+            model_quotas: quotas,
+            // Left over from the window the reset ended.
+            cooldowns: quotaCooldowns("2026-11-18T13:00:01Z"),
+          },
+          // Spent on the weekly cap, which blocks Fable too until the window ends.
+          {
+            ...accounts[1]!,
+            provider: "claude",
+            cooldowns: quotaCooldowns("2026-11-24T16:00:01Z"),
+          },
+        ],
         upstream: (request) => ({
           status: 200,
           body: request.url?.endsWith("/oauth/profile")
             ? { organization: { rate_limit_tier: "default_claude_max_5x" } }
             : {
-                seven_day: { utilization: 4, resets_at: "2026-11-24T16:00:00Z" },
+                seven_day: {
+                  utilization: request.auth_index === "a" ? 4 : 100,
+                  resets_at: "2026-11-24T16:00:00Z",
+                },
                 limits: [
                   {
                     kind: "weekly_scoped",
-                    percent: 0,
+                    percent: request.auth_index === "a" ? 0 : 60,
                     resets_at: "2026-11-24T16:00:00Z",
                     scope: { model: { display_name: "Fable" } },
                   },
@@ -587,11 +608,16 @@ describe("CLIProxyAPI built-in management API", () => {
         }),
       });
       const api = yield* test.api;
-      const windows = (result: ReadonlyArray<UsageLimitSourceAccount>) =>
-        result[0]?.usageLimits.windows.map((w) => [w.id, w.usedPercent]);
-      expect(windows(yield* api.readAccounts(config))).toEqual([
+      const windows = (result: ReadonlyArray<UsageLimitSourceAccount>, index = 0) =>
+        result[index]?.usageLimits.windows.map((w) => [w.id, w.usedPercent]);
+      const first = yield* api.readAccounts(config);
+      expect(windows(first)).toEqual([
         ["seven_day", 4],
         ["seven_day_fable", 0],
+      ]);
+      expect(windows(first, 1)).toEqual([
+        ["seven_day", 100],
+        ["seven_day_fable", 100],
       ]);
       quotas.fable = {
         observed_at: "2026-11-17T11:10:00Z",
