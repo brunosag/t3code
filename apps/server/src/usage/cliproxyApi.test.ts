@@ -469,7 +469,8 @@ describe("CLIProxyAPI built-in management API", () => {
     () =>
       Effect.gen(function* () {
         yield* TestClock.setTime(Date.parse("2026-11-17T11:00:00Z"));
-        let status = 200;
+        let usageStatus = 200;
+        let profileStatus = 200;
         const account: {
           id: string;
           auth_index: string;
@@ -494,25 +495,30 @@ describe("CLIProxyAPI built-in management API", () => {
         };
         const test = fixture({
           accounts: [account],
-          upstream: (request) =>
-            status !== 200
+          upstream: (request) => {
+            const isProfile = request.url?.endsWith("/oauth/profile");
+            const status = isProfile ? profileStatus : usageStatus;
+            return status !== 200
               ? { status, body: { error: { type: "authentication_error" } } }
               : {
                   status: 200,
-                  body: request.url?.endsWith("/oauth/profile")
+                  body: isProfile
                     ? { organization: { rate_limit_tier: "default_claude_max_5x" } }
                     : {
                         five_hour: { utilization: 10, resets_at: null },
                         seven_day: { utilization: 50, resets_at: "2026-11-20T11:00:00Z" },
                         cedar_ember: cedarEmber([{ id: "launch", resets_left: 1 }]),
                       },
-                },
+                };
+          },
         });
         const api = yield* test.api;
         const initial = yield* api.readAccounts(config);
         expect(initial[0]?.usageLimits.resetCredits?.availableCount).toBe(1);
 
-        status = 401;
+        // /oauth/usage may return 429 before auth while /oauth/profile reports the expired token (401).
+        usageStatus = 429;
+        profileStatus = 401;
         account.status_message = "invalid grant (retrying)";
         yield* TestClock.adjust("1 hour");
         const expired = yield* api.readAccounts(config);
@@ -533,7 +539,8 @@ describe("CLIProxyAPI built-in management API", () => {
         );
 
         // Once re-authenticated on the hub, the next refresh probes immediately.
-        status = 200;
+        usageStatus = 200;
+        profileStatus = 200;
         delete account.status_message;
         const recovered = yield* api.readAccounts(config);
         expect(recovered[0]?.usageLimits.unavailable).toBeUndefined();

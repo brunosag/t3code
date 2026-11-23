@@ -529,7 +529,18 @@ const CLAUDE_HUB: HubProvider = {
         cache.usageAt = undefined;
       }
       if (!cache.authError) {
-        yield* claudeTier(plans, account, call).pipe(Effect.ignore);
+        const tier = yield* claudeTier(plans, account, call).pipe(Effect.result);
+        if (
+          tier._tag === "Failure" &&
+          isUsageLimitSourceError(tier.failure) &&
+          AUTH_FAILURE_DETAIL.test(tier.failure.detail)
+        ) {
+          // Anthropic can rate-limit /oauth/usage (429) before checking auth, while /oauth/profile still answers 401.
+          cache.authError = tier.failure;
+          cache.authErrorStatus = account.status_message;
+          cache.usage = undefined;
+          cache.usageAt = undefined;
+        }
       }
     }
     if (cache.authError) {
