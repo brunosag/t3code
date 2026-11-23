@@ -33,6 +33,7 @@ import {
 } from "@t3tools/shared/usageLimitsCopy";
 import { type ReactNode, useState } from "react";
 import { Pressable, View } from "react-native";
+import { useNowMinuteMs } from "../../lib/clock";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -381,7 +382,6 @@ export function UsageLimitsSection({
       windowId: pool.id,
       windowKind: pool.kind,
       environmentIds: environmentParam,
-      now,
     });
   const shownProviders = pools.flatMap((pool) => usageProviderKind(pool.driver) ?? []);
   const menuFor = (pool: LimitPool) => {
@@ -641,13 +641,13 @@ type AccountScreenProps = StaticScreenProps<{
   windowId: string;
   windowKind: LimitPoolWindow["kind"];
   environmentIds: readonly string[] | null;
-  now: number;
 }>;
 
 export function UsageLimitAccountScreen({ route }: AccountScreenProps) {
   const insets = useSafeAreaInsets();
   const presentations = useAtomValue(environmentPresentations.presentationsWithProvidersAtom);
-  const { accountKey, windowId, windowKind, environmentIds, now } = route.params;
+  const { accountKey, windowId, windowKind, environmentIds } = route.params;
+  const now = useNowMinuteMs();
   const selectedIds =
     environmentIds === null ? null : new Set(environmentIds.map((id) => EnvironmentId.make(id)));
   const selected =

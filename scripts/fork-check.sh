@@ -17,6 +17,7 @@ vp test run \
   apps/server/src/provider/ProviderRegistry.test.ts \
   apps/server/src/scheduledTasks/Schedule.test.ts \
   apps/server/src/scheduledTasks/ScheduledTaskService.test.ts \
+  apps/server/src/workflows/Workflows.test.ts \
   apps/server/src/mcp/OrchestratorMcpService.test.ts \
   apps/server/src/background/SleepInhibitor.test.ts \
   apps/server/src/background/SleepInhibitor.integration.test.ts \
