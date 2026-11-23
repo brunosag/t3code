@@ -2,6 +2,7 @@ import {
   ModelSelection,
   OrchestratorMcpCapabilitiesResult,
   OrchestratorMcpFailure,
+  OrchestratorMcpThreadInterruptResult,
   OrchestratorMcpThreadListResult,
   OrchestratorMcpThreadReadResult,
   OrchestratorMcpThreadSendResult,
@@ -16,6 +17,7 @@ import {
   type OrchestratorMcpThreadStatus,
   type OrchestratorMcpThreadTimelineItem,
 } from "@t3tools/contracts";
+import { UsageLimitsSummary } from "../usage/UsageLimitsSummary.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
@@ -191,11 +193,31 @@ const ThreadLaunchResult = Schema.Struct({
   runId: Schema.NullOr(RunId),
 });
 
-const toolFailureDetail = (result: typeof ToolResult.Type) => {
+/**
+ * Each tool words a missing thread its own way. Scripts match this sentence
+ * to look for the thread on another machine, so every command leads with it.
+ */
+const missingThreadDetail = (threadId: unknown, message: string) => {
+  if (typeof threadId !== "string") return message;
+  const lead = `Thread ${threadId} is no longer available.`;
+  if (message.startsWith(lead)) return message;
+  const worded = /^(?:Thread .+? was not found\.|The thread was not found\.)\s*/.exec(message);
+  if (worded === null) return message;
+  const hint = message.slice(worded[0].length);
+  return hint.length === 0 ? lead : `${lead} ${hint}`;
+};
+
+const toolFailureDetail = (
+  result: typeof ToolResult.Type,
+  args: Readonly<Record<string, unknown>>,
+) => {
   const text = result.content?.find((part) => part.text !== undefined)?.text ?? "";
   return Option.match(decodeFailureText(text), {
     onNone: () => text || "The tool call failed.",
-    onSome: (failure) => failure.message,
+    onSome: (failure) =>
+      failure.code === "thread_not_found"
+        ? missingThreadDetail(args.threadId, failure.message)
+        : failure.message,
   });
 };
 
@@ -236,7 +258,7 @@ const makeThreadTools = (session: McpToolSession, origin: string) => {
       );
       const result = yield* decodeToolResult(raw).pipe(Effect.mapError(() => unexpected(tool)));
       if (result.isError === true) {
-        return yield* new ThreadToolFailedError({ tool, detail: toolFailureDetail(result) });
+        return yield* new ThreadToolFailedError({ tool, detail: toolFailureDetail(result, args) });
       }
       return yield* Schema.decodeUnknownEffect(schema)(result.structuredContent).pipe(
         Effect.mapError(() => unexpected(tool)),
@@ -773,22 +795,40 @@ export const titleFromMessage = (message: string) => {
   return `${firstLine.slice(0, end).trimEnd()}…`;
 };
 
-const launchWorkspaceStrategy = (input: {
+const launchWorkspaceStrategy = Effect.fn("cli.thread.launchWorkspaceStrategy")(function* (input: {
   readonly worktree: Option.Option<string>;
+  readonly existingWorktree: Option.Option<string>;
   readonly branch: Option.Option<string>;
-}) =>
-  Option.match(input.worktree, {
-    onNone: () =>
-      Option.isSome(input.branch)
-        ? Effect.fail(new ThreadUsageError({ detail: "--branch needs --worktree <base-ref>." }))
-        : Effect.void,
-    onSome: (baseRef) =>
-      Effect.succeed({
-        type: "worktree" as const,
-        baseRef,
-        ...Option.match(input.branch, { onNone: () => ({}), onSome: (branch) => ({ branch }) }),
-      }),
+}) {
+  const branch = Option.match(input.branch, {
+    onNone: () => ({}),
+    onSome: (name) => ({ branch: name }),
   });
+  if (Option.isSome(input.worktree)) {
+    if (Option.isSome(input.existingWorktree)) {
+      return yield* new ThreadUsageError({
+        detail:
+          "--worktree makes a new worktree and --existing-worktree uses one that exists. Pass one of them.",
+      });
+    }
+    return { type: "worktree" as const, baseRef: input.worktree.value, ...branch };
+  }
+  if (Option.isSome(input.existingWorktree)) {
+    const path = yield* Path.Path;
+    // The server would resolve a relative path against its own directory.
+    const worktreePath = path.resolve(
+      yield* HostProcess.WorkingDirectory,
+      yield* expandHomePath(input.existingWorktree.value),
+    );
+    return { type: "existing_worktree" as const, worktreePath, ...branch };
+  }
+  if (Option.isSome(input.branch)) {
+    return yield* new ThreadUsageError({
+      detail: "--branch needs --worktree <base-ref> or --existing-worktree <path>.",
+    });
+  }
+  return undefined;
+});
 
 /**
  * Options are model specific, so they need an explicit model. `true` and
@@ -952,8 +992,16 @@ const threadStartCommand = Command.make("start", {
     ),
     Flag.optional,
   ),
+  existingWorktree: Flag.String("existing-worktree").pipe(
+    Flag.withDescription(
+      "Run in this git worktree of the project, as another thread left it, uncommitted edits included. Not with --worktree.",
+    ),
+    Flag.optional,
+  ),
   branch: Flag.String("branch").pipe(
-    Flag.withDescription("Branch name for the new worktree."),
+    Flag.withDescription(
+      "Branch name for the new worktree. With --existing-worktree, the branch the thread shows, which should be the one checked out there: nothing is checked out or created.",
+    ),
     Flag.optional,
   ),
   outputSchema: outputSchemaFlag,
@@ -1167,6 +1215,36 @@ const threadModelCommand = Command.make("model", {
   ),
 );
 
+const threadStopCommand = Command.make("stop", {
+  ...projectLocationFlags,
+  thread: threadArgument,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Stop a thread's running turn and the work it delegated. The thread and its messages stay.",
+  ),
+  Command.withHandler((flags) =>
+    Effect.gen(function* () {
+      const threadId = yield* decodeThreadId(flags.thread);
+      yield* withThreadTools(
+        flags,
+        Effect.fn("cli.thread.stop")(function* (tools) {
+          const stopped = yield* tools.call(
+            "t3_thread_interrupt",
+            { threadId, stop: true },
+            OrchestratorMcpThreadInterruptResult,
+          );
+          yield* flags.json
+            ? printJson(stopped)
+            : Console.log(
+                stopped.status === "interrupt_requested" ? "Stopping." : "Nothing was running.",
+              );
+        }),
+      );
+    }).pipe(reportThreadErrors),
+  ),
+);
+
 const threadModelsCommand = Command.make("models", {
   ...projectLocationFlags,
   search: Flag.String("search").pipe(
@@ -1212,6 +1290,61 @@ const threadModelsCommand = Command.make("models", {
   ),
 );
 
+const threadUsageCommand = Command.make("usage", {
+  ...projectLocationFlags,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Print the model quota left on each provider, pooled as the Limits view shows it: what is left, when it comes back, the pace that lasts, and banked resets.",
+  ),
+  Command.withHandler((flags) =>
+    withThreadTools(
+      flags,
+      Effect.fn("cli.thread.usage")(function* (tools) {
+        const usage = yield* tools.call("t3_usage_limits", {}, UsageLimitsSummary);
+        if (flags.json) {
+          return yield* printJson(usage);
+        }
+        for (const provider of usage.providers) {
+          yield* Console.log(provider.name);
+          for (const account of provider.accounts) {
+            const state = [
+              account.off ? "off" : "",
+              account.stale ? "stale" : "",
+              account.notice ?? "",
+            ]
+              .filter(Boolean)
+              .join(", ");
+            yield* Console.log(
+              `  ${[account.name, account.plan ?? ""].filter(Boolean).join("  ")}${state ? `  (${state})` : ""}`,
+            );
+          }
+          for (const limit of provider.limits) {
+            const parts = [`${limit.label}: ${Math.round(limit.remainingPercent * 10) / 10}% left`];
+            for (const reset of limit.resets)
+              parts.push(`+${reset.restoresPercent}% at ${reset.at}`);
+            if (limit.pace !== undefined) parts.push(`pace ${limit.pace}`);
+            if (limit.burnPercentPerDay !== undefined)
+              parts.push(`using ${limit.burnPercentPerDay}%/day`);
+            if (limit.safePercentPerDay !== undefined) {
+              parts.push(`lasts at ${limit.safePercentPerDay}%/day`);
+            }
+            if (limit.runsOutAt !== undefined) parts.push(`runs out ${limit.runsOutAt}`);
+            if (limit.outUntil !== undefined) parts.push(`out until ${limit.outUntil}`);
+            yield* Console.log(`  ${parts.join("  ")}`);
+          }
+          for (const banked of provider.bankedResets) {
+            yield* Console.log(
+              `  ${banked.count} banked ${banked.label} reset${banked.count === 1 ? "" : "s"}${banked.nextExpiresAt === undefined ? "" : `, next expires ${banked.nextExpiresAt}`}`,
+            );
+          }
+        }
+        for (const notice of usage.notices) yield* Console.log(notice);
+      }),
+    ).pipe(reportThreadErrors),
+  ),
+);
+
 export const threadCommand = Command.make("thread").pipe(
   Command.withDescription("Start, message, and read threads on the running server."),
   Command.withSubcommands([
@@ -1221,5 +1354,7 @@ export const threadCommand = Command.make("thread").pipe(
     threadShowCommand,
     threadModelCommand,
     threadModelsCommand,
+    threadStopCommand,
+    threadUsageCommand,
   ]),
 );

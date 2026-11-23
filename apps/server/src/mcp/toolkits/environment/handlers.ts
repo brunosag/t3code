@@ -1,8 +1,12 @@
 import { OrchestratorMcpFailure, type ServerSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Clock from "effect/Clock";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as Settings from "../../../serverSettings.ts";
+import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
+import * as UsageLimitSources from "../../../usage/UsageLimitSources.ts";
+import { summarizeUsageLimits } from "../../../usage/UsageLimitsSummary.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { readCaller, unavailable } from "../../threadAccess.ts";
@@ -52,6 +56,14 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
         platform: descriptor.platform,
         preferences: preferences(current),
       };
+    }),
+  ),
+  t3_usage_limits: McpToolAccess.reads(() =>
+    Effect.gen(function* () {
+      yield* access;
+      const providers = yield* (yield* ProviderRegistry.ProviderRegistry).getProviders;
+      const sources = yield* (yield* UsageLimitSources.UsageLimitSources).current;
+      return summarizeUsageLimits({ providers, sources, now: yield* Clock.currentTimeMillis });
     }),
   ),
   t3_environment_preferences_update: McpToolAccess.writesEnvironment((patch, check) =>

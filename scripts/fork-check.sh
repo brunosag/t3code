@@ -69,6 +69,7 @@ vp test run \
   apps/server/src/process/agentScope.test.ts \
   apps/server/src/cli/config.test.ts \
   apps/server/src/cli/thread.test.ts \
+  apps/server/src/usage/UsageLimitsSummary.test.ts \
   apps/desktop/src/backend/DesktopBackendConfiguration.test.ts \
   apps/server/src/orchestration-v2/IdleCompaction.test.ts \
   apps/server/src/orchestration-v2/runtimeLayer.test.ts \

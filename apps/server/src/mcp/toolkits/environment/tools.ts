@@ -12,6 +12,9 @@ import { Tool, Toolkit } from "effect/ai";
 import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
+import * as UsageLimitSources from "../../../usage/UsageLimitSources.ts";
+import { UsageLimitsSummary } from "../../../usage/UsageLimitsSummary.ts";
 import * as Settings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 
@@ -67,4 +70,23 @@ const EnvironmentPreferencesTool = Tool.make("t3_environment_preferences_update"
   }),
   success: Schema.Struct(PreferenceFields),
 }).annotate(Tool.Destructive, true);
-export const EnvironmentToolkit = Toolkit.make(EnvironmentReadTool, EnvironmentPreferencesTool);
+// fork: the Limits view's figures for `t3 thread usage` and agents that pace their work.
+const UsageLimitsTool = Tool.make("t3_usage_limits", {
+  ...shared,
+  dependencies: [
+    ...shared.dependencies,
+    ProviderRegistry.ProviderRegistry,
+    UsageLimitSources.UsageLimitSources,
+  ],
+  description:
+    "Read the model quota left on this server's providers, as the Limits view pools it: each limit's share left, when it comes back, the burn against a pace that lasts, and banked resets.",
+  parameters: Schema.Struct({ environmentId: OrchestratorMcpEnvironmentTarget }),
+  success: UsageLimitsSummary,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false);
+export const EnvironmentToolkit = Toolkit.make(
+  EnvironmentReadTool,
+  EnvironmentPreferencesTool,
+  UsageLimitsTool,
+);

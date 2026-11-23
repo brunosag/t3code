@@ -1,7 +1,13 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { AuthSessionId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
+import {
+  AuthSessionId,
+  OrchestratorMcpFailure,
+  ProjectId,
+  RunId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NetService from "@t3tools/shared/Net";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -12,6 +18,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as TestClock from "effect/testing/TestClock";
 import * as TestConsole from "effect/testing/TestConsole";
@@ -525,10 +532,16 @@ it.effect("start rejects a repeated --option before reaching the server", () =>
   ),
 );
 
-/** Runs `t3 thread` against a server whose tools answer with `answer`, and lists the calls made. */
+const encodeFailure = Schema.encodeSync(Schema.fromJsonString(OrchestratorMcpFailure));
+const isMcpFailure = Schema.is(OrchestratorMcpFailure);
+
+/**
+ * Runs `t3 thread` against a server whose tools answer with `answer`, and lists the calls made.
+ * An OrchestratorMcpFailure answer is returned the way the server returns a refused call.
+ */
 const runThreadCommand = Effect.fn("test.runThreadCommand")(function* (
   args: ReadonlyArray<string>,
-  answer: (args: Readonly<Record<string, unknown>>) => unknown,
+  answer: (args: Readonly<Record<string, unknown>>, tool: string) => unknown,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -545,7 +558,12 @@ const runThreadCommand = Effect.fn("test.runThreadCommand")(function* (
     Effect.succeed({
       call: (tool, toolArgs) => {
         calls.push({ tool, args: toolArgs });
-        return Effect.succeed({ structuredContent: answer(toolArgs) });
+        const answered = answer(toolArgs, tool);
+        return Effect.succeed(
+          isMcpFailure(answered)
+            ? { isError: true, content: [{ type: "text", text: encodeFailure(answered) }] }
+            : { structuredContent: answered },
+        );
       },
     }),
   );
@@ -679,6 +697,137 @@ it.effect("--output-schema reads a ~/ path from the home directory", () =>
 
     assert.deepStrictEqual(output, { outputSchema: { type: "object" } });
   }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("stop interrupts the thread's turn and says whether one was running", () =>
+  Effect.gen(function* () {
+    const stopped = { threadId, runId, status: "interrupt_requested" };
+    const calls = yield* runThreadCommand(["stop", threadId, "--json"], () => stopped);
+    assert.deepStrictEqual(calls, [
+      { tool: "t3_thread_interrupt", args: { threadId, stop: true } },
+    ]);
+    assert.strictEqual((yield* TestConsole.logLines).at(-1), JSON.stringify(stopped));
+
+    yield* runThreadCommand(["stop", threadId], () => stopped);
+    assert.strictEqual((yield* TestConsole.logLines).at(-1), "Stopping.");
+
+    const idle = { threadId, runId: null, status: "no_active_run" };
+    yield* runThreadCommand(["stop", threadId, "--json"], () => idle);
+    assert.strictEqual((yield* TestConsole.logLines).at(-1), JSON.stringify(idle));
+    yield* runThreadCommand(["stop", threadId], () => idle);
+    assert.strictEqual((yield* TestConsole.logLines).at(-1), "Nothing was running.");
+  }).pipe(Effect.scoped, Effect.provide(commandLayer)),
+);
+
+it.effect("a thread this server lacks reads the same from stop, send and model", () =>
+  Effect.gen(function* () {
+    const linksHint = "Thread ids belong to one environment: for a thread on a linked one, ask.";
+    // The server's own wordings: t3_thread_interrupt and t3_thread_send, then t3_thread_configure.
+    for (const [args, worded] of [
+      [["stop", threadId, "--json"], `Thread ${threadId} was not found. ${linksHint}`],
+      [["send", threadId, "hi"], `Thread ${threadId} was not found. ${linksHint}`],
+      [["model", threadId], `The thread was not found. ${linksHint}`],
+      [["stop", threadId], `Thread ${threadId} was not found.`],
+    ] as const) {
+      const error = yield* runThreadCommand(
+        args,
+        () => new OrchestratorMcpFailure({ code: "thread_not_found", message: worded }),
+      ).pipe(Effect.flip);
+      const expected = worded.endsWith(linksHint)
+        ? `Thread ${threadId} is no longer available. ${linksHint}`
+        : `Thread ${threadId} is no longer available.`;
+      assert.strictEqual(error.message, expected, args.join(" "));
+      assert.strictEqual((yield* TestConsole.errorLines).at(-1), expected, args.join(" "));
+    }
+    assert.deepStrictEqual(yield* TestConsole.logLines, []);
+
+    // A link to a thread here is answered with its id, which is not a thread to look for elsewhere.
+    const link = "`t3://thread/1` is a thread link, not a thread id. Pass `thread-1` instead.";
+    const linked = yield* runThreadCommand(
+      ["stop", "t3://thread/1"],
+      () => new OrchestratorMcpFailure({ code: "thread_not_found", message: link }),
+    ).pipe(Effect.flip);
+    assert.strictEqual(linked.message, link);
+  }).pipe(Effect.scoped, Effect.provide(commandLayer)),
+);
+
+const projectId = ProjectId.make("project-1");
+const answerLaunch = (args: Readonly<Record<string, unknown>>, tool: string) =>
+  tool === "t3_project_list"
+    ? {
+        projects: [{ id: projectId, title: "Sample", workspaceRoot: "/work/app" }],
+        nextCursor: null,
+      }
+    : { threadId, projectId: args.projectId, runId };
+
+it.effect("start --existing-worktree runs the thread in a checkout that exists", () =>
+  Effect.gen(function* () {
+    const launchStrategy = (args: ReadonlyArray<string>) =>
+      runThreadCommand(["start", projectId, "Carry on", ...args], answerLaunch).pipe(
+        Effect.provideService(HostProcess.HomeDirectory, "/home/sample"),
+        Effect.provideService(HostProcess.WorkingDirectory, "/work/app"),
+        Effect.map(
+          (calls) =>
+            (
+              calls.find((call) => call.tool === "t3_thread_launch")?.args as
+                | { readonly workspaceStrategy?: unknown }
+                | undefined
+            )?.workspaceStrategy,
+        ),
+      );
+
+    assert.deepStrictEqual(yield* launchStrategy(["--existing-worktree", "/work/trees/feature"]), {
+      type: "existing_worktree",
+      worktreePath: "/work/trees/feature",
+    });
+    // The server would read a relative path against its own directory.
+    assert.deepStrictEqual(
+      yield* launchStrategy(["--existing-worktree", "../trees/feature", "--branch", "feature"]),
+      { type: "existing_worktree", worktreePath: "/work/trees/feature", branch: "feature" },
+    );
+    assert.deepStrictEqual(yield* launchStrategy(["--existing-worktree", "~/trees/feature"]), {
+      type: "existing_worktree",
+      worktreePath: "/home/sample/trees/feature",
+    });
+    assert.deepStrictEqual(yield* launchStrategy(["--worktree", "origin/main"]), {
+      type: "worktree",
+      baseRef: "origin/main",
+    });
+    assert.isUndefined(yield* launchStrategy([]));
+  }).pipe(Effect.scoped, Effect.provide(commandLayer)),
+);
+
+it.effect("start refuses --existing-worktree with --worktree, and a path the project lacks", () =>
+  Effect.gen(function* () {
+    const start = (
+      args: ReadonlyArray<string>,
+      answer: (args: Readonly<Record<string, unknown>>, tool: string) => unknown = answerLaunch,
+    ) =>
+      runThreadCommand(["start", projectId, "Carry on", ...args], answer).pipe(
+        Effect.provideService(HostProcess.WorkingDirectory, "/work/app"),
+        Effect.flip,
+      );
+
+    const both = yield* start(["--existing-worktree", "/work/trees/a", "--worktree", "main"]);
+    assert.strictEqual(both._tag, "ThreadUsageError");
+    assert.include(both.message, "Pass one of them.");
+    const branchOnly = yield* start(["--branch", "feature"]);
+    assert.strictEqual(
+      branchOnly.message,
+      "--branch needs --worktree <base-ref> or --existing-worktree <path>.",
+    );
+
+    const refusal =
+      "worktreePath must be one of the project's git worktrees. t3_worktree_list shows them.";
+    const stray = yield* start(["--existing-worktree", "/tmp/elsewhere"], (args, tool) =>
+      tool === "t3_thread_launch"
+        ? new OrchestratorMcpFailure({ code: "invalid_request", message: refusal })
+        : answerLaunch(args, tool),
+    );
+    assert.strictEqual(stray.message, refusal);
+    assert.strictEqual((yield* TestConsole.errorLines).at(-1), refusal);
+    assert.deepStrictEqual(yield* TestConsole.logLines, []);
+  }).pipe(Effect.scoped, Effect.provide(commandLayer)),
 );
 
 /** Serves t3_thread_read pages the way the server does: positions count every item, and a cursorless read is the newest page. */
