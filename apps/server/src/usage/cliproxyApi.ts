@@ -548,18 +548,19 @@ const CLAUDE_HUB: HubProvider = {
     }
     const usage = cache.usage ?? {};
     const endpointCurrent = cache.usageAt !== undefined && now - cache.usageAt < CLAUDE_REFRESH_MS;
+    // A reset redeemed outside this server moves a window without new traffic, so the newer reading wins.
+    const headerIsNewer = (header: typeof five) =>
+      header !== undefined && header.at >= (cache.usageAt ?? -Infinity);
     const currentWindow = (
       header: typeof five,
       endpoint: typeof ClaudeWindow.Type | null | undefined,
     ) => {
-      if (header) return header;
-      if (
+      const endpointLive =
         endpointCurrent &&
         endpoint &&
-        (!endpoint.resets_at || Date.parse(endpoint.resets_at) > now)
-      )
-        return endpoint;
-      return null;
+        (!endpoint.resets_at || Date.parse(endpoint.resets_at) > now);
+      if (header && (!endpointLive || headerIsNewer(header))) return header;
+      return endpointLive ? endpoint : null;
     };
     if (!five && !seven && !scoped && !endpointCurrent) {
       return yield* new UsageLimitSourceError({ detail: "No current Claude quota observation." });
@@ -582,7 +583,10 @@ const CLAUDE_HUB: HubProvider = {
           ]
         : [],
     );
-    if (scoped) {
+    const endpointFable = model_scoped.some((limit) =>
+      limit.display_name.toLowerCase().includes("fable"),
+    );
+    if (scoped && (!endpointFable || headerIsNewer(scoped))) {
       const name =
         (usage.limits ?? []).find(
           (limit) =>

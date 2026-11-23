@@ -550,6 +550,64 @@ describe("CLIProxyAPI built-in management API", () => {
       }),
   );
 
+  it.effect("prefers whichever of the Claude headers and usage endpoint was read last", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-11-17T11:00:00Z"));
+      const signals = (window: string, utilization: string, reset: string) => ({
+        [`Anthropic-Ratelimit-Unified-${window}-Utilization`]: utilization,
+        [`Anthropic-Ratelimit-Unified-${window}-Reset`]: String(Date.parse(reset) / 1000),
+      });
+      // Observed before a reset redeemed elsewhere; the old windows have not ended yet.
+      const quotas: Record<string, { observed_at: string; signals: Record<string, string> }> = {
+        fable: {
+          observed_at: "2026-11-17T09:00:00Z",
+          signals: {
+            ...signals("7d", "0.53", "2026-11-18T13:00:00Z"),
+            ...signals("7d_oi", "0.98", "2026-11-18T13:00:00Z"),
+          },
+        },
+      };
+      const test = fixture({
+        accounts: [{ ...accounts[0]!, provider: "claude", model_quotas: quotas }],
+        upstream: (request) => ({
+          status: 200,
+          body: request.url?.endsWith("/oauth/profile")
+            ? { organization: { rate_limit_tier: "default_claude_max_5x" } }
+            : {
+                seven_day: { utilization: 4, resets_at: "2026-11-24T16:00:00Z" },
+                limits: [
+                  {
+                    kind: "weekly_scoped",
+                    percent: 0,
+                    resets_at: "2026-11-24T16:00:00Z",
+                    scope: { model: { display_name: "Fable" } },
+                  },
+                ],
+              },
+        }),
+      });
+      const api = yield* test.api;
+      const windows = (result: ReadonlyArray<UsageLimitSourceAccount>) =>
+        result[0]?.usageLimits.windows.map((w) => [w.id, w.usedPercent]);
+      expect(windows(yield* api.readAccounts(config))).toEqual([
+        ["seven_day", 4],
+        ["seven_day_fable", 0],
+      ]);
+      quotas.fable = {
+        observed_at: "2026-11-17T11:10:00Z",
+        signals: {
+          ...signals("7d", "0.05", "2026-11-24T16:00:00Z"),
+          ...signals("7d_oi", "0.01", "2026-11-24T16:00:00Z"),
+        },
+      };
+      yield* TestClock.adjust("15 minutes");
+      expect(windows(yield* api.readAccounts(config))).toEqual([
+        ["seven_day", 5],
+        ["seven_day_fable", 1],
+      ]);
+    }),
+  );
+
   it.effect("probes Claude once over twelve five-minute refreshes even without observations", () =>
     Effect.gen(function* () {
       const test = fixture({
