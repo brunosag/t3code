@@ -18,7 +18,6 @@ import {
 import { type ReactNode, useRef, useState } from "react";
 import type {
   EnvironmentId,
-  ModelSelection,
   OrchestrationV2ThreadLaunchWorkspaceStrategy,
   ProjectId,
   ScheduledTask,
@@ -108,7 +107,6 @@ import {
   scheduleFromDraft,
   scheduleLabel,
   scheduledTaskDefaultModel,
-  scheduledTaskModelSelection,
   weekdayShortLabel,
   taskToDraft,
   unbindDraftFromThread,
@@ -203,10 +201,9 @@ const EMPTY_DRAFT: DraftState = {
   baseRef: "",
   startFromOrigin: true,
   existingWorktreePath: "",
-  modelKey: "",
+  modelSelection: null,
   runtimeMode: "full-access",
   interactionMode: "default",
-  baseModelSelection: null,
   signatureEnabled: false,
   ...WEBHOOK_SIGNATURE_DEFAULTS,
   signatureSecret: "",
@@ -343,15 +340,6 @@ function Field({
       {children}
     </div>
   );
-}
-
-function splitModelKey(value: string): ModelSelection | null {
-  const index = value.indexOf(":");
-  if (index <= 0 || index === value.length - 1) return null;
-  return {
-    instanceId: ProviderInstanceId.make(value.slice(0, index)),
-    model: value.slice(index + 1),
-  };
 }
 
 /** formatRelativeTime handles only the past; upcoming runs need future labels. */
@@ -1566,7 +1554,7 @@ function ScheduledTaskEditorForm({
   );
 
   const firstInstance = instanceEntries[0];
-  const draftSelection = draft.modelKey ? splitModelKey(draft.modelKey) : null;
+  const draftSelection = draft.modelSelection;
   const activeSelection =
     draftSelection &&
     instanceEntries.some((entry) => entry.instanceId === draftSelection.instanceId && entry.enabled)
@@ -1578,7 +1566,6 @@ function ScheduledTaskEditorForm({
   const activeInstanceEntry = instanceEntries.find(
     (entry) => entry.instanceId === activeInstanceId,
   );
-  const modelSelection = scheduledTaskModelSelection(activeSelection, draft.baseModelSelection);
   const boundToThread = draft.threadId !== "" && draft.threadMode !== "new_thread";
   const boundThread = useScheduledTaskThread(
     environmentId,
@@ -1623,7 +1610,7 @@ function ScheduledTaskEditorForm({
       !draft.title.trim() ||
       !draft.prompt.trim() ||
       !projects.some((project) => project.id === selectedProjectId) ||
-      modelSelection === null
+      activeSelection === null
     ) {
       reportFailure(
         gt("Scheduled task is incomplete"),
@@ -1695,7 +1682,7 @@ function ScheduledTaskEditorForm({
       ...(draft.threadId === "" && draft.savedThreadId !== "" ? { unbindThread: true } : {}),
       ...(offersThreadModes ? { threadMode: draft.threadMode } : {}),
       workspaceStrategy,
-      modelSelection,
+      modelSelection: activeSelection,
       // Tasks have no mode picker; a mode above the administrator's ceiling would fail every run.
       runtimeMode:
         clampManagedRuntimeMode(environment?.serverConfig?.managedPolicy, draft.runtimeMode) ??
@@ -1749,8 +1736,7 @@ function ScheduledTaskEditorForm({
                 setDraft((current) => ({
                   ...unbindDraftFromThread(current),
                   projectId: defaultScheduledTaskProjectId(projectsOn(next.environmentId), scope),
-                  modelKey: "",
-                  baseModelSelection: null,
+                  modelSelection: null,
                   baseRef: "",
                   startFromOrigin: true,
                   existingWorktreePath: "",
@@ -1964,29 +1950,30 @@ function ScheduledTaskEditorForm({
                 modelOptionsByInstance={modelOptionsByInstance}
                 isComposerOwned={false}
                 triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                onInstanceModelChange={(instanceId, model) =>
-                  setDraft((current) => ({ ...current, modelKey: `${instanceId}:${model}` }))
-                }
+                onInstanceModelChange={(instanceId, model) => {
+                  if (instanceId === activeSelection?.instanceId && model === activeSelection.model)
+                    return;
+                  setDraft((current) => ({
+                    ...current,
+                    modelSelection: createModelSelection(instanceId, model),
+                  }));
+                }}
               />
-              {!boundToThread && activeInstanceEntry ? (
+              {!boundToThread && activeSelection && activeInstanceEntry ? (
                 <TraitsPicker
                   provider={activeInstanceEntry.driverKind}
                   instanceId={activeInstanceId}
                   models={activeInstanceEntry.models}
                   model={activeModel}
-                  modelOptions={modelSelection?.options ?? []}
+                  modelOptions={activeSelection.options ?? []}
                   allowPromptInjectedEffort={false}
-                  includePlanAgent={selectsPlanAgent(modelSelection?.options)}
+                  includePlanAgent={selectsPlanAgent(activeSelection.options)}
                   disabled={saving || !connected}
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
                   onModelOptionsChange={(options) =>
                     setDraft((current) => ({
                       ...current,
-                      baseModelSelection: createModelSelection(
-                        activeInstanceId,
-                        activeModel,
-                        options,
-                      ),
+                      modelSelection: createModelSelection(activeInstanceId, activeModel, options),
                     }))
                   }
                 />

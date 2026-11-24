@@ -14,6 +14,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
+import { windowsPowerShellPath } from "@t3tools/shared/windowsSystem";
 import { forkParked } from "../serverActivation.ts";
 import * as Settings from "../serverSettings.ts";
 
@@ -27,10 +28,11 @@ const WINDOWS_HOLD_SCRIPT = `$t = Add-Type -Name Power -Namespace T3 -PassThru -
  * Each command writes a line to stdout once it holds its inhibitor, holds it until it exits, and
  * exits on its own if the server dies.
  */
-function inhibitorCommand(
+export function inhibitorCommand(
   platform: NodeJS.Platform,
   serverPid: number,
   isWsl: boolean,
+  env: NodeJS.ProcessEnv,
 ):
   | {
       readonly command: string;
@@ -77,7 +79,7 @@ function inhibitorCommand(
       };
     case "win32":
       return {
-        command: "powershell.exe",
+        command: windowsPowerShellPath(env),
         args: [
           "-NoProfile",
           "-NonInteractive",
@@ -147,7 +149,7 @@ export const layer = Layer.effectDiscard(
       ));
     // Fork: SleepInhibitor holds the Linux lock, lid switch and background work included.
     if (platform === "linux" && !isWsl) return;
-    const command = inhibitorCommand(platform, process.pid, isWsl);
+    const command = inhibitorCommand(platform, process.pid, isWsl, yield* HostProcess.Environment);
     if (command === undefined) return;
     const settings = yield* Settings.ServerSettingsService;
     const events = yield* OrchestrationEventStore.OrchestrationEventStore;

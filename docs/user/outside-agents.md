@@ -78,7 +78,11 @@ policy. Approving without a code starts at **Read only**:
   the available providers and models. It cannot change anything.
 - **Supervised** through **Full access** also let it start, message and stop
   threads in every project. A thread it starts or steers cannot run with more
-  permissions than the mode you chose.
+  permissions than the mode you chose. [Workflow runs](workflows.md) choose
+  their own modes, so only **Full access** (or the highest mode your
+  organization's policy allows) can start, answer, resume or cancel them,
+  change what workflows store, or read webhook paths. Lower modes can still
+  read runs.
 
 ## What outside agents can call
 
@@ -175,13 +179,14 @@ running turn) or `--mode auto` (which steers one if there is one). Pass `-` as
 the message to read it from stdin.
 
 To choose the model, pass `--provider <instance-id> --model <slug>`. Add
-`--option id=value` for each model option, such as `--option effort=high`.
-Option ids and values depend on the model; `true` and `false` set on/off
-options. `t3 thread models` lists the providers, models and options this
-environment has. `t3 thread model <id>` prints what a thread runs on, and with
-the same flags moves it to another model for its next turns: a turn already
-running keeps its model, though some providers apply new options to it at once,
-and a thread can't change provider while one runs.
+`--option id=value` for each model option. For reasoning effort, Codex uses
+`--option reasoningEffort=high`, while Claude uses `--option effort=high`.
+Option ids and allowed values depend on the provider and model; `true` and
+`false` set on/off options. `t3 thread models` lists the providers, models and
+options this environment has. `t3 thread model <id>` prints what a thread runs
+on, and with the same flags moves it to another model for its next turns: a
+turn already running keeps its model, though some providers apply new options
+to it at once, and a thread can't change provider while one runs.
 
 `--wait` prints the agent's reply. It exits 1 when the run fails or stops, and
 2 when the agent waits for an answer you give in the app. Add `--json` for a

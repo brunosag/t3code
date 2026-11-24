@@ -19,7 +19,6 @@ import { resolveSettingsScope, type SettingsScopeSearch } from "./settingsScope"
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import {
   scheduledTaskDefaultModel,
-  scheduledTaskModelSelection,
   defaultScheduledTaskProjectId,
   matchesScheduledTaskScope,
   scheduleFromDraft,
@@ -416,12 +415,6 @@ describe("scheduled task model defaults", () => {
         },
       }),
     ).toEqual(environmentSelection);
-  });
-  it("keeps chosen options only while the picker names the same model", () => {
-    const chosen = { ...environmentSelection, options: [{ id: "reasoning", value: "low" }] };
-    expect(scheduledTaskModelSelection(environmentSelection, chosen)).toEqual(chosen);
-    expect(scheduledTaskModelSelection(projectSelection, chosen)).toEqual(projectSelection);
-    expect(scheduledTaskModelSelection(environmentSelection, null)).toEqual(environmentSelection);
   });
 });
 
