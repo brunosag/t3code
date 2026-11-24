@@ -6,6 +6,7 @@ import * as NodeSqlite from "node:sqlite";
 import type { OrchestrationV2ProviderFailure } from "@t3tools/contracts";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as DateTime from "effect/DateTime";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -26,6 +27,8 @@ const API_ERROR =
   /Error (\d{3}), Message: ((?:(?!, Status: |Error \d{3}, Message: ).)+), Status: ([A-Z_]+|\d{3}[^,\n]*)/s;
 // Antigravity 1.5 with a Google account writes "STATUS (code NNN): message".
 const STATUS_ERROR = /(?<![A-Z_])([A-Z_]+) \(code (\d{3})\): (\P{Cc}+)/u;
+// The CLI renewed its token at most 17 seconds after expiry in observed logs.
+const TOKEN_RENEWAL_WAIT = "30 seconds";
 const QUOTA_EXHAUSTED = /\breason:QUOTA_EXHAUSTED\b/;
 // Claude rejects a saved thinking block without a valid signature. It sits in the native
 // history, so every later prompt to that session fails the same way.
@@ -137,6 +140,7 @@ function turnFailure(
       readonly failure: OrchestrationV2ProviderFailure;
       readonly threadDisposition: "reusable" | "broken";
       readonly resumeWith?: string;
+      readonly resumeAfter?: Duration.Input;
     }
   | undefined {
   const errorText =
@@ -184,13 +188,24 @@ function turnFailure(
   const rateLimited = httpStatus === "429" || status === "RESOURCE_EXHAUSTED";
   // A 404 before the model answered is an unknown or unentitled model; after, a transient edge error.
   const transientNotFound = httpStatus === "404" && step?.reachedModel === true;
+  // The CLI renews its hourly Google token only after it expires, so a model request in that
+  // gap fails with 401. The same session works again once the CLI has renewed it.
+  const expiredToken = httpStatus === "401";
   const failure = makeProviderFailure({
     class: rateLimited ? "usage_limit" : "provider_error",
     message: message!.trim(),
     code: status ?? null,
-    retryable: rateLimited || transientNotFound || Number(httpStatus) >= 500,
+    retryable: rateLimited || transientNotFound || expiredToken || Number(httpStatus) >= 500,
     resetAt: resetAtFrom(text, now) ?? null,
   });
+  if (expiredToken) {
+    return {
+      failure,
+      threadDisposition: "reusable",
+      resumeWith: "continue",
+      resumeAfter: TOKEN_RENEWAL_WAIT,
+    };
+  }
   return transientNotFound
     ? { failure, threadDisposition: "reusable", resumeWith: "continue" }
     : reusable(failure);

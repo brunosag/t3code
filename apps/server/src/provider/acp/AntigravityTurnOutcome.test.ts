@@ -60,6 +60,13 @@ const STATUS_NOT_FOUND_ERROR = Buffer.concat([
     'NOT_FOUND (code 404): Requested entity was not found.\u001a\u0080\u0001HTTP 404 Not Found\n\n{"error":{"code":404,"message":"Requested entity was not found.","status":"NOT_FOUND"}}',
   ),
 ]);
+// Antigravity 1.5 when a model request carries the hourly token just after it expired.
+const UNAUTHENTICATED_ERROR = Buffer.concat([
+  Buffer.from([0x12, 0xec, 0x01]),
+  Buffer.from(
+    "UNAUTHENTICATED (code 401): Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.\u001a\u00a4\u0006HTTP 401 Unauthorized\nSherlog: \nTraceID: 0x",
+  ),
+]);
 // The model's reply quoting the agent's quota notice is an ordinary planner response.
 const QUOTED_NOTICE = Buffer.from(
   "Usage Limit Reached\n\nYou have reached your current quota for this period. Your limit will reset in 1 hour.",
@@ -193,6 +200,26 @@ describe("watchAntigravityPromptOutcome", () => {
           { retired: true },
         ))?.failure.resetAt,
         "2026-11-09T01:05:00.000Z",
+      );
+      // A 401 is the CLI's late token renewal; the session resumes once it has renewed.
+      assert.deepEqual(
+        yield* turn([
+          [USER_INPUT, input],
+          [PLANNER_RESPONSE, reply],
+          [TOOL, reply],
+          [ERROR_MESSAGE, UNAUTHENTICATED_ERROR],
+        ]),
+        {
+          ...reusable({
+            class: "provider_error",
+            message:
+              "Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential. See https://developers.google.com/identity/sign-in/web/devconsole-project.",
+            code: "UNAUTHENTICATED",
+            retryable: true,
+          }),
+          resumeWith: "continue",
+          resumeAfter: "30 seconds",
+        },
       );
       // A 404 after the turn already reached the model is a transient edge error, not a bad model.
       for (const error of [NOT_FOUND_ERROR, STATUS_NOT_FOUND_ERROR]) {

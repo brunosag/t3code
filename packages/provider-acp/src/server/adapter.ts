@@ -419,6 +419,8 @@ interface AcpPromptOutcomeFailure {
   readonly threadDisposition: "reusable" | "broken";
   /** The native session can carry on: the turn resends this prompt once before failing. */
   readonly resumeWith?: string;
+  /** How long to wait before resending, so the agent can recover first. */
+  readonly resumeAfter?: Duration.Input;
 }
 
 export interface AcpAdapterV2Flavor {
@@ -9523,13 +9525,16 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                       sessionId: context.nativeThreadId,
                       failure: hiddenFailure.failure,
                     });
-                    yield* steerWithPrompt({
-                      threadId: context.input.threadId,
-                      runId: context.input.runId,
-                      providerThread: context.input.providerThread,
-                      providerTurnId: context.providerTurnId,
-                      message: { ...context.input.message, text: resumeWith, attachments: [] },
-                    }).pipe(
+                    yield* Effect.sleep(hiddenFailure.resumeAfter ?? Duration.zero).pipe(
+                      Effect.andThen(
+                        steerWithPrompt({
+                          threadId: context.input.threadId,
+                          runId: context.input.runId,
+                          providerThread: context.input.providerThread,
+                          providerTurnId: context.providerTurnId,
+                          message: { ...context.input.message, text: resumeWith, attachments: [] },
+                        }),
+                      ),
                       Effect.catchCause(() =>
                         runRuntimeCallbackAtGeneration(
                           settle.generation,

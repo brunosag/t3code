@@ -1548,6 +1548,7 @@ describe("AcpAdapterV2", () => {
         retryable: true,
       } as const;
       const promptTexts: Array<string> = [];
+      const promptTimes: Array<number> = [];
       // Checks 1, 3 and 4 fail: turn 1 resumes and completes, turn 2 fails after one resume.
       let checks = 0;
       const adapter = yield* makeAcpAdapterV2({
@@ -1567,6 +1568,7 @@ describe("AcpAdapterV2", () => {
                       failure: notFound,
                       threadDisposition: "reusable" as const,
                       resumeWith: "continue",
+                      resumeAfter: Duration.millis(checks === 1 ? 100 : 0),
                     };
               return () => Effect.succeed(outcome);
             }),
@@ -1576,14 +1578,17 @@ describe("AcpAdapterV2", () => {
             wrapRuntime: (runtime) => ({
               ...runtime,
               prompt: (payload) =>
-                Effect.sync(() => {
-                  promptTexts.push(
-                    payload.prompt
-                      .flatMap((block) => (block.type === "text" ? [block.text] : []))
-                      .join("\n"),
-                  );
-                  return { stopReason: "end_turn" as const };
-                }),
+                Clock.currentTimeMillis.pipe(
+                  Effect.map((now) => {
+                    promptTimes.push(now);
+                    promptTexts.push(
+                      payload.prompt
+                        .flatMap((block) => (block.type === "text" ? [block.text] : []))
+                        .join("\n"),
+                    );
+                    return { stopReason: "end_turn" as const };
+                  }),
+                ),
             }),
           }),
         },
@@ -1637,6 +1642,7 @@ describe("AcpAdapterV2", () => {
       const completed = resumed.at(-1);
       assert.equal(completed?.type === "turn.terminal" ? completed.status : null, "completed");
       assert.deepEqual(promptTexts.slice(1), ["continue"]);
+      assert.isAtLeast(promptTimes[1]! - promptTimes[0]!, 100, "the resend waits resumeAfter");
       assert.deepEqual(retryTitles(resumed), ["Provider retry", "Provider recovered"]);
 
       const failedEvents = yield* runTurn(2);
