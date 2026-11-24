@@ -121,6 +121,23 @@ export type DesktopWindowError =
   | PreviewManager.PreviewManagerError;
 
 export type MainWindowZoomDirection = "in" | "out" | "reset";
+
+// Quarter steps keep text-xs (12px) on whole pixels at every step, and text-sm (14px) on
+// whole device pixels at 2x; Chromium's default 1.2^level steps land neither.
+const MAIN_WINDOW_ZOOM_STEP = 0.25;
+const MAIN_WINDOW_ZOOM_MIN = 0.5;
+const MAIN_WINDOW_ZOOM_MAX = 3;
+
+export function nextMainWindowZoomFactor(current: number, direction: MainWindowZoomDirection) {
+  if (direction === "reset") return 1;
+  // Off-grid factors (from older steps) snap to the neighbouring step in the zoom direction.
+  const steps = current / MAIN_WINDOW_ZOOM_STEP;
+  const next =
+    direction === "in"
+      ? (Math.floor(steps + 1e-6) + 1) * MAIN_WINDOW_ZOOM_STEP
+      : (Math.ceil(steps - 1e-6) - 1) * MAIN_WINDOW_ZOOM_STEP;
+  return Math.min(MAIN_WINDOW_ZOOM_MAX, Math.max(MAIN_WINDOW_ZOOM_MIN, next));
+}
 export type MainWindowContentsCommand = "reload" | "forceReload" | "toggleDevTools";
 
 export class DesktopWindow extends Context.Service<
@@ -441,9 +458,7 @@ export const make = Effect.gen(function* () {
     direction: MainWindowZoomDirection,
   ) {
     const webContents = window.webContents;
-    webContents.setZoomLevel(
-      direction === "reset" ? 0 : webContents.getZoomLevel() + (direction === "in" ? 0.5 : -0.5),
-    );
+    webContents.setZoomFactor(nextMainWindowZoomFactor(webContents.getZoomFactor(), direction));
     if (environment.platform === "darwin") syncMacosWindowButtons(window);
     // App zoom propagates to guests; restore each preview's own zoom.
     yield* previewManager.reapplyZoom();

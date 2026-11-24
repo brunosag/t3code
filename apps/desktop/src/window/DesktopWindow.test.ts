@@ -72,7 +72,7 @@ const environmentInput = {
 function makeFakeBrowserWindow() {
   const windowListeners = new Map<string, (...args: readonly unknown[]) => void>();
   const webContentsListeners = new Map<string, (...args: readonly unknown[]) => void>();
-  let zoomLevel = 0;
+  let zoomFactor = 1;
   const webContents = {
     id: 1,
     session: {
@@ -84,10 +84,10 @@ function makeFakeBrowserWindow() {
     focus: vi.fn(),
     isDestroyed: vi.fn(() => false),
     getURL: vi.fn(() => "t3code-dev://app/"),
-    getZoomLevel: vi.fn(() => zoomLevel),
-    getZoomFactor: vi.fn(() => 1.2 ** zoomLevel),
-    setZoomLevel: vi.fn((level: number) => {
-      zoomLevel = level;
+    getZoomLevel: vi.fn(() => Math.log(zoomFactor) / Math.log(1.2)),
+    getZoomFactor: vi.fn(() => zoomFactor),
+    setZoomFactor: vi.fn((factor: number) => {
+      zoomFactor = factor;
     }),
     isLoadingMainFrame: vi.fn(() => false),
     navigationHistory: {
@@ -158,7 +158,7 @@ function makeFakeBrowserWindow() {
     navigationHistory: webContents.navigationHistory,
     setIgnoreMenuShortcuts: webContents.setIgnoreMenuShortcuts,
     send: webContents.send,
-    setZoomLevel: webContents.setZoomLevel,
+    setZoomFactor: webContents.setZoomFactor,
     setWindowButtonPosition: window.setWindowButtonPosition,
     setBackgroundThrottling: webContents.setBackgroundThrottling,
     setAutoHideCursor: window.setAutoHideCursor,
@@ -389,7 +389,7 @@ function layerTest(input: {
           getBrowserPartition: () => Effect.succeed("persist:t3code-preview-test"),
           reapplyZoom: () =>
             Effect.sync(() => {
-              input.previewZoomReapplies?.push(input.window.webContents.getZoomLevel());
+              input.previewZoomReapplies?.push(input.window.webContents.getZoomFactor());
             }),
         }),
       ),
@@ -989,14 +989,22 @@ describe("DesktopWindow", () => {
         yield* desktopWindow.zoomMain("reset");
 
         assert.deepEqual(
-          fakeWindow.setZoomLevel.mock.calls.map(([level]) => level),
-          [-0.5, -1, -0.5, 0],
+          fakeWindow.setZoomFactor.mock.calls.map(([factor]) => factor),
+          [0.75, 0.5, 0.75, 1],
         );
-        assert.deepEqual(previewZoomReapplies, [-0.5, -1, -0.5, 0]);
-        assert.equal(popup.setZoomLevel.mock.calls.length, 0);
+        assert.deepEqual(previewZoomReapplies, [0.75, 0.5, 0.75, 1]);
+        assert.equal(popup.setZoomFactor.mock.calls.length, 0);
       }).pipe(Effect.provide(layer));
     }),
   );
+
+  it("snaps off-grid zoom to quarter steps and stops at 50% and 300%", () => {
+    const old = 1.2 ** 0.5;
+    assert.equal(DesktopWindow.nextMainWindowZoomFactor(old, "in"), 1.25);
+    assert.equal(DesktopWindow.nextMainWindowZoomFactor(old, "out"), 1);
+    assert.equal(DesktopWindow.nextMainWindowZoomFactor(0.5, "out"), 0.5);
+    assert.equal(DesktopWindow.nextMainWindowZoomFactor(3, "in"), 3);
+  });
 
   it.effect("zooms the app from Ctrl+wheel like the menu does", () =>
     Effect.gen(function* () {
@@ -1022,10 +1030,10 @@ describe("DesktopWindow", () => {
         zoomChanged({}, "out");
 
         assert.deepEqual(
-          fakeWindow.setZoomLevel.mock.calls.map(([level]) => level),
-          [0.5, 0, -0.5],
+          fakeWindow.setZoomFactor.mock.calls.map(([factor]) => factor),
+          [1.25, 1, 0.75],
         );
-        assert.deepEqual(previewZoomReapplies, [0.5, 0, -0.5]);
+        assert.deepEqual(previewZoomReapplies, [1.25, 1, 0.75]);
       }).pipe(Effect.provide(layer));
     }),
   );
