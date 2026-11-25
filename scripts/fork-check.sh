@@ -52,6 +52,7 @@ vp test run \
   apps/server/src/speech/speechText.test.ts \
   apps/server/src/speech/SpeechSynthesis.test.ts \
   apps/server/src/speech/readAloudScript.test.ts \
+  apps/server/src/speech/SpeechCache.test.ts \
   scripts/lib/cli-external-packages.test.ts \
   packages/client-runtime/src/modelSearch.test.ts \
   packages/client-runtime/src/state/sharedProviderSettings.test.ts \

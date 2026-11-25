@@ -108,6 +108,8 @@ const DEFAULT_VOICE = modelFile(
 );
 const VOICE_REPOSITORY = "gradium/phonon-voices";
 const VOICE_REVISION = "da6c9ec0d47be8df5c87c730a3aa97187f3229c3";
+/** Changes whenever the same text and voice could sound different. */
+export const SPEECH_ENGINE_REVISION = `${MODEL_REVISION}/${VOICE_REVISION}`;
 // Catalog ids of the voices offered by name, from the catalog's voices.jsonl.
 const CATALOG_VOICE_IDS: Record<Exclude<ReadAloudVoice, "default">, string> = {
   zoey: "NbpkqMVS3CJeq2j8",

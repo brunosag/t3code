@@ -125,3 +125,11 @@ export function encodeWav(samples: Float32Array): Uint8Array {
   }
   return bytes;
 }
+
+/** Seconds of audio in a WAV file from `encodeWav`, or null when it isn't a whole one. */
+export function wavDurationSeconds(bytes: Uint8Array): number | null {
+  if (bytes.byteLength < 44) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const dataBytes = view.getUint32(40, true);
+  return bytes.byteLength === 44 + dataBytes ? dataBytes / 2 / SPEECH_SAMPLE_RATE : null;
+}

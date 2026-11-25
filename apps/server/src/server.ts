@@ -226,6 +226,7 @@ import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PhononEngine from "./speech/PhononEngine.ts";
 import * as ReadAloudScript from "./speech/readAloudScript.ts";
+import * as SpeechCache from "./speech/SpeechCache.ts";
 import * as SpeechSynthesis from "./speech/SpeechSynthesis.ts";
 import * as TriageService from "./triage/TriageService.ts";
 import * as DesktopTelemetryReceiver from "./resourceTelemetry/DesktopTelemetryReceiver.ts";
@@ -761,6 +762,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   SpeechSynthesis.layer.pipe(
     Layer.provide(PhononEngine.layer),
     Layer.provide(ReadAloudScript.layer),
+    Layer.provide(SpeechCache.layer),
   ),
   Layer.effectDiscard(
     Effect.gen(function* () {

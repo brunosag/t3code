@@ -9,12 +9,14 @@ import * as Stream from "effect/Stream";
 
 import * as PhononEngine from "./PhononEngine.ts";
 import * as ReadAloudScript from "./readAloudScript.ts";
+import * as SpeechCache from "./SpeechCache.ts";
 import {
   encodeWav,
   estimateRemainingSeconds,
   prepareSpeechText,
   SPEECH_SAMPLE_RATE,
   splitSpeechText,
+  wavDurationSeconds,
 } from "./speechText.ts";
 
 type SpeechSynthesisFailure =
@@ -28,7 +30,7 @@ export class SpeechSynthesis extends Context.Service<
     /**
      * Speaks `text` on this host, one sentence-sized WAV chunk at a time, or `markdown` as the
      * read aloud model rewrites it when one is set. Syntheses run one after another because a
-     * single one already uses the cores it can; rewrites don't wait for them.
+     * single one already uses the cores it can; rewrites and cached chunks don't wait for them.
      */
     readonly synthesize: (
       input: SpeechSynthesisInput,
@@ -39,6 +41,7 @@ export class SpeechSynthesis extends Context.Service<
 const make = Effect.gen(function* () {
   const engine = yield* PhononEngine.PhononEngine;
   const script = yield* ReadAloudScript.ReadAloudScript;
+  const cache = yield* SpeechCache.SpeechCache;
   const permit = yield* Semaphore.make(1);
 
   const synthesize: SpeechSynthesis["Service"]["synthesize"] = ({ text, markdown, voice }) =>
@@ -54,51 +57,81 @@ const make = Effect.gen(function* () {
                   emit({ type: "progress", stage: "wording", completed: 0, total: null }),
                 )
                 .pipe(Effect.map((written) => written ?? text));
-        return spoken.pipe(
-          Effect.tap(() =>
-            emit({ type: "progress", stage: "starting", completed: 0, total: null }),
-          ),
-          Effect.flatMap((speech) =>
-            permit.withPermit(
-              Effect.scoped(
-                Effect.gen(function* () {
-                  const session = yield* engine.acquire({
-                    voice,
-                    onDownloadProgress: (completed, total) =>
-                      emit({ type: "progress", stage: "downloading-model", completed, total }),
-                  });
-                  const chunks = splitSpeechText(prepareSpeechText(speech));
-                  const generated = { characters: 0, seconds: 0 };
-                  for (const [index, chunk] of chunks.entries()) {
-                    yield* emit({
-                      type: "progress",
-                      stage: "generating",
-                      completed: index,
-                      total: chunks.length,
-                      ...(index > 0
-                        ? {
-                            estimatedDurationSeconds:
-                              generated.seconds +
-                              estimateRemainingSeconds(chunks.slice(index), generated),
-                          }
-                        : {}),
-                    });
-                    const samples = yield* session.speak(chunk);
-                    const seconds = samples.length / SPEECH_SAMPLE_RATE;
-                    generated.characters += chunk.length;
-                    generated.seconds += seconds;
-                    // Text with nothing to pronounce, such as a lone symbol, yields no audio.
-                    if (samples.length === 0) continue;
-                    yield* emit({
-                      type: "chunk",
-                      audio: encodeWav(samples),
-                      durationSeconds: seconds,
-                    });
+        const speak = Effect.fn("SpeechSynthesis.speak")(function* (speech: string) {
+          const chunks = splitSpeechText(prepareSpeechText(speech));
+          const generated = { characters: 0, seconds: 0 };
+          const keyOf = (chunk: string) => [
+            "audio",
+            PhononEngine.SPEECH_ENGINE_REVISION,
+            voice,
+            chunk,
+          ];
+          const progress = (index: number) =>
+            emit({
+              type: "progress",
+              stage: "generating",
+              completed: index,
+              total: chunks.length,
+              ...(index > 0
+                ? {
+                    estimatedDurationSeconds:
+                      generated.seconds + estimateRemainingSeconds(chunks.slice(index), generated),
                   }
-                }),
-              ),
+                : {}),
+            });
+          const deliver = (chunk: string, audio: Uint8Array, seconds: number) => {
+            generated.characters += chunk.length;
+            generated.seconds += seconds;
+            // Text with nothing to pronounce, such as a lone symbol, yields no audio.
+            return seconds === 0
+              ? Effect.void
+              : emit({ type: "chunk", audio, durationSeconds: seconds });
+          };
+          const cached = (chunk: string) =>
+            cache.get(keyOf(chunk)).pipe(
+              Effect.map((audio) => {
+                const seconds = audio && wavDurationSeconds(audio);
+                return audio && seconds !== null ? { audio, seconds } : null;
+              }),
+            );
+          let index = 0;
+          // Chunks heard before play at once, without waiting behind another synthesis.
+          for (; index < chunks.length; index++) {
+            const hit = yield* cached(chunks[index]!);
+            if (hit === null) break;
+            yield* progress(index);
+            yield* deliver(chunks[index]!, hit.audio, hit.seconds);
+          }
+          if (index === chunks.length) return;
+          yield* emit({ type: "progress", stage: "starting", completed: 0, total: null });
+          yield* permit.withPermit(
+            Effect.scoped(
+              Effect.gen(function* () {
+                const session = yield* engine.acquire({
+                  voice,
+                  onDownloadProgress: (completed, total) =>
+                    emit({ type: "progress", stage: "downloading-model", completed, total }),
+                });
+                for (; index < chunks.length; index++) {
+                  const chunk = chunks[index]!;
+                  yield* progress(index);
+                  const hit = yield* cached(chunk);
+                  if (hit !== null) {
+                    yield* deliver(chunk, hit.audio, hit.seconds);
+                    continue;
+                  }
+                  const samples = yield* session.speak(chunk);
+                  const audio = encodeWav(samples);
+                  // Saved before it is sent, so a listener who stops after it keeps it.
+                  yield* cache.set(keyOf(chunk), audio);
+                  yield* deliver(chunk, audio, samples.length / SPEECH_SAMPLE_RATE);
+                }
+              }),
             ),
-          ),
+          );
+        });
+        return spoken.pipe(
+          Effect.flatMap(speak),
           Effect.catch((error) => Queue.fail(queue, error)),
           Effect.andThen(Queue.end(queue)),
           Effect.forkScoped,

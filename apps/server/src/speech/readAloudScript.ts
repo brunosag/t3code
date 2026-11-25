@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import * as SpeechCache from "./SpeechCache.ts";
 
 export class ReadAloudScriptError extends Schema.TaggedError<ReadAloudScriptError>()(
   "ReadAloudScriptError",
@@ -56,7 +57,7 @@ export class ReadAloudScript extends Context.Service<
   {
     /**
      * The reply as the read aloud model rewrites it for speech, or null when no model is set.
-     * `onWriting` runs just before the model is asked.
+     * `onWriting` runs just before the model is asked, which a reply rewritten before skips.
      */
     readonly write: (
       markdown: string,
@@ -69,6 +70,7 @@ const make = Effect.gen(function* () {
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const fileSystem = yield* FileSystem.FileSystem;
   const textGeneration = yield* TextGeneration.TextGeneration;
+  const cache = yield* SpeechCache.SpeechCache;
   return ReadAloudScript.of({
     write: Effect.fn("ReadAloudScript.write")(function* (markdown, onWriting) {
       const settings = yield* settingsService.getSettings.pipe(
@@ -79,6 +81,10 @@ const make = Effect.gen(function* () {
       );
       const modelSelection = settings.readAloudModelSelection;
       if (modelSelection === null || !markdown.trim()) return null;
+      const prompt = buildReadAloudScriptPrompt(markdown);
+      const key = ["read-aloud-script", modelSelection, prompt];
+      const cached = yield* cache.get(key);
+      if (cached !== null) return new TextDecoder().decode(cached);
       yield* onWriting;
       // Providers run in a working directory; rewriting must not read a checkout.
       const cwd = yield* fileSystem
@@ -89,7 +95,6 @@ const make = Effect.gen(function* () {
               new ReadAloudScriptError({ detail: "Couldn't create a working directory.", cause }),
           ),
         );
-      const prompt = buildReadAloudScriptPrompt(markdown);
       let problem = "";
       // The voice-cleanup operation is a plain prompt-to-text call on every provider.
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -99,7 +104,11 @@ const make = Effect.gen(function* () {
             Effect.mapError((cause) => new ReadAloudScriptError({ detail: cause.detail, cause })),
           );
         problem = scriptProblem(transcription);
-        if (!problem) return transcription.trim();
+        if (!problem) {
+          const script = transcription.trim();
+          yield* cache.set(key, new TextEncoder().encode(script));
+          return script;
+        }
       }
       return yield* new ReadAloudScriptError({
         detail: `The read aloud model answered twice with ${problem}.`,

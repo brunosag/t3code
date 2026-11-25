@@ -1,13 +1,16 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import type { SpeechSynthesisEvent } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 
 import * as PhononEngine from "./PhononEngine.ts";
 import * as ReadAloudScript from "./readAloudScript.ts";
+import * as SpeechCache from "./SpeechCache.ts";
 import { SPEECH_SAMPLE_RATE } from "./speechText.ts";
 import * as SpeechSynthesis from "./SpeechSynthesis.ts";
 
@@ -47,7 +50,13 @@ function layerFakes(options: FakeEngineOptions = {}) {
         }),
     }),
   );
-  return Layer.merge(engine, script);
+  const cache = Layer.effect(
+    SpeechCache.SpeechCache,
+    FileSystem.FileSystem.use((fs) => fs.makeTempDirectoryScoped()).pipe(
+      Effect.flatMap((directory) => SpeechCache.makeAt(directory)),
+    ),
+  ).pipe(Layer.provide(NodeServices.layer));
+  return Layer.mergeAll(engine, script, cache);
 }
 
 const synthesize = (text: string, markdown?: string) =>
@@ -206,6 +215,73 @@ describe("SpeechSynthesis", () => {
                   : Effect.void,
             }),
           ),
+        ),
+      ),
+    );
+  });
+
+  it.effect("replays sentences heard before from the cache, without the engine", () => {
+    const log: string[] = [];
+    return Effect.gen(function* () {
+      const first = yield* synthesize("Hi you. Bye!");
+      const again = yield* synthesize("Hi you. Bye!");
+      expect(summarize(again)).toEqual([
+        "generating 0/2",
+        "chunk 600",
+        "generating 1/2",
+        "chunk 400",
+      ]);
+      expect(again.filter((event) => event.type === "chunk")).toEqual(
+        first.filter((event) => event.type === "chunk"),
+      );
+      // A new sentence after cached ones starts the engine for that sentence alone.
+      yield* synthesize("Hi you. See you!");
+      expect(log).toEqual(["acquire", "Hi you.", "Bye!", "acquire", "See you!"]);
+    }).pipe(
+      Effect.provide(
+        SpeechSynthesis.layer.pipe(
+          Layer.provide(
+            layerFakes({
+              onAcquire: Effect.sync(() => log.push("acquire")),
+              onSpeak: (text) => Effect.sync(() => log.push(text)),
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
+  it.effect("keeps the sentences of a stopped synthesis for the next one", () => {
+    const spoken: string[] = [];
+    return Effect.gen(function* () {
+      const speech = yield* SpeechSynthesis.SpeechSynthesis;
+      yield* speech.synthesize({ text: "Hi you. Bye!", voice: "default" }).pipe(
+        Stream.filter((event) => event.type === "chunk"),
+        Stream.take(1),
+        Stream.runDrain,
+      );
+      yield* synthesize("Hi you. Bye!");
+      expect(spoken.filter((text) => text === "Hi you.")).toHaveLength(1);
+    }).pipe(
+      Effect.provide(
+        SpeechSynthesis.layer.pipe(
+          Layer.provide(layerFakes({ onSpeak: (text) => Effect.sync(() => spoken.push(text)) })),
+        ),
+      ),
+    );
+  });
+
+  it.effect("caches each voice apart", () => {
+    const spoken: string[] = [];
+    return Effect.gen(function* () {
+      const speech = yield* SpeechSynthesis.SpeechSynthesis;
+      yield* synthesize("Hi.");
+      yield* speech.synthesize({ text: "Hi.", voice: "zoey" }).pipe(Stream.runDrain);
+      expect(spoken).toEqual(["Hi.", "Hi."]);
+    }).pipe(
+      Effect.provide(
+        SpeechSynthesis.layer.pipe(
+          Layer.provide(layerFakes({ onSpeak: (text) => Effect.sync(() => spoken.push(text)) })),
         ),
       ),
     );

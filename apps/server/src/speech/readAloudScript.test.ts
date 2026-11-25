@@ -2,19 +2,28 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import { ProviderInstanceId, TextGenerationError, type ModelSelection } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as ReadAloudScript from "./readAloudScript.ts";
+import * as SpeechCache from "./SpeechCache.ts";
 
 const sonnet: ModelSelection = {
   instanceId: ProviderInstanceId.make("claudeAgent"),
   model: "claude-sonnet-5-5",
 };
 
-/** Answers with `answers` in turn, logging each prompt and the start of writing. */
-function write(answers: ReadonlyArray<string | TextGenerationError>, model: ModelSelection | null) {
+/**
+ * Writes the reply `times` times with one cache, the model answering with `answers` in turn, and
+ * logs each prompt and the start of writing.
+ */
+function write(
+  answers: ReadonlyArray<string | TextGenerationError>,
+  model: ModelSelection | null,
+  times = 1,
+) {
   const log: string[] = [];
   let asked = 0;
   const layer = ReadAloudScript.layer.pipe(
@@ -30,14 +39,24 @@ function write(answers: ReadonlyArray<string | TextGenerationError>, model: Mode
       } as unknown as TextGeneration.TextGeneration["Service"]),
     ),
     Layer.provide(ServerSettings.layerTest({ readAloudModelSelection: model })),
+    Layer.provide(
+      Layer.effect(
+        SpeechCache.SpeechCache,
+        FileSystem.FileSystem.use((fs) => fs.makeTempDirectoryScoped()).pipe(
+          Effect.flatMap((directory) => SpeechCache.makeAt(directory)),
+        ),
+      ),
+    ),
     Layer.provide(NodeServices.layer),
   );
   return Effect.gen(function* () {
     const script = yield* ReadAloudScript.ReadAloudScript;
-    return yield* script.write(
+    const writeOnce = script.write(
       "# Hi `x`",
       Effect.sync(() => log.push("writing")),
     );
+    for (let time = 1; time < times; time++) yield* writeOnce;
+    return yield* writeOnce;
   }).pipe(
     Effect.provide(layer),
     Effect.result,
@@ -67,6 +86,15 @@ describe("ReadAloudScript", () => {
       });
       expect(yield* write(["  ", "  "], sonnet)).toMatchObject({
         result: expect.stringContaining("an empty script"),
+      });
+    }),
+  );
+
+  it.effect("reuses a reply's script instead of asking again", () =>
+    Effect.gen(function* () {
+      expect(yield* write(["Hi x."], sonnet, 2)).toEqual({
+        result: "Hi x.",
+        log: ["writing", "asked"],
       });
     }),
   );
