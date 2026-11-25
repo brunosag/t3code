@@ -6,13 +6,13 @@ import type { AudioStatus } from "expo-audio";
 
 export interface ExpoPlayer {
   play(): void;
-  pause(): void;
   seekTo(seconds: number): Promise<void>;
   setPlaybackRate(rate: number): void;
   addListener(
     event: "playbackStatusUpdate",
     listener: (status: ExpoPlayerStatus) => void,
   ): { remove(): void };
+  release(): void;
 }
 
 export type ExpoPlayerStatus = Pick<
@@ -24,15 +24,15 @@ export type ExpoPlayerStatus = Pick<
 const END_TOLERANCE_SECONDS = 0.25;
 
 /**
- * Presents an Expo audio player as the media element the read-aloud controller drives.
- * `duration` comes from the chunk's sample count, so it is known before the player loads.
- * `beforePlay` claims the audio session and rejects when playback isn't allowed right now.
+ * Presents a chunk as the media element the read-aloud controller drives; `duration` comes from
+ * its sample count and `beforePlay` claims the audio session. Each loaded player holds one of
+ * Android's limited audio tracks, so one is open only while its chunk plays.
  */
 export function createExpoPlaybackAudio(
-  player: ExpoPlayer,
+  openPlayer: () => ExpoPlayer,
   duration: number,
   beforePlay: () => Promise<void>,
-): PlaybackAudio & { readonly detach: () => void } {
+): PlaybackAudio & { readonly release: () => void } {
   const listeners = new Map<PlaybackAudioEvent, Set<() => void>>();
   const emit = (type: PlaybackAudioEvent) => {
     for (const listener of listeners.get(type) ?? []) listener();
@@ -44,15 +44,25 @@ export function createExpoPlaybackAudio(
   // Expo reports a stopped clock while it prepares and seeks; only a stop after it ran is a pause.
   let running = false;
   let attempt = 0;
+  let native: { readonly player: ExpoPlayer; readonly subscription: { remove(): void } } | null =
+    null;
+
+  const close = () => {
+    if (!native) return;
+    native.subscription.remove();
+    native.player.release();
+    native = null;
+  };
 
   const markPaused = () => {
+    close();
     if (paused) return;
     paused = true;
     running = false;
     emit("pause");
   };
 
-  const subscription = player.addListener("playbackStatusUpdate", (status) => {
+  const onStatus = (status: ExpoPlayerStatus) => {
     if (status.error) {
       markPaused();
       emit("error");
@@ -79,7 +89,17 @@ export function createExpoPlaybackAudio(
       // The system paused it, for example on losing audio focus.
       markPaused();
     }
-  });
+  };
+
+  const open = () => {
+    if (native) return native.player;
+    const player = openPlayer();
+    native = { player, subscription: player.addListener("playbackStatusUpdate", onStatus) };
+    running = false;
+    if (rate !== 1) player.setPlaybackRate(rate);
+    if (time > 0) void player.seekTo(time).catch(() => {});
+    return player;
+  };
 
   return {
     get currentTime() {
@@ -89,14 +109,14 @@ export function createExpoPlaybackAudio(
       time = Math.max(0, Math.min(duration, value));
       if (time < duration) ended = false;
       running = false;
-      void player.seekTo(time).catch(() => {});
+      if (native) void native.player.seekTo(time).catch(() => {});
     },
     get playbackRate() {
       return rate;
     },
     set playbackRate(value: number) {
       rate = value;
-      player.setPlaybackRate(value);
+      native?.player.setPlaybackRate(value);
     },
     get paused() {
       return paused;
@@ -116,12 +136,11 @@ export function createExpoPlaybackAudio(
       }
       // Paused or restarted while the session was being claimed.
       if (current !== attempt || paused) return;
-      player.play();
+      open().play();
       emit("playing");
     },
     pause() {
       attempt++;
-      player.pause();
       markPaused();
     },
     addEventListener(type, listener) {
@@ -132,6 +151,6 @@ export function createExpoPlaybackAudio(
     removeEventListener(type, listener) {
       listeners.get(type)?.delete(listener);
     },
-    detach: () => subscription.remove(),
+    release: close,
   };
 }

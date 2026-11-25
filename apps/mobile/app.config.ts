@@ -396,7 +396,8 @@ const config: ExpoConfig = {
       {
         microphonePermission: "Allow T3 Code to use your microphone for voice input.",
         recordAudioAndroid: true,
-        enableBackgroundPlayback: false,
+        // fork: read aloud keeps playing after leaving the app or locking the phone.
+        enableBackgroundPlayback: true,
         enableBackgroundRecording: false,
       },
     ],

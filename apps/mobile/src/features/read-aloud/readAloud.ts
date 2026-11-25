@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import { AtomRegistry } from "effect/reactivity";
 import { createAudioPlayer } from "expo-audio";
 import { Directory, File, Paths } from "expo-file-system";
+import { Platform } from "react-native";
 
 import { connectionAtomRuntime } from "../../connection/runtime";
 import {
@@ -13,11 +14,12 @@ import {
   activateAudioSession,
   disposeAudioPlayer,
   isAudioSessionOwner,
-  pauseAudioPlayer,
   releaseAudioSession,
 } from "../../lib/audioSession";
 import { uuidv4 } from "../../lib/uuid";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { environmentThreadShells } from "../../state/threads";
+import { keepReadAloudInBackground } from "./backgroundPlayback";
 import { createExpoPlaybackAudio } from "./expoPlaybackAudio";
 
 type AudioSession = ReturnType<typeof acquireAudioSession>;
@@ -40,7 +42,9 @@ async function claimAudioSession(): Promise<void> {
     session = { token, active: null };
   }
   const current = session;
-  current.active ??= activateAudioSession(current.token);
+  current.active ??= activateAudioSession(current.token, {
+    background: Platform.OS === "android",
+  });
   if (!(await current.active)) {
     if (session === current) session = null;
     throw notAllowed("Couldn't start audio playback.");
@@ -77,14 +81,16 @@ export const readAloud = new ReadAloudController({
     const file = new File(cacheDirectory(), `${uuidv4()}.wav`);
     file.create();
     file.writeSync(chunk.audio);
-    const player = createAudioPlayer(file.uri, { updateInterval: 250 });
     const audio = createExpoPlaybackAudio(
-      {
-        play: () => player.play(),
-        pause: () => pauseAudioPlayer(player),
-        seekTo: (seconds) => player.seekTo(seconds),
-        setPlaybackRate: (rate) => player.setPlaybackRate(rate),
-        addListener: (event, listener) => player.addListener(event, listener),
+      () => {
+        const player = createAudioPlayer(file.uri, { updateInterval: 250 });
+        return {
+          play: () => player.play(),
+          seekTo: (seconds) => player.seekTo(seconds),
+          setPlaybackRate: (rate) => player.setPlaybackRate(rate),
+          addListener: (event, listener) => player.addListener(event, listener),
+          release: () => disposeAudioPlayer(player),
+        };
       },
       chunk.duration,
       claimAudioSession,
@@ -92,8 +98,7 @@ export const readAloud = new ReadAloudController({
     return {
       audio,
       dispose: () => {
-        audio.detach();
-        disposeAudioPlayer(player);
+        audio.release();
         try {
           file.delete();
         } catch {}
@@ -107,6 +112,61 @@ readAloud.subscribe(() => {
   const status = readAloud.getSnapshot()?.status;
   if (status !== "playing" && status !== "buffering" && status !== "preparing") releaseSession();
 });
+
+if (Platform.OS === "android") {
+  keepReadAloudInBackground(readAloud, {
+    claim: claimAudioSession,
+    createAnchor: (state) => {
+      const file = new File(cacheDirectory(), "silence.wav");
+      if (!file.exists) {
+        file.create();
+        file.writeSync(silentWav());
+      }
+      const player = createAudioPlayer(file.uri, { updateInterval: 1000 });
+      player.loop = true;
+      const source = readAloudSourceThread(state.messageKey);
+      const title = source
+        ? appAtomRegistry.get(environmentThreadShells.threadShellAtom(source))?.title?.trim()
+        : undefined;
+      player.setActiveForLockScreen(
+        true,
+        { title: title || "Read aloud", artist: "T3 Code" },
+        // A live stream has no seek bar, which would only show the anchor's silent loop.
+        { isLiveStream: true },
+      );
+      return {
+        play: () => player.play(),
+        pause: () => player.pause(),
+        addListener: (event, listener) => player.addListener(event, listener),
+        release: () => disposeAudioPlayer(player),
+      };
+    },
+  });
+}
+
+/** One second of 8 kHz, 16-bit mono silence. */
+function silentWav(): Uint8Array {
+  const samples = 8000;
+  const bytes = new Uint8Array(44 + samples * 2);
+  const view = new DataView(bytes.buffer);
+  const ascii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) bytes[offset + i] = text.charCodeAt(i);
+  };
+  ascii(0, "RIFF");
+  view.setUint32(4, 36 + samples * 2, true);
+  ascii(8, "WAVE");
+  ascii(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 8000, true);
+  view.setUint32(28, 16000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  ascii(36, "data");
+  view.setUint32(40, samples * 2, true);
+  return bytes;
+}
 
 export function readAloudMessageKey(
   environmentId: EnvironmentId,

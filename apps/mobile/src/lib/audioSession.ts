@@ -62,7 +62,11 @@ export function isAudioSessionOwner(token: AudioSessionToken): boolean {
 
 export function activateAudioSession(
   token: AudioSessionToken,
-  options: { readonly nativePlayback?: boolean; readonly allowBluetoothRecording?: boolean } = {},
+  options: {
+    readonly nativePlayback?: boolean;
+    readonly allowBluetoothRecording?: boolean;
+    readonly background?: boolean;
+  } = {},
 ): Promise<boolean> {
   return enqueue(async () => {
     if (!isAudioSessionOwner(token)) return false;
@@ -75,7 +79,7 @@ export function activateAudioSession(
         : {}),
       interruptionMode: "doNotMix",
       playsInSilentMode: true,
-      shouldPlayInBackground: false,
+      shouldPlayInBackground: options.background === true,
     });
     if (!isAudioSessionOwner(token)) return false;
     await setIsAudioActiveAsync(true);

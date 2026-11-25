@@ -9,19 +9,22 @@ import {
 function setup(beforePlay: () => Promise<void> = async () => {}) {
   let report!: (status: ExpoPlayerStatus) => void;
   const calls: string[] = [];
-  const player: ExpoPlayer = {
-    play: () => calls.push("play"),
-    pause: () => calls.push("pause"),
-    seekTo: async (seconds) => {
-      calls.push(`seek ${seconds}`);
-    },
-    setPlaybackRate: (rate) => calls.push(`rate ${rate}`),
-    addListener: (_event, listener) => {
-      report = listener;
-      return { remove: () => calls.push("removed") };
-    },
+  const openPlayer = (): ExpoPlayer => {
+    calls.push("open");
+    return {
+      play: () => calls.push("play"),
+      seekTo: async (seconds) => {
+        calls.push(`seek ${seconds}`);
+      },
+      setPlaybackRate: (rate) => calls.push(`rate ${rate}`),
+      addListener: (_event, listener) => {
+        report = listener;
+        return { remove: () => calls.push("removed") };
+      },
+      release: () => calls.push("release"),
+    };
   };
-  const audio = createExpoPlaybackAudio(player, 10, beforePlay);
+  const audio = createExpoPlaybackAudio(openPlayer, 10, beforePlay);
   const events: string[] = [];
   for (const type of ["playing", "pause", "timeupdate", "ended", "error"] as const) {
     audio.addEventListener(type, () => events.push(type));
@@ -43,7 +46,7 @@ describe("createExpoPlaybackAudio", () => {
   it("plays, reports progress, then pauses and ends like a media element", async () => {
     const { audio, calls, events, status } = setup();
     await audio.play();
-    expect(calls).toEqual(["play"]);
+    expect(calls).toEqual(["open", "play"]);
     expect(audio.paused).toBe(false);
     status({ currentTime: 4, playing: true });
     expect(audio.currentTime).toBe(4);
@@ -51,6 +54,23 @@ describe("createExpoPlaybackAudio", () => {
     status({ currentTime: 10, didJustFinish: true });
     expect(audio).toMatchObject({ paused: true, ended: true, currentTime: 10 });
     expect(events).toEqual(["playing", "timeupdate", "pause", "ended"]);
+    expect(calls).toEqual(["open", "play", "removed", "release"]);
+  });
+
+  it("holds a native player only while playing, so long responses don't run out of them", async () => {
+    const { audio, calls, status } = setup();
+    audio.currentTime = 2;
+    audio.playbackRate = 1.25;
+    expect(calls).toEqual([]);
+    await audio.play();
+    status({ currentTime: 4, playing: true });
+    audio.pause();
+    expect(calls).toEqual(["open", "rate 1.25", "seek 2", "play", "removed", "release"]);
+
+    calls.length = 0;
+    await audio.play();
+    audio.release();
+    expect(calls).toEqual(["open", "rate 1.25", "seek 4", "play", "removed", "release"]);
   });
 
   it("ignores a stopped clock while starting or seeking, but reports a system pause", async () => {
@@ -79,7 +99,7 @@ describe("createExpoPlaybackAudio", () => {
     audio.pause();
     claim();
     await playing;
-    expect(calls).toEqual(["pause"]);
+    expect(calls).toEqual([]);
     expect(audio.paused).toBe(true);
   });
 
@@ -102,7 +122,10 @@ describe("createExpoPlaybackAudio", () => {
     audio.currentTime = 0;
     audio.playbackRate = 1.5;
     expect(audio).toMatchObject({ currentTime: 0, ended: false, playbackRate: 1.5 });
-    expect(calls).toEqual(["play", "seek 10", "seek 0", "rate 1.5"]);
+    expect(calls).toEqual(["open", "play", "removed", "release"]);
+    await audio.play();
+    audio.currentTime = 3;
+    expect(calls.slice(4)).toEqual(["open", "rate 1.5", "play", "seek 3"]);
   });
 
   it("reports a player error", async () => {
