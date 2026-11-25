@@ -14,6 +14,7 @@ import {
 import { limitRunway } from "@t3tools/shared/usageLimitRunway";
 import {
   bankedResets,
+  collectHttpQuotaSources,
   collectLimitAccounts,
   collectLimitPools,
   displayLimitWindows,
@@ -44,6 +45,7 @@ import { Menu } from "../../components/ui/Menu";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { cn } from "../../lib/cn";
+import { m as resolveNow } from "../../i18n/messages";
 import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -51,7 +53,7 @@ import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { AccountChip, emailInitials } from "./AccountChip";
 import { BankedResetButton } from "./BankedResets";
 import { PoolFigures, RunwayChart } from "./UsageLimitRunway";
-import { ResetCredits } from "./UsageLimitsSection";
+import { ResetCredits, resetLabels } from "./UsageLimitsSection";
 import { hubPermissionsAtom, useUsageLimitsLayout } from "./usageLimitsLayout";
 import { environmentIdsKey } from "./usageLimitsRefresh";
 import { PROVIDER_LABEL, usageProviderKind, useProviderColors } from "./usageProviders";
@@ -500,6 +502,7 @@ export function UsageLimitsSection({
       </Menu>
     );
   };
+  const quotaSources = collectHttpQuotaSources(selected);
   const notices = collectLimitNotices(selected);
   const externalLinks = collectExternalUsageLinks(selected);
   const colors = useProviderColors();
@@ -509,7 +512,8 @@ export function UsageLimitsSection({
       {pools.length === 0 &&
       notices.length === 0 &&
       failedLabels.length === 0 &&
-      externalLinks.length === 0 ? (
+      externalLinks.length === 0 &&
+      quotaSources.length === 0 ? (
         <Text className="py-12 text-center text-base text-foreground-muted">
           {selected.size === 0
             ? "Select an environment to see limits."
@@ -518,6 +522,28 @@ export function UsageLimitsSection({
               : "No provider on the selected environments reports subscription limits."}
         </Text>
       ) : null}
+      {quotaSources.map((source) => (
+        <View key={source.key} className="gap-3 rounded-[24px] bg-grouped-card p-4">
+          <Text className="text-base font-t3-medium text-foreground">{source.label}</Text>
+          {source.quotaAccounts?.map((account) => (
+            <View key={account.id} className="gap-1">
+              <Text className="text-sm font-t3-medium text-foreground">{account.label}</Text>
+              {account.windows.map((window) => {
+                const reset = resetLabels(window, now, resolveNow);
+                return (
+                  <View key={window.id} className="flex-row justify-between gap-3">
+                    <Text className="shrink text-sm text-foreground-muted">{window.label}</Text>
+                    <Text className="text-sm text-foreground-muted">
+                      {remainingPercent(window)}% left
+                      {reset ? ` · ${reset.compact}` : ""}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ))}
+        </View>
+      ))}
       {pools.map((pool) => {
         const provider = usageProviderKind(pool.driver);
         const windows = displayLimitWindows(pool).filter(

@@ -30,6 +30,7 @@ import {
   type BankedReset,
   bankedResets,
   CHATGPT_USAGE_URL,
+  collectHttpQuotaSources,
   collectLimitAccounts,
   displayLimitWindows,
   type HubLogin,
@@ -46,6 +47,7 @@ import {
   collectLimitNotices,
   cursorUsageWindowDetails,
   formatDuration,
+  formatResetsIn,
 } from "@t3tools/shared/usageLimitsCopy";
 import { limitRunway } from "@t3tools/shared/usageLimitRunway";
 import type { UsageProviderKind } from "@t3tools/contracts";
@@ -803,11 +805,15 @@ export function UsageLimitsPooled({
     const provider = usageProviderForDriver(pool.driver);
     return provider !== undefined && hiddenAccountRows.has(provider);
   };
+  const quotaSources = collectHttpQuotaSources(presentations);
   const notices = collectLimitNotices(presentations);
   const externalLinks = collectExternalUsageLinks(presentations);
   return (
     <div className="flex flex-col gap-8">
-      {pools.length === 0 && notices.length === 0 && externalLinks.length === 0 ? (
+      {pools.length === 0 &&
+      notices.length === 0 &&
+      externalLinks.length === 0 &&
+      quotaSources.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No provider on the selected environments reports subscription limits.
         </p>
@@ -824,6 +830,31 @@ export function UsageLimitsPooled({
             allOff={hubLogins.every((login) => login.driver !== pool.driver || login.disabled)}
           />
         </Fragment>
+      ))}
+      {quotaSources.map((source) => (
+        <section key={source.key} className="space-y-3 rounded-xl border p-4">
+          <h2 className="text-sm font-medium">{source.label}</h2>
+          {source.quotaAccounts?.map((account) => (
+            <div key={account.id} className="space-y-1">
+              <h3 className="text-sm font-medium">{account.label}</h3>
+              {account.windows.map((window) => {
+                const reset = formatResetsIn(window, now);
+                return (
+                  <div
+                    key={window.id}
+                    className="flex justify-between gap-3 text-sm text-muted-foreground"
+                  >
+                    <span>{window.label}</span>
+                    <span>
+                      {remainingPercent(window)}% left
+                      {reset ? ` · ${reset}` : ""}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </section>
       ))}
       {externalLinks.map((link) => (
         <section

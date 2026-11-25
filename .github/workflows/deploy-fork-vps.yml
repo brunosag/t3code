@@ -174,7 +174,7 @@ jobs:
           # npm skips pnpm patches, and these packages load from disk on the host, so it applies them.
           # fff-node's adds the async methods file search calls; Cursor's carries upstream fixes.
           # node-pty's only touches Windows code.
-          for patch in "patches/@ff-labs__fff-node@0.11.0.patch" "patches/@cursor__sdk@1.4.2.patch"; do
+          for patch in "patches/@ff-labs__fff-node@0.11.0.patch" "patches/@cursor__sdk@1.5.0.patch"; do
             scp "${ssh_opts[@]}" "$patch" "$VPS_USER@$VPS_HOST:local/t3-pi/releases/t3-$VERSION.${patch#patches/}"
           done
 

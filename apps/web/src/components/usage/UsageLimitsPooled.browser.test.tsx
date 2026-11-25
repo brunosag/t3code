@@ -10,6 +10,8 @@ import { CHATGPT_USAGE_URL } from "@t3tools/shared/usageLimits";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { page, userEvent } from "vite-plus/test/browser";
 
+import "~/index.css";
+
 import { render } from "../../../test/render";
 import { UsageLimitsPooled } from "./UsageLimitsPooled";
 
@@ -170,5 +172,42 @@ describe("UsageLimitsPooled hub accounts", () => {
       input: { sourceId: UsageLimitSourceId.make("hub"), accountId: "team.json", disabled: false },
     });
     await expect.element(team).toBeChecked();
+  });
+});
+
+describe("UsageLimitsPooled next refill", () => {
+  it("skips elapsed resets while waiting for refreshed account data", async () => {
+    function account(instanceId: string, usedPercent: number, resetsAt: string): ServerProvider {
+      return {
+        ...managedChatGpt(instanceId, instanceId),
+        usageLimits: {
+          checkedAt,
+          windows: [{ id: "weekly", label: "Weekly", kind: "weekly", usedPercent, resetsAt }],
+        },
+      };
+    }
+    const presentations = new Map([
+      [
+        EnvironmentId.make("desk"),
+        {
+          entry: { target: { label: "Desk" } },
+          serverConfig: {
+            providers: [
+              account("Work", 20, "2026-10-25T17:00:00.000Z"),
+              account("Personal", 60, "2026-10-25T18:00:00.000Z"),
+            ],
+          },
+        },
+      ],
+    ]);
+    await using screen = await render(
+      <UsageLimitsPooled presentations={presentations} now={Date.parse("2026-10-25T17:30:00Z")} />,
+    );
+    await expect.element(screen.getByText(/^\+30% at /)).toBeVisible();
+
+    await screen.rerender(
+      <UsageLimitsPooled presentations={presentations} now={Date.parse("2026-10-25T18:00:00Z")} />,
+    );
+    await expect.element(screen.getByText(/^\+\d+% at /)).not.toBeInTheDocument();
   });
 });

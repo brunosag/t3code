@@ -84,7 +84,7 @@ export function PoolFigures({
     const refill = runway?.refills[0];
     const next = refill
       ? { at: refill.at, restoresPercent: Math.round(refill.percent) }
-      : pool.resets.find((reset) => reset.restoresPercent > 0);
+      : pool.resets.find((reset) => reset.at > now && reset.restoresPercent > 0);
     const burn = empty ? null : (runway?.burnPerDay ?? null);
     const runsOut = runway?.out ?? null;
     if (burn !== null) {

@@ -119,9 +119,29 @@ export const UsageLimitSourceAccount = Schema.Struct({
 });
 export type UsageLimitSourceAccount = typeof UsageLimitSourceAccount.Type;
 
+export const HttpQuotaAccount = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+  windows: Schema.Array(
+    Schema.Struct({
+      id: ServerProviderUsageWindow.fields.id,
+      kind: ServerProviderUsageWindow.fields.kind,
+      label: ServerProviderUsageWindow.fields.label,
+      usedPercent: ServerProviderUsageWindow.fields.usedPercent,
+      resetsAt: ServerProviderUsageWindow.fields.resetsAt,
+    }),
+  ),
+});
+
+export const HttpQuotaResponse = Schema.Struct({
+  version: Schema.Literal(1),
+  accounts: Schema.Array(HttpQuotaAccount),
+});
+
 export const UsageLimitSourceSnapshot = Schema.Struct({
   id: UsageLimitSourceId,
-  kind: Schema.Literal("cliproxy"),
+  kind: Schema.Literals(["cliproxy", "http"]),
   label: TrimmedNonEmptyString,
   /** Origin of the hub, which also serves the agents sent through it. */
   origin: Schema.optional(TrimmedNonEmptyString),
@@ -129,6 +149,7 @@ export const UsageLimitSourceSnapshot = Schema.Struct({
   endpoint: Schema.optional(TrimmedNonEmptyString),
   checkedAt: IsoDateTime,
   accounts: ForwardCompatibleArray(UsageLimitSourceAccount),
+  quotaAccounts: Schema.optional(ForwardCompatibleArray(HttpQuotaAccount)),
   error: Schema.optional(TrimmedNonEmptyString),
   /** Providers the server routes by earliest reset, so their order is not set by hand. */
   routeByReset: Schema.optional(Schema.Array(ProviderDriverKind)),

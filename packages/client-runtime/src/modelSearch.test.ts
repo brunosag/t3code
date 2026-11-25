@@ -61,6 +61,7 @@ type CatalogModel = {
   driverKind: string;
   providerDisplayName: string;
   name: string;
+  slug?: string;
   subProvider?: string;
   isFavorite?: boolean;
 };
@@ -131,6 +132,13 @@ const catalog: CatalogModel[] = [
     name: "Kimi K2",
     subProvider: "Moonshot",
   },
+  {
+    driverKind: "opencode",
+    providerDisplayName: "OpenCode",
+    name: "DeepSeek V4.1 Flash 1017",
+    slug: "opencode-go/deepseek-v4.1-flash",
+    subProvider: "OpenCode Go",
+  },
 ];
 
 function search(query: string, models: ReadonlyArray<CatalogModel> = catalog): string[] {
@@ -157,6 +165,11 @@ describe("rankModelPickerSearch", () => {
 
   it("matches the provider when the name does not", () => {
     expect(search("moonshot")).toEqual(["Kimi K3", "Kimi K2.5", "Kimi K2"]);
+  });
+
+  it("finds a model by its full or bare ID when the name is written differently", () => {
+    expect(search("opencode-go/deepseek-v4.1-flash")).toEqual(["DeepSeek V4.1 Flash 1017"]);
+    expect(search("deepseek-v4.1-flash")).toEqual(["DeepSeek V4.1 Flash 1017"]);
   });
 
   it("ranks a favorite above newer models in the same family", () => {
