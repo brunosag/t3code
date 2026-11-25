@@ -9,6 +9,8 @@ export interface SpeechRequest {
   readonly voice: ReadAloudVoice;
 }
 
+export const READ_ALOUD_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+
 export interface SpeechGenerationProgress {
   readonly label: string;
   readonly percent: number | null;
@@ -330,6 +332,26 @@ export class ReadAloudController {
     if (this.wantsPlayback && segment.playback.audio.paused && !segment.playback.audio.ended) {
       void this.play(segment);
     }
+  }
+
+  /** Pauses a response that is playing or waiting for speech, and plays a paused or ended one. */
+  togglePlayback(): void {
+    const status = this.state?.status;
+    if (status === "playing" || status === "buffering") this.pause();
+    else if (status === "paused" || status === "ended") void this.resume();
+  }
+
+  seekBy(seconds: number): void {
+    if (this.state) this.seek(this.state.position + seconds);
+  }
+
+  /** Moves to the next listed speed in `direction`, from wherever the current speed lies. */
+  stepSpeed(direction: 1 | -1): void {
+    const next =
+      direction > 0
+        ? READ_ALOUD_SPEEDS.find((speed) => speed > this.speed)
+        : READ_ALOUD_SPEEDS.findLast((speed) => speed < this.speed);
+    if (next !== undefined) this.setSpeed(next);
   }
 
   setSpeed(speed: number): void {

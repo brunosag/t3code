@@ -512,6 +512,12 @@ const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
   "thread.pin": msg("Thread: Pin"),
   "thread.regenerateTitle": msg("Thread: Regenerate Title"),
   "thread.undo": msg("Thread: Undo"),
+  "readAloud.toggle": msg("Read Aloud: Play or Pause (Latest Reply When Idle)"),
+  "readAloud.stop": msg("Read Aloud: Stop"),
+  "readAloud.seekBackward": msg("Read Aloud: Back 10 Seconds"),
+  "readAloud.seekForward": msg("Read Aloud: Forward 10 Seconds"),
+  "readAloud.slower": msg("Read Aloud: Slower"),
+  "readAloud.faster": msg("Read Aloud: Faster"),
 };
 
 // Whole labels: search titles keep the encoded message, which cannot nest another one.

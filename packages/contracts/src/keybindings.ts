@@ -116,6 +116,12 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "usage.period.week",
   "usage.period.month",
   "usage.period.quarter",
+  "readAloud.toggle",
+  "readAloud.stop",
+  "readAloud.seekBackward",
+  "readAloud.seekForward",
+  "readAloud.slower",
+  "readAloud.faster",
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
 ] as const;

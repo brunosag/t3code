@@ -5,7 +5,8 @@ import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import { draftSupportedRuntimeModes } from "./chat/runtimeModeConfig";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
-import { ReadAloudPlayer } from "./chat/ReadAloud";
+import { ReadAloudPlayer, startReadAloud } from "./chat/ReadAloud";
+import { readAloud } from "../lib/readAloud";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { queuedRunEditBlockedReason } from "@t3tools/client-runtime/queued-run-edit";
 import { ScrollToEndButton, WorkspaceFileDropOverlay } from "./chat/TimelineOverlays";
@@ -2974,6 +2975,16 @@ export default function ChatView(props: ChatViewProps) {
       "thread.stop": ({ event }) => {
         if (!canInterruptRunningThread) return false;
         if (!event.repeat) void onInterruptStable();
+      },
+      // Loaded playback belongs to the app-wide read aloud keys.
+      "readAloud.toggle": ({ event }) => {
+        const playback = readAloud.getSnapshot();
+        if (playback && playback.status !== "error") return false;
+        const reply = timelineMessages.findLast(
+          (message) => message.role === "assistant" && !message.streaming && message.text.trim(),
+        );
+        if (!reply) return false;
+        if (!event.repeat) return startReadAloud(displayedTimelineKey, reply.id, reply.text);
       },
     },
     fallback: (command) => {

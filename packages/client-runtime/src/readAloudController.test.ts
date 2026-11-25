@@ -228,6 +228,36 @@ describe("ReadAloudController", () => {
     expect(audios[1]!.playbackRate).toBe(1.5);
   });
 
+  it("toggles, seeks relative to the position, and steps speed from the keyboard", async () => {
+    const { player, audios } = setup();
+    player.togglePlayback();
+    await player.start("response", { environmentId, text: "Hello.", voice: "everly" });
+    player.togglePlayback();
+    expect(player.getSnapshot()?.status).toBe("paused");
+    player.togglePlayback();
+    expect(player.getSnapshot()?.status).toBe("playing");
+
+    player.seekBy(10);
+    player.seekBy(10);
+    expect(audios[0]!.currentTime).toBe(20);
+    player.seekBy(-30);
+    expect(audios[0]!.currentTime).toBe(0);
+
+    player.stepSpeed(1);
+    expect(audios[0]!.playbackRate).toBe(1.25);
+    player.setSpeed(1.1);
+    player.stepSpeed(-1);
+    expect(player.getSnapshot()?.speed).toBe(1);
+    player.setSpeed(2);
+    player.stepSpeed(1);
+    expect(player.getSnapshot()?.speed).toBe(2);
+
+    audios[0]!.finish();
+    expect(player.getSnapshot()?.status).toBe("ended");
+    player.togglePlayback();
+    expect(player.getSnapshot()).toMatchObject({ status: "playing", position: 0 });
+  });
+
   it("stops audio and releases its resources", async () => {
     const { player, audios, disposed } = setup();
     await player.start("response", { environmentId, text: "Hello.", voice: "everly" });

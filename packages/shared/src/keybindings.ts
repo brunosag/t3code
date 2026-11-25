@@ -146,6 +146,20 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
     command,
     when: "modelPickerOpen && isDesktop",
   })),
+  // Outside a reply, toggling reads the thread's latest one; the rest need something loaded.
+  { key: "mod+shift+space", command: "readAloud.toggle", when: "!terminalFocus" },
+  {
+    key: "mod+shift+,",
+    command: "readAloud.seekBackward",
+    when: "readAloudActive && !terminalFocus",
+  },
+  {
+    key: "mod+shift+.",
+    command: "readAloud.seekForward",
+    when: "readAloudActive && !terminalFocus",
+  },
+  { key: "mod+alt+,", command: "readAloud.slower", when: "readAloudActive && !terminalFocus" },
+  { key: "mod+alt+.", command: "readAloud.faster", when: "readAloudActive && !terminalFocus" },
   { key: "c", command: "usage.cost", when: "usagePageOpen" },
   { key: "t", command: "usage.tokens", when: "usagePageOpen" },
   { key: "l", command: "usage.limits", when: "usagePageOpen" },

@@ -958,6 +958,47 @@ describe("isSidebarToggleShortcut", () => {
   });
 });
 
+describe("read aloud shortcuts", () => {
+  it("toggles anywhere outside the terminal and controls loaded playback only", () => {
+    const resolve = (
+      overrides: Partial<ShortcutEventLike>,
+      context: Record<string, boolean>,
+      platform = "Linux",
+    ) =>
+      resolveShortcutCommand(event(overrides), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform,
+        context: { terminalFocus: false, ...context },
+      });
+    const toggle = { key: " ", code: "Space", ctrlKey: true, shiftKey: true };
+    assert.strictEqual(resolve(toggle, {}), "readAloud.toggle");
+    assert.strictEqual(resolve(toggle, { terminalFocus: true }), null);
+
+    // Shifted punctuation differs by layout; the physical key decides.
+    const back = { key: "<", code: "Comma", ctrlKey: true, shiftKey: true };
+    assert.strictEqual(resolve(back, {}), null);
+    assert.strictEqual(resolve(back, { readAloudActive: true }), "readAloud.seekBackward");
+    assert.strictEqual(
+      resolve(
+        { key: ">", code: "Period", ctrlKey: true, shiftKey: true },
+        { readAloudActive: true },
+      ),
+      "readAloud.seekForward",
+    );
+    assert.strictEqual(
+      resolve(
+        { key: "≤", code: "Comma", metaKey: true, altKey: true },
+        { readAloudActive: true },
+        "MacIntel",
+      ),
+      "readAloud.slower",
+    );
+    assert.strictEqual(
+      resolve({ key: ".", code: "Period", ctrlKey: true, altKey: true }, { readAloudActive: true }),
+      "readAloud.faster",
+    );
+  });
+});
+
 describe("composer and pull request shortcuts", () => {
   it("uses the dictation chord outside the terminal and preserves terminal split", () => {
     const chord = event({ key: "d", ctrlKey: true, shiftKey: true });

@@ -47,6 +47,7 @@ vp test run \
   apps/web/src/pendingUserInput.test.ts \
   apps/web/src/components/chat/MessagesTimeline.logic.test.ts \
   packages/client-runtime/src/readAloudController.test.ts \
+  apps/web/src/keybindings.test.ts \
   apps/mobile/src/features/read-aloud/expoPlaybackAudio.test.ts \
   apps/mobile/src/features/read-aloud/backgroundPlayback.test.ts \
   apps/server/src/speech/speechText.test.ts \

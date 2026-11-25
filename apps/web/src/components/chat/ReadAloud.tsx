@@ -1,21 +1,62 @@
-import { useSyncExternalStore, type CSSProperties } from "react";
+import { useSyncExternalStore, type CSSProperties, type ReactElement } from "react";
+import { useAtomValue } from "@effect/atom-react";
 import { Link } from "@tanstack/react-router";
 import { PauseIcon, PlayIcon, SquareIcon, Volume2Icon } from "lucide-react";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import { READ_ALOUD_SPEEDS } from "@t3tools/client-runtime/read-aloud-controller";
+import type { KeybindingCommand, ResolvedKeybindingsConfig } from "@t3tools/contracts";
 
 import { getClientSettings } from "~/hooks/useSettings";
-import { readAloud } from "~/lib/readAloud";
+import { shortcutLabelForCommand } from "~/keybindings";
+import { READ_ALOUD_SEEK_SECONDS, readAloud } from "~/lib/readAloud";
 import { useThreadShell } from "~/state/entities";
+import { primaryServerKeybindingsAtom } from "~/state/server";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerBanner } from "./ComposerBanner";
 
-const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const getServerSnapshot = () => null;
 
 function messageKey(threadKey: string, messageId: string) {
   return `${threadKey}\0${messageId}`;
+}
+
+/** Reads a reply aloud; false when it has no text or its thread is not on a server. */
+export function startReadAloud(threadKey: string, messageId: string, text: string): boolean {
+  const environmentId = parseScopedThreadKey(threadKey)?.environmentId;
+  if (environmentId === undefined || !text.trim()) return false;
+  // Loaded on demand so the remark parser stays out of the main web bundle.
+  void import("@t3tools/client-runtime/read-aloud").then(({ speechInputFromMarkdown }) =>
+    readAloud.start(messageKey(threadKey, messageId), {
+      environmentId,
+      ...speechInputFromMarkdown(text),
+      voice: getClientSettings().readAloudVoice,
+    }),
+  );
+  return true;
+}
+
+function shortcutLabel(keybindings: ResolvedKeybindingsConfig, command: KeybindingCommand) {
+  return shortcutLabelForCommand(keybindings, command, {
+    context: { terminalFocus: false, readAloudActive: true },
+  });
+}
+
+function ShortcutTooltip(props: {
+  label: string;
+  shortcut: string | null;
+  children: ReactElement;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={props.children} />
+      <TooltipPopup side="top">
+        {props.label}
+        {props.shortcut ? ` (${props.shortcut})` : ""}
+      </TooltipPopup>
+    </Tooltip>
+  );
 }
 
 function formatTime(seconds: number) {
@@ -53,17 +94,7 @@ export function ReadAloudButton({
             aria-label={label}
             onClick={() => {
               if (active) readAloud.stopMessage(key);
-              else {
-                // Loaded on demand so the remark parser stays out of the main web bundle.
-                void import("@t3tools/client-runtime/read-aloud").then(
-                  ({ speechInputFromMarkdown }) =>
-                    readAloud.start(key, {
-                      environmentId,
-                      ...speechInputFromMarkdown(text),
-                      voice: getClientSettings().readAloudVoice,
-                    }),
-                );
-              }
+              else startReadAloud(threadKey, messageId, text);
             }}
           />
         }
@@ -95,6 +126,7 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
       ? parseScopedThreadKey(sourceThreadKey)
       : null;
   const sourceShell = useThreadShell(sourceRef);
+  const keybindings = useAtomValue(primaryServerKeybindingsAtom);
 
   if (!state) return null;
   const preparing = state.status === "preparing";
@@ -158,6 +190,16 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
                   disabled={state.duration === 0}
                   style={seekStyle}
                   onChange={(event) => readAloud.seek(Number(event.currentTarget.value))}
+                  onKeyDown={(event) => {
+                    // The fine step keeps dragging smooth, but would make arrow keys move 0.1s.
+                    const direction = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[
+                      event.key
+                    ];
+                    if (direction === undefined || event.altKey || event.ctrlKey || event.metaKey)
+                      return;
+                    event.preventDefault();
+                    readAloud.seekBy(direction * READ_ALOUD_SEEK_SECONDS);
+                  }}
                 />
                 <span>{total}</span>
               </>
@@ -174,27 +216,37 @@ export function ReadAloudPlayer({ threadKey }: { threadKey: string }) {
                 <SelectValue>{state.speed}×</SelectValue>
               </SelectTrigger>
               <SelectPopup side="top">
-                {SPEEDS.map((speed) => (
+                {READ_ALOUD_SPEEDS.map((speed) => (
                   <SelectItem key={speed} value={speed}>
                     {speed}×
                   </SelectItem>
                 ))}
               </SelectPopup>
             </Select>
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost-muted"
-              aria-label={playing ? "Pause reading" : "Play reading"}
-              disabled={!playable}
-              onClick={() => {
-                if (playing) readAloud.pause();
-                else void readAloud.resume();
-              }}
+            <ShortcutTooltip
+              label={playing ? "Pause reading" : "Play reading"}
+              shortcut={shortcutLabel(keybindings, "readAloud.toggle")}
             >
-              {playing ? <PauseIcon /> : <PlayIcon />}
-            </Button>
-            <ComposerBanner.Dismiss aria-label="Stop reading" onClick={() => readAloud.stop()} />
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost-muted"
+                aria-label={playing ? "Pause reading" : "Play reading"}
+                disabled={!playable}
+                onClick={() => {
+                  if (playing) readAloud.pause();
+                  else void readAloud.resume();
+                }}
+              >
+                {playing ? <PauseIcon /> : <PlayIcon />}
+              </Button>
+            </ShortcutTooltip>
+            <ShortcutTooltip
+              label="Stop reading"
+              shortcut={shortcutLabel(keybindings, "readAloud.stop")}
+            >
+              <ComposerBanner.Dismiss aria-label="Stop reading" onClick={() => readAloud.stop()} />
+            </ShortcutTooltip>
           </ComposerBanner.Actions>
         </ComposerBanner.Row>
       </ComposerBanner.Root>

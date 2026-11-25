@@ -1,3 +1,4 @@
+import { READ_ALOUD_SPEEDS } from "@t3tools/client-runtime/read-aloud-controller";
 import type { ScopedThreadRef } from "@t3tools/contracts";
 import { useState, useSyncExternalStore } from "react";
 import { Pressable, View } from "react-native";
@@ -10,7 +11,6 @@ import { useOpenLinkedThread } from "../threads/useOpenLinkedThread";
 import { readAloud, readAloudSourceThread } from "./readAloud";
 import { ReadAloudTimeline } from "./ReadAloudTimeline";
 
-const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const getSnapshot = () => readAloud.getSnapshot();
 
 function formatTime(seconds: number) {
@@ -103,7 +103,7 @@ export function ReadAloudPlayer(props: { readonly threadRef: ScopedThreadRef }) 
         </Text>
         <Menu
           title="Reading speed"
-          actions={SPEEDS.map((speed) => ({
+          actions={READ_ALOUD_SPEEDS.map((speed) => ({
             id: String(speed),
             title: `${speed}×`,
             state: speed === state.speed ? "on" : "off",
