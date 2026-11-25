@@ -11,28 +11,47 @@ describe("prepareSpeechText", () => {
 });
 
 describe("splitSpeechText", () => {
-  it("splits sentences and lines, and long sentences at word boundaries", () => {
-    const longSentence = Array.from({ length: 60 }, (_, index) => `word${index}`).join(" ");
-    const chunks = splitSpeechText(`First one. Second one?\nThird line\n\n${longSentence}`);
-    expect(chunks.slice(0, 3)).toEqual(["First one.", "Second one?", "Third line"]);
-    const rest = chunks.slice(3);
-    expect(rest.length).toBeGreaterThan(1);
-    expect(rest.every((chunk) => chunk.length <= 180)).toBe(true);
-    expect(rest.join(" ")).toBe(longSentence);
+  const sentence = (index: number) => `Sentence ${index} says a little more about the topic.`;
+
+  it("keeps sentences whole, in chunks no longer than the speech before them", () => {
+    const text = Array.from({ length: 60 }, (_, index) => sentence(index)).join(" ");
+    const chunks = splitSpeechText(text);
+    expect(chunks.join(" ")).toBe(text);
+    expect(chunks.every((chunk) => /^Sentence \d+ .*topic\.$/.test(chunk))).toBe(true);
+    expect(chunks[0]).toBe(sentence(0));
+    let before = 0;
+    for (const chunk of chunks) {
+      expect(chunk.length).toBeLessThanOrEqual(Math.min(1000, Math.max(120, before)));
+      before += chunk.length;
+    }
+    expect(chunks.length).toBeLessThan(12);
+  });
+
+  it("closes lines without punctuation so headings and list items keep their pause", () => {
+    expect(splitSpeechText("Intro line here.\nA heading\n\nFirst item: details\nDone!")).toEqual([
+      "Intro line here.",
+      "A heading. First item: details. Done!",
+    ]);
+  });
+
+  it("cuts only a sentence too long for one chunk, at a clause or word", () => {
+    const clause = Array.from({ length: 30 }, (_, index) => `word${index} more`).join(" ");
+    const long = Array.from({ length: 8 }, () => clause).join(", ");
+    const chunks = splitSpeechText(`Start here. ${long}.`);
+    expect(chunks.slice(1).every((chunk) => chunk.length <= 1000)).toBe(true);
+    expect(chunks.slice(1, -1).every((chunk) => chunk.endsWith(","))).toBe(true);
+    expect(chunks.join(" ")).toBe(`Start here. ${long}.`);
   });
 
   it("cuts a long first sentence at its first clause so playback starts sooner", () => {
-    expect(
-      splitSpeechText(
-        "Yes, the usage command now pools each provider's quota, the way the Usage page does. Next.",
-      ),
-    ).toEqual([
+    const first =
+      "Yes, the usage command now pools each provider's quota, the way the Usage page does it, and prints the totals for each account.";
+    expect(splitSpeechText(`${first} Next.`)).toEqual([
       "Yes, the usage command now pools each provider's quota,",
-      "the way the Usage page does.",
-      "Next.",
+      "the way the Usage page does it, and prints the totals for each account. Next.",
     ]);
-    const unbroken = "A long first sentence without any clause break that runs well past sixty.";
-    expect(splitSpeechText(unbroken)).toEqual([unbroken]);
+    const short = "A first sentence with a clause, but short enough to keep.";
+    expect(splitSpeechText(short)).toEqual([short]);
   });
 });
 

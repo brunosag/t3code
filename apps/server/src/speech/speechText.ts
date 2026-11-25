@@ -1,9 +1,12 @@
 // Text preparation for Phonon, which spells out numbers, amounts and symbols itself.
 export const SPEECH_SAMPLE_RATE = 24_000;
-/** Each chunk plays as its own clip, so chunks end at sentences or clauses. */
-const MAX_CHUNK_CHARS = 180;
-/** A long first sentence is cut at a clause, so playback starts sooner. */
-const FIRST_CHUNK_CHARS = 60;
+/**
+ * Each chunk plays as its own clip, so a boundary is a cut the listener can hear. Phonon splits
+ * longer text at sentences itself and joins the audio seamlessly, so chunks hold whole sentences.
+ */
+const MAX_CHUNK_CHARS = 1000;
+/** A first sentence longer than this is cut at a clause, so playback starts sooner. */
+const FIRST_CHUNK_CHARS = 120;
 /** Phonon's speaking rate in English, for an estimate before any audio exists. */
 const CHARACTERS_PER_SECOND = 15;
 
@@ -28,26 +31,59 @@ function splitFirstClause(sentence: string): string[] {
   return [sentence];
 }
 
-/** Splits text into sentence-sized chunks so playback can start before the whole text is ready. */
-export function splitSpeechText(text: string): string[] {
-  const chunks: string[] = [];
-  for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
-    let remaining = sentence.trim();
-    if (chunks.length === 0 && remaining) {
-      const [first, rest] = splitFirstClause(remaining);
-      if (rest !== undefined) {
-        chunks.push(first!);
-        remaining = rest;
-      }
-    }
-    while (remaining.length > MAX_CHUNK_CHARS) {
-      const space = remaining.lastIndexOf(" ", MAX_CHUNK_CHARS);
-      const end = space > 0 ? space : MAX_CHUNK_CHARS;
-      chunks.push(remaining.slice(0, end));
-      remaining = remaining.slice(end).trim();
-    }
-    if (remaining) chunks.push(remaining);
+/** Cuts a sentence too long for one chunk at its last clause or word before the limit. */
+function splitLongSentence(sentence: string): string[] {
+  const pieces: string[] = [];
+  let remaining = sentence;
+  while (remaining.length > MAX_CHUNK_CHARS) {
+    const head = remaining.slice(0, MAX_CHUNK_CHARS);
+    const clause = Math.max(...[", ", "; ", ": "].map((mark) => head.lastIndexOf(mark)));
+    const end = clause > MAX_CHUNK_CHARS / 2 ? clause + 1 : head.lastIndexOf(" ");
+    const cut = end > 0 ? end : MAX_CHUNK_CHARS;
+    pieces.push(remaining.slice(0, cut).trim());
+    remaining = remaining.slice(cut).trim();
   }
+  if (remaining) pieces.push(remaining);
+  return pieces;
+}
+
+function sentencesOf(text: string): string[] {
+  const sentences: string[] = [];
+  for (const line of text.split(/\n+/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    // Lines run together within a chunk, so a heading or list item keeps its pause.
+    const closed = /[\p{L}\p{N}]$/u.test(trimmed) ? `${trimmed}.` : trimmed;
+    for (const sentence of closed.split(/(?<=[.!?])\s+/)) {
+      if (sentence) sentences.push(...splitLongSentence(sentence));
+    }
+  }
+  return sentences;
+}
+
+/**
+ * Splits text into chunks so playback can start before the whole text is ready: the first
+ * sentence alone, then whole sentences in growing chunks.
+ */
+export function splitSpeechText(text: string): string[] {
+  const [first, ...rest] = sentencesOf(text);
+  if (first === undefined) return [];
+  const [opening, remainder] = splitFirstClause(first);
+  const chunks = [opening!];
+  let before = opening!.length;
+  let current = remainder ?? "";
+  for (const sentence of rest) {
+    // No longer than the speech before it, which plays while it generates at twice real time.
+    const limit = Math.min(MAX_CHUNK_CHARS, Math.max(FIRST_CHUNK_CHARS, before));
+    if (current && current.length + 1 + sentence.length > limit) {
+      chunks.push(current);
+      before += current.length;
+      current = sentence;
+    } else {
+      current = current ? `${current} ${sentence}` : sentence;
+    }
+  }
+  if (current) chunks.push(current);
   return chunks;
 }
 

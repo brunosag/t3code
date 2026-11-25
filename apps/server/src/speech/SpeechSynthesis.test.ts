@@ -120,14 +120,9 @@ describe("SpeechSynthesis", () => {
           ? [event.estimatedDurationSeconds]
           : [],
       );
-      // "Hi you." is 7 characters in 600 samples; the other 11 characters are read at that rate.
-      const secondsPerCharacter = 600 / SPEECH_SAMPLE_RATE / 7;
+      // "Hi you." is 7 characters in 600 samples; "Bye now. Ok." follows at that rate.
       expect(estimates[0]).toBeUndefined();
-      expect(estimates[1]).toBeCloseTo(600 / SPEECH_SAMPLE_RATE + 11 * secondsPerCharacter);
-      // After "Bye now.", 15 characters took 1300 samples.
-      expect(estimates[2]).toBeCloseTo(
-        1300 / SPEECH_SAMPLE_RATE + (3 * 1300) / SPEECH_SAMPLE_RATE / 15,
-      );
+      expect(estimates[1]).toBeCloseTo((600 / SPEECH_SAMPLE_RATE) * (1 + 12 / 7));
     }).pipe(Effect.provide(SpeechSynthesis.layer.pipe(Layer.provide(layerFakes())))),
   );
 
