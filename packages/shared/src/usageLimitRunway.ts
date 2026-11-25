@@ -24,6 +24,8 @@ const IN_USE = 20 * MINUTE;
 /** Burn under this part of the safe pace has room for a heavier day; up to the safe pace it is on pace. */
 const ROOM = 0.8;
 const EPSILON = 1e-9;
+/** Smaller drops outside a scheduled reset are replica jitter or temporary holds settling, not refills. */
+const MIN_OFF_SCHEDULE_REFILL = 5;
 
 export interface RunwayPoint {
   readonly at: number;
@@ -168,6 +170,48 @@ function readings(window: ServerProviderUsageWindow, now: number) {
   ];
 }
 
+function scheduledResetBetween(window: ServerProviderUsageWindow) {
+  const reset = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+  const period = (window.windowDurationMins ?? 0) * MINUTE;
+  const step = (window.history?.stepMins ?? 60) * MINUTE;
+  // A reading is dated to its step's end, so a reset may fall up to one step before it.
+  return (from: number, to: number) =>
+    period > 0 &&
+    Number.isFinite(reset) &&
+    [1, 2, 3].some((k) => from - step < reset - k * period && reset - k * period <= to);
+}
+
+function isRefill(
+  previous: { readonly at: number; readonly used: number },
+  current: { readonly at: number; readonly used: number },
+  resetBetween: (from: number, to: number) => boolean,
+) {
+  // A refill at least halves the reading; off-schedule, require a drop larger than replica jitter.
+  return (
+    current.used < previous.used / 2 &&
+    (previous.used - current.used >= MIN_OFF_SCHEDULE_REFILL ||
+      resetBetween(previous.at, current.at))
+  );
+}
+
+function smoothSamples(
+  samples: ReadonlyArray<{ readonly at: number; readonly used: number }>,
+  step: number,
+  resetBetween: (from: number, to: number) => boolean,
+) {
+  const smoothed = samples.map((sample) => ({ ...sample }));
+  // Trim transient holds and replica spikes backward toward the settled reading, stopping at gaps and refills.
+  for (let index = smoothed.length - 2; index >= 0; index--) {
+    const previous = samples[index]!;
+    const rawNext = samples[index + 1]!;
+    if (rawNext.at - previous.at > step || isRefill(previous, rawNext, resetBetween)) continue;
+    const current = smoothed[index]!;
+    const next = smoothed[index + 1]!;
+    if (current.used > next.used) current.used = next.used;
+  }
+  return smoothed;
+}
+
 /** Spend from `base` on. Readings waver by a point or two, so outside a refill only a new high is spent. */
 function spending(
   samples: ReadonlyArray<{ readonly at: number; readonly used: number }>,
@@ -180,8 +224,7 @@ function spending(
   for (let index = base + 1; index < samples.length; index++) {
     const previous = samples[index - 1]!;
     const current = samples[index]!;
-    // A refill at least halves the reading; one off its reset clock, such as an upgrade, spends nothing.
-    const refill = current.used < previous.used / 2;
+    const refill = isRefill(previous, current, resetBetween);
     const reset = refill && resetBetween(previous.at, current.at);
     const rise = reset ? current.used : Math.max(0, current.used - peak);
     peak = refill ? current.used : Math.max(peak, current.used);
@@ -200,11 +243,7 @@ function burnPerDay(pool: Pool, now: number): number | null {
     if (!samples) return null;
     const base = samples.findLastIndex((sample) => sample.at <= now - DAY);
     dayLong ||= base >= 0;
-    const reset = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
-    const period = (window.windowDurationMins ?? 0) * MINUTE;
-    // A reading is dated to its hour's end, so a reset may fall up to an hour before it.
-    const resetBetween = (from: number, to: number) =>
-      [1, 2, 3].some((k) => from - HOUR < reset - k * period && reset - k * period <= to);
+    const resetBetween = scheduledResetBetween(window);
     // An account first read within the day joined the pool then; what it spent since is the day's.
     const { spent } = spending(samples, Math.max(base, 0), resetBetween);
     total += (shareOf(pool, member) * spent) / (base < 0 ? 1 : (now - samples[base]!.at) / DAY);
@@ -248,13 +287,24 @@ function paceOf(burn: number | null, safe: LimitRunway["safe"]): LimitPace | nul
 
 function pastBalance(pool: Pool, from: number, now: number): RunwayPoint[][] {
   // A blocked session's own readings show quota it cannot use, so it counts as empty.
-  const byAccount = pool.members.map((member) => ({
-    share: shareOf(pool, member),
-    samples: blocked(member.window) ? [] : (readings(member.window, now) ?? []).slice(0, -1),
-    blocked: blocked(member.window),
-  }));
+  const byAccount = pool.members.map((member) => {
+    if (blocked(member.window)) {
+      return { share: shareOf(pool, member), hasHistory: true, samples: [] };
+    }
+    const raw = readings(member.window, now) ?? [];
+    const step = (member.window.history?.stepMins ?? 60) * MINUTE;
+    const series = [
+      ...raw.slice(0, -1).filter((sample) => sample.at < now),
+      { at: now, used: member.window.usedPercent },
+    ];
+    return {
+      share: shareOf(pool, member),
+      hasHistory: raw.length > 1,
+      samples: smoothSamples(series, step, scheduledResetBetween(member.window)).slice(0, -1),
+    };
+  });
   // An account without readings would draw as empty, not as unknown.
-  if (byAccount.some((account) => !account.blocked && account.samples.length === 0)) return [];
+  if (byAccount.some((account) => !account.hasHistory)) return [];
   const times = [
     ...new Set(byAccount.flatMap((account) => account.samples.map((sample) => sample.at))),
   ]

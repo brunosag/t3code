@@ -253,5 +253,80 @@ describe("limitRunway", () => {
     );
     // 2% at the reset, then 10% up to 12%, over 40 minutes.
     expect(wavering?.burnPerDay).toBeCloseTo((12 * 1440) / 40, 6);
+    // Wavering readings smooth out instead of drawing false upward refill spikes, while the real reset still jumps.
+    expect(
+      wavering?.past.map((stretch) => stretch.map(({ at, remaining }) => [at, remaining])),
+    ).toEqual([
+      [
+        [now - 40 * 60_000, 56],
+        [now - 30 * 60_000, 56],
+        [now - 20 * 60_000, 56],
+        [now - 20 * 60_000, 98],
+        [now - 10 * 60_000, 90],
+        [now, 88],
+      ],
+    ]);
+  });
+
+  it("smooths noisy quota readings and settling holds without hiding real refills", () => {
+    // Reproduces Antigravity's replica jitter and 1% holds settling back when going idle.
+    const used = [
+      2.3, 3.6, 5.8, 5.6, 8.4, 9.3, 7.7, 7.7, 7.7, 8.0, 9.2, 11.7, 10.9, 10.8, 13.0, 12.9, 16.0,
+      14.9, 17.7, 19.4, 18.5, 20.8, 23.9, 23.5, 23.1, 23.1, 23.1, 23.2,
+    ];
+    const runway = limitRunway({ members: [weekly(22.5, 5 * DAY, hourly(used))] }, now);
+    const past = runway?.past.flat() ?? [];
+    // No upward steps anywhere in the smoothed curve, including into `now`.
+    for (let index = 1; index < past.length; index++) {
+      expect(past[index]!.remaining).toBeLessThanOrEqual(past[index - 1]!.remaining);
+      expect(past[index]!.at).toBeGreaterThan(past[index - 1]!.at);
+    }
+    // Connects seamlessly to the live reading at `now` (`projection[0]`).
+    expect(past.at(-1)).toEqual({ at: now, remaining: 77.5 });
+    expect(runway?.projection[0]).toEqual({ at: now, remaining: 77.5 });
+
+    // A small scheduled reset (3% -> 0% at the reset boundary) still draws as a refill jump.
+    const smallReset = limitRunway(
+      {
+        members: [weekly(1, 7 * DAY - 2.5 * HOUR, hourly([2, 3, 3, 0, 0.5, 1]))],
+      },
+      now,
+    );
+    const resetPoints = smallReset?.past.flat() ?? [];
+    const jump = resetPoints.findIndex((point) => point.at === now - 2 * HOUR);
+    expect(resetPoints.slice(jump - 1, jump + 2)).toEqual([
+      { at: now - 3 * HOUR, remaining: 97 },
+      { at: now - 2 * HOUR, remaining: 97 },
+      { at: now - 2 * HOUR, remaining: 100 },
+    ]);
+
+    // A small off-schedule hold settling (1.2% -> 0.2%) is not mistaken for a refill in burn or chart.
+    const smallHold = limitRunway(
+      {
+        members: [
+          {
+            window: {
+              id: "gemini-5h",
+              kind: "session",
+              label: "Gemini · 5-hour",
+              usedPercent: 1.5,
+              resetsAt: iso(now + 4 * HOUR),
+              windowDurationMins: 300,
+              history: {
+                startsAt: iso(now - 50 * 60_000),
+                stepMins: 10,
+                usedPercent: [0.2, 1.2, 0.2, 0.5, 1.5],
+              },
+            },
+          },
+        ],
+      },
+      now,
+    );
+    expect(smallHold?.past.flat().map((point) => point.remaining)).toEqual([
+      99.8, 99.8, 99.8, 99.5, 98.5,
+    ]);
+    // Spent 1.3% (0.2% -> 1.5%) over 40 minutes, without double-counting the 1% hold.
+    expect(smallHold?.burnPerDay).toBeCloseTo((1.3 * 1440) / 40, 6);
   });
 });
