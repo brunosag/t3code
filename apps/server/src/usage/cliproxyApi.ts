@@ -5,6 +5,7 @@ import {
   type UsageLimitSourceAccount,
   type UsageLimitSourceConfig,
 } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Cause from "effect/Cause";
 import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
@@ -31,7 +32,15 @@ import {
   liveClaudeGrants,
 } from "../provider/claudeResetCredits.ts";
 import { claudeUsageResponseToLimits } from "../provider/claudeUsageLimits.ts";
-import { makeUnavailableUsageLimits } from "@t3tools/provider-core/server/usageLimits";
+import {
+  antigravityAccountFingerprint,
+  antigravitySummaryWindows,
+  antigravityUserAgent,
+} from "../provider/antigravityUsageLimits.ts";
+import {
+  makeUnavailableUsageLimits,
+  makeUsageLimits,
+} from "@t3tools/provider-core/server/usageLimits";
 
 /** A hub with its management key already read from wherever the setting keeps it. */
 export interface CliproxyHub {
@@ -53,6 +62,7 @@ const AuthFile = Schema.Struct({
   status_message: Schema.optional(Schema.String),
   // Unknown so an odd hand-edited value cannot break the Limits view.
   priority: Schema.optional(Schema.Unknown),
+  project_id: Schema.optional(Schema.String),
   model_quotas: Schema.optional(Schema.Unknown),
   cooldowns: Schema.optional(Schema.Unknown),
   id_token: Schema.optional(
@@ -156,6 +166,19 @@ const CLAUDE_TIERS: Record<string, HubPlan> = {
   default_claude_max_5x: { plan: "Claude Max 5x", capacity: 5 },
   default_claude_max_20x: { plan: "Claude Max 20x", capacity: 20 },
 };
+// Google's two Ultra plans give 5 and 20 times Pro's Antigravity limits.
+const ANTIGRAVITY_TIERS: Record<string, HubPlan> = {
+  "g1-pro-tier": { plan: "Google AI Pro", capacity: 1 },
+  "g1-ultra-lite-tier": { plan: "Google AI Ultra 5x", capacity: 5 },
+  "g1-ultra-tier": { plan: "Google AI Ultra 20x", capacity: 20 },
+};
+const decodeCodeAssist = Schema.decodeUnknownEffect(
+  Schema.Struct({
+    paidTier: Schema.optional(
+      Schema.Struct({ id: Schema.String, name: Schema.optional(Schema.String) }),
+    ),
+  }),
+);
 const CreditList = Schema.Struct({
   credits: Schema.Array(
     Schema.Struct({
@@ -181,6 +204,7 @@ const decodeClaudeUsage = Schema.decodeUnknownEffect(Schema.fromJsonString(Claud
 const decodeClaudeProfile = Schema.decodeUnknownEffect(Schema.fromJsonString(ClaudeProfile));
 const decodeCodexUsage = Schema.decodeUnknownEffect(Schema.fromJsonString(CodexUsage));
 const decodeGrokUsage = Schema.decodeUnknownEffect(Schema.fromJsonString(GrokUsageResponse));
+const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const isUsageLimitSourceError = Schema.is(UsageLimitSourceError);
 
 // Extra CAs can fix untrusted chains; expiry/hostname failures report codes only.
@@ -260,7 +284,12 @@ type HubCall = (
 type HubReading = Omit<UsageLimitSourceAccount, "id" | "driver">;
 interface HubProvider {
   readonly driver: ProviderDriverKind;
-  readonly header: (account: AuthFile, hub: CliproxyHub) => Record<string, string>;
+  readonly header: (
+    account: AuthFile,
+    platform: NodeJS.Platform,
+    architecture: NodeJS.Architecture,
+    hub: CliproxyHub,
+  ) => Record<string, string>;
   readonly read: (input: {
     readonly account: AuthFile;
     readonly call: HubCall;
@@ -366,6 +395,7 @@ const HOUR_MS = 60 * 60 * 1000;
 const CLAUDE_REFRESH_MS = HOUR_MS;
 type AccountCache = {
   attemptedAt?: number | undefined;
+  planAttemptedAt?: number | undefined;
   observedAfter?: number | undefined;
   usage?: typeof ClaudeUsage.Type | undefined;
   usageAt?: number | undefined;
@@ -456,7 +486,7 @@ const claudeHeaderWindow = (account: AuthFile, window: string, now: number, afte
 
 const CLAUDE_HUB: HubProvider = {
   driver: ProviderDriverKind.make("claudeAgent"),
-  header: (_account, hub) => ({
+  header: (_account, _platform, _architecture, hub) => ({
     Authorization: "Bearer $TOKEN$",
     "anthropic-beta": "oauth-2025-04-20",
     // The OAuth usage endpoint can return 429 without a Claude Code user agent.
@@ -609,6 +639,10 @@ const CLAUDE_HUB: HubProvider = {
 };
 
 const GROK_CLI_VERSION = "1.0.77";
+const ANTIGRAVITY_SUMMARY_URL =
+  "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary";
+const ANTIGRAVITY_CODE_ASSIST_URL =
+  "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
 
 // Keyed by the auth-files `provider`; accounts of any other provider are skipped.
 const HUB_PROVIDERS = new Map<string, HubProvider>([
@@ -633,11 +667,81 @@ const HUB_PROVIDERS = new Map<string, HubProvider>([
       }),
     },
   ],
+  [
+    "antigravity",
+    {
+      driver: ProviderDriverKind.make("antigravity"),
+      header: (_account, platform, architecture) => ({
+        Authorization: "Bearer $TOKEN$",
+        "Content-Type": "application/json",
+        "User-Agent": antigravityUserAgent(platform, architecture),
+      }),
+      read: Effect.fnUntraced(function* ({ account, call, checkedAt, plans, cache }) {
+        const project = account.project_id?.trim();
+        if (!project) {
+          return yield* new UsageLimitSourceError({ detail: "No Antigravity project reported." });
+        }
+        const requestedAt = DateTime.toEpochMillis(yield* DateTime.now);
+        const summary = yield* call(ANTIGRAVITY_SUMMARY_URL, { project });
+        const windows = yield* antigravitySummaryWindows(yield* decodeJson(summary), requestedAt);
+        if (windows.length === 0) {
+          return yield* new UsageLimitSourceError({ detail: "No Antigravity quota reported." });
+        }
+        // Local Antigravity reports no e-mail, so the Google account fingerprint is what pools the two.
+        const fingerprint = yield* call("https://www.googleapis.com/oauth2/v2/userinfo").pipe(
+          Effect.flatMap(decodeJson),
+          Effect.flatMap(antigravityAccountFingerprint),
+          Effect.option,
+        );
+        if (cache.planAttemptedAt === undefined || requestedAt - cache.planAttemptedAt >= HOUR_MS) {
+          cache.planAttemptedAt = requestedAt;
+          yield* call(ANTIGRAVITY_CODE_ASSIST_URL, {
+            cloudaicompanionProject: project,
+            metadata: {
+              ideType: "ANTIGRAVITY",
+              platform: "PLATFORM_UNSPECIFIED",
+              pluginType: "GEMINI",
+            },
+          }).pipe(
+            Effect.flatMap(decodeJson),
+            Effect.flatMap(decodeCodeAssist),
+            Effect.tap(({ paidTier }) =>
+              Effect.sync(() => {
+                if (!paidTier) plans.delete(account.id);
+                else
+                  plans.set(
+                    account.id,
+                    ANTIGRAVITY_TIERS[paidTier.id] ?? {
+                      plan: paidTier.name?.trim() || paidTier.id,
+                    },
+                  );
+              }),
+            ),
+            Effect.ignore,
+          );
+        }
+        const plan = plans.get(account.id);
+        const usageLimits = makeUsageLimits({ checkedAt, windows });
+        return {
+          ...(plan ? { plan: plan.plan } : {}),
+          ...(plan?.capacity ? { capacity: plan.capacity } : {}),
+          ...Option.match(fingerprint, {
+            onNone: () => ({ ...listedIdentity(account), usageLimits }),
+            onSome: (credentialFingerprint) => ({
+              usageLimits: { ...usageLimits, credentialFingerprint },
+            }),
+          }),
+        };
+      }),
+    },
+  ],
 ]);
 
 export const makeCliproxyApi = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient;
   const digest = yield* Digest.Digest;
+  const platform = yield* HostProcess.Platform;
+  const architecture = yield* HostProcess.Architecture;
 
   const management = Effect.fn("CliproxyApi.management")(function* (
     hub: CliproxyHub,
@@ -740,7 +844,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
   const hubCall =
     (hub: CliproxyHub, account: AuthFile, provider: HubProvider): HubCall =>
     (url, data) =>
-      apiCall(hub, account, provider.header(account, hub), url, data);
+      apiCall(hub, account, provider.header(account, platform, architecture, hub), url, data);
   const hubPlans = new Map<string, Map<string, HubPlan>>();
   const hubCaches = new Map<string, Map<string, AccountCache>>();
   const cacheFor = (hub: CliproxyHub) => {

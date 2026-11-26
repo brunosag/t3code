@@ -36,6 +36,8 @@ vp test run \
   packages/shared/src/assistantCitations.test.ts \
   apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts \
   apps/server/src/usage/cliproxyApi.test.ts \
+  apps/server/src/provider/antigravityUsageLimits.test.ts \
+  apps/server/src/provider/AntigravityProvider.test.ts \
   apps/server/src/provider/claudeResetCredits.test.ts \
   apps/server/src/usage/UsageLimitHistory.test.ts \
   apps/server/src/mobilePush/MobilePush.test.ts \

@@ -78,6 +78,7 @@
         "@effect/platform-node-shared",
         "@t3tools/web",
         "phonon-tts",
+        "@napi-rs/keyring",
         "ffi-rs",
         "transcribe-cpp",
       ],

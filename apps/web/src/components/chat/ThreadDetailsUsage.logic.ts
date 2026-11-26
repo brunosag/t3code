@@ -6,6 +6,7 @@ import {
   type UsageLimitSourceSnapshots,
 } from "@t3tools/contracts";
 import {
+  antigravityWindowLimitsModel,
   collectLimitAccounts,
   collectLimitPools,
   collectProviderUsageLimits,
@@ -82,7 +83,19 @@ function hubPool(
   const routes = hubRoutes(sources, driver, model);
   const routed = sources.map((source) => ({
     ...source,
-    accounts: source.accounts.filter(routes),
+    accounts: source.accounts.filter(routes).map((account) =>
+      account.driver === "antigravity"
+        ? {
+            ...account,
+            usageLimits: {
+              ...account.usageLimits,
+              windows: account.usageLimits.windows.filter((window) =>
+                antigravityWindowLimitsModel(window, model),
+              ),
+            },
+          }
+        : account,
+    ),
   }));
   const readable = routed
     .flatMap((source) => source.accounts)
