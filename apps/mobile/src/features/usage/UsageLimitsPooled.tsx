@@ -10,6 +10,7 @@ import {
   NO_PENDING_HUB_CHANGES,
   type PendingHubChanges,
   routeByResetHubs,
+  accountRowsShown,
 } from "@t3tools/client-runtime/usage-limit-controls";
 import { limitRunway } from "@t3tools/shared/usageLimitRunway";
 import {
@@ -432,15 +433,11 @@ export function UsageLimitsSection({
             } satisfies MenuAction,
           ]
         : []),
-      ...(pool.accounts.length > 1
-        ? [
-            {
-              id: "accounts",
-              title: "Show accounts",
-              state: accountsShown ? "on" : "off",
-            } satisfies MenuAction,
-          ]
-        : []),
+      {
+        id: "accounts",
+        title: "Show accounts",
+        state: accountsShown ? "on" : "off",
+      } satisfies MenuAction,
       ...(routeByReset
         ? [
             {
@@ -549,8 +546,7 @@ export function UsageLimitsSection({
         const windows = displayLimitWindows(pool).filter(
           (window) => !hiddenLimits.has(limitKey(pool, window)),
         );
-        const showAccounts =
-          pool.accounts.length > 1 && (provider === null || !hiddenAccountRows.has(provider));
+        const showAccounts = accountRowsShown(provider, hiddenAccountRows);
         const allOff = resolved.hubLogins.every(
           (login) => login.driver !== pool.driver || login.disabled,
         );

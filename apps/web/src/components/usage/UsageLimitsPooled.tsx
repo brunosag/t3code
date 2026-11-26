@@ -25,6 +25,7 @@ import {
   pendingRoutingFor,
   reorderedHubAccounts,
   routeByResetHubs,
+  accountRowsShown,
 } from "@t3tools/client-runtime/usage-limit-controls";
 import {
   type BankedReset,
@@ -443,7 +444,7 @@ function PoolActions({
     readonly onToggle: () => void;
   }>;
   /** Null for a pool of one account. */
-  readonly accounts: { readonly shown: boolean; readonly onToggle: () => void } | null;
+  readonly accounts: { readonly shown: boolean; readonly onToggle: () => void };
   /** Null where no hub this viewer manages routes more than one of the provider's logins. */
   readonly routeByReset: { readonly on: boolean; readonly onToggle: () => void } | null;
   /** Each hub's logins for this provider; empty where the viewer may not change them. */
@@ -492,15 +493,13 @@ function PoolActions({
             </MenuSubPopup>
           </MenuSub>
         ) : null}
-        {accounts ? (
-          <MenuCheckboxItem
-            checked={accounts.shown}
-            closeOnClick={false}
-            onCheckedChange={accounts.onToggle}
-          >
-            Show accounts
-          </MenuCheckboxItem>
-        ) : null}
+        <MenuCheckboxItem
+          checked={accounts.shown}
+          closeOnClick={false}
+          onCheckedChange={accounts.onToggle}
+        >
+          Show accounts
+        </MenuCheckboxItem>
         {routeByReset ? (
           <MenuCheckboxItem
             checked={routeByReset.on}
@@ -780,19 +779,15 @@ export function UsageLimitsPooled({
               ),
           };
         })}
-        accounts={
-          pool.accounts.length > 1
-            ? {
-                shown: accountsShown,
-                onToggle: () =>
-                  onHiddenAccountRowsChange(
-                    accountsShown
-                      ? [...hiddenAccountRows, provider]
-                      : [...hiddenAccountRows].filter((entry) => entry !== provider),
-                  ),
-              }
-            : null
-        }
+        accounts={{
+          shown: accountsShown,
+          onToggle: () =>
+            onHiddenAccountRowsChange(
+              accountsShown
+                ? [...hiddenAccountRows, provider]
+                : [...hiddenAccountRows].filter((entry) => entry !== provider),
+            ),
+        }}
         routeByReset={routeByResetFor(pool)}
         hubs={hubsFor(pool)}
         onMoveUp={index > 0 ? move(-1) : null}
@@ -800,10 +795,6 @@ export function UsageLimitsPooled({
         onHide={() => onHideProvider(provider)}
       />
     );
-  };
-  const accountRowsHidden = (pool: LimitPool) => {
-    const provider = usageProviderForDriver(pool.driver);
-    return provider !== undefined && hiddenAccountRows.has(provider);
   };
   const quotaSources = collectHttpQuotaSources(presentations);
   const notices = collectLimitNotices(presentations);
@@ -825,7 +816,7 @@ export function UsageLimitsPooled({
             now={now}
             actions={poolActions(pool)}
             hiddenLimits={hiddenLimits}
-            showAccounts={pool.accounts.length > 1 && !accountRowsHidden(pool)}
+            showAccounts={accountRowsShown(usageProviderForDriver(pool.driver), hiddenAccountRows)}
             routing={routingFor(pool)}
             allOff={hubLogins.every((login) => login.driver !== pool.driver || login.disabled)}
           />

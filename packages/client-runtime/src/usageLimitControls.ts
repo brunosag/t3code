@@ -33,6 +33,14 @@ export function moveProvider<P extends string>(
   );
 }
 
+/** Account rows show unless hidden, however many accounts a pool has (upstream needs two). */
+export function accountRowsShown<P extends string>(
+  provider: P | null | undefined,
+  hiddenAccountRows: ReadonlySet<P>,
+): boolean {
+  return provider == null || !hiddenAccountRows.has(provider);
+}
+
 /** Saved entries are replaced whole, so an empty name must drop the key to fall back to the URL. */
 export function withHubLabel(source: UsageLimitSourceConfig, name: string): UsageLimitSourceConfig {
   const { label: _previous, ...rest } = source;

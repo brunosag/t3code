@@ -9,6 +9,7 @@ import type { LimitAccount, LimitPresentations } from "@t3tools/shared/usageLimi
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  accountRowsShown,
   hubLimitPools,
   listHubs,
   moveProvider,
@@ -20,6 +21,15 @@ import {
 } from "./usageLimitControls.ts";
 
 const DEFAULT_ORDER = ["codex", "claude", "grok", "cursor", "antigravity"] as const;
+
+describe("account rows", () => {
+  it("show unless their provider hides them", () => {
+    expect(accountRowsShown("claude", new Set())).toBe(true);
+    expect(accountRowsShown("claude", new Set(["codex"]))).toBe(true);
+    expect(accountRowsShown("claude", new Set(["claude"]))).toBe(false);
+    expect(accountRowsShown(null, new Set(["claude"]))).toBe(true);
+  });
+});
 
 describe("usage provider order", () => {
   it("keeps providers missing from a saved order at the end", () => {
