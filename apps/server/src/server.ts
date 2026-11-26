@@ -827,7 +827,10 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   // fork: nested because pipe takes 20 steps and the fork's push step below takes one.
   Layer.provideMerge(Keybindings.layer.pipe(Layer.provideMerge(ProviderRegistry.layer))),
   Layer.provideMerge(
-    ProviderInstanceRegistryHydration.layer.pipe(Layer.provide(SqlitePersistence.layerConfig)),
+    ProviderInstanceRegistryHydration.layer.pipe(
+      Layer.provide(SqlitePersistence.layerConfig),
+      Layer.provide(layerNativeTelemetry),
+    ),
   ),
   // Claude adapters ask the hub when a gateway cooldown ends.
   // fork: the server sends the fork Android app's pushes itself.

@@ -32,7 +32,6 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "../ui/sidebar";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
 import { readIssueListPreferences } from "../issue/issueListPreferences";
 import { IssueGlyph } from "../issue/issuePresentation";
@@ -43,6 +42,7 @@ import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUp
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { observeResize } from "~/lib/observeResize";
 import { useWindowZoomFactor } from "~/browser/useBrowserLayoutZoomFactor";
+import { SharedTooltipTrigger } from "../ui/shared-tooltip";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -143,29 +143,30 @@ function HistoryNavigationButton({
   );
   const Icon = direction === "back" ? ArrowLeftIcon : ArrowRightIcon;
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            aria-label={label}
-            className={cn(
-              "[-webkit-app-region:no-drag]",
-              onBackdrop && "relative top-auto translate-y-0",
-            )}
-            disabled={!enabled}
-            onClick={() => navigateHistory(direction)}
-            size="icon-sm"
-            variant={onBackdrop ? "media-navigation" : "ghost"}
-          />
-        }
-      >
-        <Icon className="size-3.5" />
-      </TooltipTrigger>
-      <TooltipPopup side="bottom">
-        {label}
-        {shortcutLabel ? ` (${shortcutLabel})` : ""}
-      </TooltipPopup>
-    </Tooltip>
+    <SharedTooltipTrigger
+      render={
+        <Button
+          aria-label={label}
+          className={cn(
+            "[-webkit-app-region:no-drag]",
+            onBackdrop && "relative top-auto translate-y-0",
+          )}
+          disabled={!enabled}
+          onClick={() => navigateHistory(direction)}
+          size="icon-sm"
+          variant={onBackdrop ? "media-navigation" : "ghost"}
+        />
+      }
+      label={
+        <>
+          {label}
+          {shortcutLabel ? ` (${shortcutLabel})` : ""}
+        </>
+      }
+      side="bottom"
+    >
+      <Icon className="size-3.5" />
+    </SharedTooltipTrigger>
   );
 }
 
@@ -182,27 +183,24 @@ function WindowZoomIndicator({ onBackdrop }: { onBackdrop: boolean }) {
   const percent = Math.round(useWindowZoomFactor() * 100);
   if (percent === 100) return null;
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            aria-label={`Zoom ${percent}%, reset to 100%`}
-            className={cn(
-              "[-webkit-app-region:no-drag]",
-              onBackdrop && "relative top-auto translate-y-0",
-            )}
-            onClick={() => void window.desktopBridge?.resetWindowZoom()}
-            size="micro"
-            variant={onBackdrop ? "media-navigation" : "ghost-muted"}
-          />
-        }
-      >
-        <span className="tabular-nums">{percent}%</span>
-      </TooltipTrigger>
-      <TooltipPopup side="bottom">
-        Reset zoom ({formatShortcutLabel(RESET_ZOOM_SHORTCUT)})
-      </TooltipPopup>
-    </Tooltip>
+    <SharedTooltipTrigger
+      render={
+        <Button
+          aria-label={`Zoom ${percent}%, reset to 100%`}
+          className={cn(
+            "[-webkit-app-region:no-drag]",
+            onBackdrop && "relative top-auto translate-y-0",
+          )}
+          onClick={() => void window.desktopBridge?.resetWindowZoom()}
+          size="micro"
+          variant={onBackdrop ? "media-navigation" : "ghost-muted"}
+        />
+      }
+      label={`Reset zoom (${formatShortcutLabel(RESET_ZOOM_SHORTCUT)})`}
+      side="bottom"
+    >
+      <span className="tabular-nums">{percent}%</span>
+    </SharedTooltipTrigger>
   );
 }
 
@@ -250,16 +248,14 @@ function SidebarUtilityItem({
 }) {
   return (
     <SidebarMenuItem className="shrink-0">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
-              {icon}
-            </SidebarMenuButton>
-          }
-        />
-        <TooltipPopup side="top">{label}</TooltipPopup>
-      </Tooltip>
+      <SharedTooltipTrigger
+        render={
+          <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+            {icon}
+          </SidebarMenuButton>
+        }
+        label={label}
+      />
     </SidebarMenuItem>
   );
 }
