@@ -240,7 +240,7 @@ describe("CLIProxyAPI built-in management API", () => {
         yield* TestClock.setTime(1788710400000);
         const test = fixture();
         const api = yield* test.api;
-        const result = yield* api.readAccounts(config);
+        const result = (yield* api.readAccounts(config)).accounts;
         const credits = {
           availableCount: 2,
           nextCreditId: "first",
@@ -281,7 +281,7 @@ describe("CLIProxyAPI built-in management API", () => {
               : Response.json({}, { status: 404 }),
       });
       const api = yield* test.api;
-      const result = yield* api.readAccounts(config);
+      const { accounts: result } = yield* api.readAccounts(config);
       expect(result.map((account) => account.models)).toEqual([["gpt-5.6-sol"], undefined, []]);
       expect(result[1]?.usageLimits.windows).toHaveLength(1);
     }),
@@ -316,7 +316,7 @@ describe("CLIProxyAPI built-in management API", () => {
         }),
       });
       const api = yield* test.api;
-      const result = yield* api.readAccounts(config);
+      const { accounts: result } = yield* api.readAccounts(config);
       expect(result.map((account) => [account.plan, account.usageLimits.windows[0]?.kind])).toEqual(
         [
           ["ChatGPT Plus Subscription", "session"],
@@ -372,7 +372,7 @@ describe("CLIProxyAPI built-in management API", () => {
             : { status: 200, body: { rate_limit: { primary_window: { used_percent: 12 } } } },
       });
       const api = yield* test.api;
-      const result = yield* api.readAccounts(config);
+      const { accounts: result } = yield* api.readAccounts(config);
       expect(result[0]?.usageLimits.windows[0]?.usedPercent).toBe(12);
       expect(result[0]?.usageLimits.resetCredits).toBeUndefined();
     }),
@@ -392,7 +392,7 @@ describe("CLIProxyAPI built-in management API", () => {
               },
       });
       const api = yield* test.api;
-      const result = yield* api.readAccounts(config);
+      const { accounts: result } = yield* api.readAccounts(config);
       expect(result[0]?.usageLimits.unavailable).toEqual({
         reason: "probeFailed",
         message: "The provider refused the hub request (HTTP 401).",
@@ -440,7 +440,7 @@ describe("CLIProxyAPI built-in management API", () => {
       const api = yield* test.api;
       const windows = (result: ReadonlyArray<UsageLimitSourceAccount>) =>
         result[0]?.usageLimits.windows.map((w) => [w.id, w.usedPercent]);
-      expect(windows(yield* api.readAccounts(config))).toEqual([
+      expect(windows((yield* api.readAccounts(config)).accounts)).toEqual([
         ["five_hour", 32],
         ["seven_day", 100],
         ["seven_day_fable", 74],
@@ -449,16 +449,16 @@ describe("CLIProxyAPI built-in management API", () => {
         "Anthropic-Ratelimit-Unified-5h-Utilization": "0.4",
       });
       yield* TestClock.adjust("5 minutes");
-      expect(windows(yield* api.readAccounts(config))?.[0]).toEqual(["five_hour", 40]);
+      expect(windows((yield* api.readAccounts(config)).accounts)?.[0]).toEqual(["five_hour", 40]);
       expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/"))).toHaveLength(2);
       yield* TestClock.adjust("55 minutes");
-      const result = yield* api.readAccounts(config);
+      const result = (yield* api.readAccounts(config)).accounts;
       const resetSession = result[0]?.usageLimits.windows.find((w) => w.id === "five_hour");
       expect(resetSession?.usedPercent).toBe(0);
       expect(resetSession?.resetsAt).toBeUndefined();
       expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/"))).toHaveLength(4);
       yield* TestClock.adjust("24 hours");
-      expect((yield* api.readAccounts(config))[0]?.usageLimits.unavailable?.reason).toBe(
+      expect((yield* api.readAccounts(config)).accounts[0]?.usageLimits.unavailable?.reason).toBe(
         "probeFailed",
       );
     }),
@@ -513,7 +513,7 @@ describe("CLIProxyAPI built-in management API", () => {
           },
         });
         const api = yield* test.api;
-        const initial = yield* api.readAccounts(config);
+        const initial = (yield* api.readAccounts(config)).accounts;
         expect(initial[0]?.usageLimits.resetCredits?.availableCount).toBe(1);
 
         // /oauth/usage may return 429 before auth while /oauth/profile reports the expired token (401).
@@ -521,7 +521,7 @@ describe("CLIProxyAPI built-in management API", () => {
         profileStatus = 401;
         account.status_message = "invalid grant (retrying)";
         yield* TestClock.adjust("1 hour");
-        const expired = yield* api.readAccounts(config);
+        const expired = (yield* api.readAccounts(config)).accounts;
         expect(expired[0]?.usageLimits.unavailable).toEqual({
           reason: "probeFailed",
           message: "The provider refused the hub request (HTTP 401).",
@@ -531,7 +531,7 @@ describe("CLIProxyAPI built-in management API", () => {
 
         // While the hub still reports the same auth error, refreshes stay throttled.
         yield* TestClock.adjust("5 minutes");
-        expect((yield* api.readAccounts(config))[0]?.usageLimits.unavailable?.reason).toBe(
+        expect((yield* api.readAccounts(config)).accounts[0]?.usageLimits.unavailable?.reason).toBe(
           "probeFailed",
         );
         expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/"))).toHaveLength(
@@ -542,7 +542,7 @@ describe("CLIProxyAPI built-in management API", () => {
         usageStatus = 200;
         profileStatus = 200;
         delete account.status_message;
-        const recovered = yield* api.readAccounts(config);
+        const recovered = (yield* api.readAccounts(config)).accounts;
         expect(recovered[0]?.usageLimits.unavailable).toBeUndefined();
         expect(recovered[0]?.usageLimits.windows.find((w) => w.id === "five_hour")).toMatchObject({
           usedPercent: 10,
@@ -610,7 +610,7 @@ describe("CLIProxyAPI built-in management API", () => {
       const api = yield* test.api;
       const windows = (result: ReadonlyArray<UsageLimitSourceAccount>, index = 0) =>
         result[index]?.usageLimits.windows.map((w) => [w.id, w.usedPercent]);
-      const first = yield* api.readAccounts(config);
+      const first = (yield* api.readAccounts(config)).accounts;
       expect(windows(first)).toEqual([
         ["seven_day", 4],
         ["seven_day_fable", 0],
@@ -627,7 +627,7 @@ describe("CLIProxyAPI built-in management API", () => {
         },
       };
       yield* TestClock.adjust("15 minutes");
-      expect(windows(yield* api.readAccounts(config))).toEqual([
+      expect(windows((yield* api.readAccounts(config)).accounts)).toEqual([
         ["seven_day", 5],
         ["seven_day_fable", 1],
       ]);
@@ -650,7 +650,9 @@ describe("CLIProxyAPI built-in management API", () => {
       });
       const api = yield* test.api;
       for (let i = 0; i < 12; i++) {
-        expect((yield* api.readAccounts(config))[0]?.usageLimits.windows[0]?.usedPercent).toBe(20);
+        expect(
+          (yield* api.readAccounts(config)).accounts[0]?.usageLimits.windows[0]?.usedPercent,
+        ).toBe(20);
         yield* TestClock.adjust("5 minutes");
       }
       expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/usage"))).toHaveLength(1);
@@ -690,7 +692,7 @@ describe("CLIProxyAPI built-in management API", () => {
       const api = yield* test.api;
       const hub = { ...config, claudeVersion: "2.1.400" };
       yield* api.readAccounts(hub);
-      const result = yield* api.readAccounts(hub);
+      const result = (yield* api.readAccounts(hub)).accounts;
       expect(
         result[0]?.usageLimits.windows.map((window) => [window.id, window.usedPercent]),
       ).toEqual([
@@ -753,7 +755,7 @@ describe("CLIProxyAPI built-in management API", () => {
           body: { five_hour: { utilization: 10, resets_at: null }, ...budget },
         }),
       });
-      const result = yield* (yield* test.api).readAccounts(config);
+      const { accounts: result } = yield* (yield* test.api).readAccounts(config);
       expect(
         result[0]?.usageLimits.windows.map((window) => [window.id, window.usedPercent]),
       ).toEqual([
@@ -781,7 +783,7 @@ describe("CLIProxyAPI built-in management API", () => {
           },
         }),
       });
-      const result = yield* (yield* test.api).readAccounts(config);
+      const { accounts: result } = yield* (yield* test.api).readAccounts(config);
       expect(result[0]?.usageLimits.windows.map((window) => window.id)).toEqual(["five_hour"]);
     }),
   );
@@ -798,7 +800,7 @@ describe("CLIProxyAPI built-in management API", () => {
           },
         }),
       });
-      const result = yield* (yield* test.api).readAccounts(config);
+      const { accounts: result } = yield* (yield* test.api).readAccounts(config);
       expect(result[0]?.usageLimits.unavailable).toBeUndefined();
       expect(
         result[0]?.usageLimits.windows.map((window) => [window.id, window.usedPercent]),
@@ -831,7 +833,9 @@ describe("CLIProxyAPI built-in management API", () => {
           },
         }),
       });
-      const [account] = yield* (yield* test.api).readAccounts(config);
+      const {
+        accounts: [account],
+      } = yield* (yield* test.api).readAccounts(config);
       expect(account).toMatchObject({ driver: "grok", email: "x@example.com" });
       expect(account?.usageLimits.windows).toMatchObject([
         { id: "subscription", kind: "weekly", usedPercent: 40 },
@@ -870,15 +874,15 @@ describe("CLIProxyAPI built-in management API", () => {
         }),
       });
       const api = yield* test.api;
-      const [account] = yield* api.readAccounts(config);
+      const [account] = (yield* api.readAccounts(config)).accounts;
       expect(account?.driver).toBe("antigravity");
       expect(account?.email).toBeUndefined();
       expect(account).toMatchObject({ plan: "Google AI Pro", capacity: 1 });
       // The plan is read hourly, so an upgrade shows within the hour.
       paidTier = { id: "g1-ultra-lite-tier", name: "Google AI Ultra" };
-      expect((yield* api.readAccounts(config))[0]?.plan).toBe("Google AI Pro");
+      expect((yield* api.readAccounts(config)).accounts[0]?.plan).toBe("Google AI Pro");
       yield* TestClock.adjust("1 hour");
-      expect((yield* api.readAccounts(config))[0]).toMatchObject({
+      expect((yield* api.readAccounts(config)).accounts[0]).toMatchObject({
         plan: "Google AI Ultra 5x",
         capacity: 5,
       });
@@ -943,7 +947,7 @@ describe("CLIProxyAPI built-in management API", () => {
                 body: antigravitySummary,
               },
       });
-      const result = yield* (yield* test.api).readAccounts(config);
+      const { accounts: result } = yield* (yield* test.api).readAccounts(config);
       expect(result).toHaveLength(1);
       const [account] = result;
       expect(account).toMatchObject({ driver: "antigravity", email: "g@example.com" });
@@ -967,7 +971,9 @@ describe("CLIProxyAPI built-in management API", () => {
         accounts: [{ id: `${provider}.json`, auth_index: "a", provider, project_id: "project-7" }],
         upstream: () => ({ status, body }),
       });
-      const [account] = yield* (yield* test.api).readAccounts(config);
+      const {
+        accounts: [account],
+      } = yield* (yield* test.api).readAccounts(config);
       expect(account?.usageLimits.unavailable?.reason).toBe("probeFailed");
     }),
   );
@@ -986,7 +992,7 @@ describe("CLIProxyAPI built-in management API", () => {
             },
           ],
         });
-        const [account] = yield* (yield* test.api).readAccounts(config);
+        const [account] = (yield* (yield* test.api).readAccounts(config)).accounts;
         expect(account?.usageLimits.unavailable?.reason).toBe("probeFailed");
         expect(test.requests.map((request) => request.path)).not.toContain(
           "/v0/management/api-call",
@@ -1003,7 +1009,7 @@ describe("CLIProxyAPI built-in management API", () => {
         ],
         upstream: () => ({ status: 200, body: { five_hour: { utilization: 1, resets_at: null } } }),
       });
-      const result = yield* (yield* test.api).readAccounts(config);
+      const { accounts: result } = yield* (yield* test.api).readAccounts(config);
       expect(result.map((account) => account.driver)).toEqual(["claudeAgent"]);
       expect(test.requests.map((request) => request.body?.auth_index)).not.toContain("k");
     }),
@@ -1052,7 +1058,7 @@ describe("CLIProxyAPI built-in management API", () => {
       yield* api.readAccounts(config);
       expect(yield* api.consume(config, "second.json", "launch")).toEqual({ outcome: "reset" });
       const probes = test.requests.filter((r) => r.body?.url?.includes("/oauth/usage")).length;
-      const [refreshed] = yield* api.readAccounts(config);
+      const [refreshed] = (yield* api.readAccounts(config)).accounts;
       expect(refreshed?.usageLimits.resetCredits?.availableCount).toBe(1);
       expect(test.requests.filter((r) => r.body?.url?.includes("/oauth/usage"))).toHaveLength(
         probes + 1,
@@ -1091,7 +1097,7 @@ describe("CLIProxyAPI built-in management API", () => {
     Effect.gen(function* () {
       const test = fixture({ accounts: [{ ...accounts[0]!, disabled: true }] });
       const api = yield* test.api;
-      const [read] = yield* api.readAccounts(config);
+      const [read] = (yield* api.readAccounts(config)).accounts;
       expect(read?.disabled).toBe(true);
       expect(read?.usageLimits.windows.map((window) => window.usedPercent)).toEqual([78]);
       expect((yield* api.consume(config, "first.json", "credit").pipe(Effect.result))._tag).toBe(
@@ -1143,6 +1149,24 @@ describe("CLIProxyAPI built-in management API", () => {
       expect(yield* api.claudeCooldownEnd(config, "claude-sonnet-5-5")).toBe(
         Date.parse("2026-10-29T19:20:09Z"),
       );
+    }),
+  );
+
+  it.effect("names the providers of enabled accounts it cannot read", () =>
+    Effect.gen(function* () {
+      const test = fixture({
+        accounts: [
+          { id: "kimi.json", auth_index: "k", provider: "kimi-ai" },
+          { id: "other.json", auth_index: "o", provider: "kimi-ai" },
+          { id: "off.json", auth_index: "x", provider: "qwen", disabled: true },
+        ],
+      });
+      const api = yield* test.api;
+      expect(yield* api.readAccounts(config)).toEqual({
+        accounts: [],
+        unreadProviders: ["kimi-ai"],
+      });
+      expect(test.requests.every((request) => request.path.endsWith("/auth-files"))).toBe(true);
     }),
   );
 
@@ -1200,7 +1224,7 @@ describe("CLIProxyAPI routing priority", () => {
   it.effect("reports a hand-edited non-integer priority as the hub default", () =>
     Effect.gen(function* () {
       const api = yield* fixture({ accounts: ranked.slice(0, 2) }).api;
-      const result = yield* api.readAccounts(config);
+      const result = (yield* api.readAccounts(config)).accounts;
       expect(result.map((account) => account.priority)).toEqual([3, 0]);
     }),
   );

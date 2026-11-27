@@ -901,15 +901,8 @@ export const makeCliproxyApi = Effect.gen(function* () {
     };
   });
 
-  // Disabled logins stay listed so the Limits view can show them dimmed and switch them back on.
-  const listAccounts = (hub: CliproxyHub) =>
+  const hubAccounts = (hub: CliproxyHub) =>
     authFiles(hub).pipe(
-      Effect.map((accounts) =>
-        accounts.flatMap((account) => {
-          const provider = HUB_PROVIDERS.get(account.provider);
-          return provider ? [{ account, provider }] : [];
-        }),
-      ),
       Effect.mapError((error) =>
         isUsageLimitSourceError(error)
           ? error
@@ -917,14 +910,38 @@ export const makeCliproxyApi = Effect.gen(function* () {
       ),
     );
 
+  // Disabled logins stay listed so the Limits view can show them dimmed and switch them back on.
+  const readableAccounts = (accounts: ReadonlyArray<AuthFile>) =>
+    accounts.flatMap((account) => {
+      const provider = HUB_PROVIDERS.get(account.provider);
+      return provider ? [{ account, provider }] : [];
+    });
+
   const readAccounts = Effect.fn("CliproxyApi.readAccounts")(function* (
     hub: CliproxyHub,
-  ): Effect.fn.Return<ReadonlyArray<UsageLimitSourceAccount>, UsageLimitSourceError> {
-    return yield* Effect.forEach(
-      yield* listAccounts(hub),
+  ): Effect.fn.Return<
+    {
+      readonly accounts: ReadonlyArray<UsageLimitSourceAccount>;
+      readonly unreadProviders: ReadonlyArray<string>;
+    },
+    UsageLimitSourceError
+  > {
+    const all = yield* hubAccounts(hub);
+    const accounts = yield* Effect.forEach(
+      readableAccounts(all),
       ({ account, provider }) => readAccount(hub, account, provider),
       { concurrency: 4 },
     );
+    const unreadProviders = [
+      ...new Set(
+        all.flatMap((account) =>
+          account.disabled || HUB_PROVIDERS.has(account.provider) || !account.provider.trim()
+            ? []
+            : [account.provider.trim()],
+        ),
+      ),
+    ].toSorted();
+    return { accounts, unreadProviders };
   });
 
   /** Returns the login with its usage as the hub now reports it. */
@@ -934,7 +951,9 @@ export const makeCliproxyApi = Effect.gen(function* () {
     disabled: boolean,
   ): Effect.fn.Return<UsageLimitSourceAccount, UsageLimitSourceError> {
     yield* management(hub, "auth-files/status", { name: accountId, disabled }, "PATCH");
-    const listed = (yield* listAccounts(hub)).find(({ account }) => account.id === accountId);
+    const listed = readableAccounts(yield* hubAccounts(hub)).find(
+      ({ account }) => account.id === accountId,
+    );
     if (!listed) {
       return yield* new UsageLimitSourceError({ detail: "The hub account is missing." });
     }
@@ -1061,7 +1080,7 @@ export const makeCliproxyApi = Effect.gen(function* () {
     if (![...HUB_PROVIDERS.values()].some((provider) => provider.driver === driver)) {
       return yield* new UsageLimitSourceError({ detail: "The hub does not route this provider." });
     }
-    const files = (yield* listAccounts(hub))
+    const files = readableAccounts(yield* hubAccounts(hub))
       .filter(({ provider }) => provider.driver === driver)
       .map(({ account }) => account);
     const listed = [...new Set(accountIds)].flatMap(

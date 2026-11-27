@@ -279,9 +279,11 @@ export const make = Effect.gen(function* () {
     )?.accounts;
     const carryFrom = Date.parse(checkedAt) - CARRY_READING_FOR_MS;
     const hub = { url: config.url, managementKey, claudeVersion: yield* Ref.get(claudeVersion) };
+    const { unreadProviders } = accounts.success;
     return yield* routeByReset(hub, {
       ...base,
-      accounts: accounts.success.map((account) => {
+      ...(unreadProviders.length > 0 ? { unreadProviders } : {}),
+      accounts: accounts.success.accounts.map((account) => {
         const kept =
           account.usageLimits.unavailable?.reason === "probeFailed" &&
           !/\(HTTP (?:401|403)\)\.$/.test(account.usageLimits.unavailable.message ?? "") &&

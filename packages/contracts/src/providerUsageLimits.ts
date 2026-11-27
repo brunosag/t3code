@@ -150,6 +150,8 @@ export const UsageLimitSourceSnapshot = Schema.Struct({
   checkedAt: IsoDateTime,
   accounts: ForwardCompatibleArray(UsageLimitSourceAccount),
   quotaAccounts: Schema.optional(ForwardCompatibleArray(HttpQuotaAccount)),
+  /** Hub provider names of enabled accounts that T3 Code cannot read. */
+  unreadProviders: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   error: Schema.optional(TrimmedNonEmptyString),
   /** Providers the server routes by earliest reset, so their order is not set by hand. */
   routeByReset: Schema.optional(Schema.Array(ProviderDriverKind)),
