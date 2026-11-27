@@ -71,6 +71,8 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
       <SquareMenuIcon className="size-4" />
     </Toggle>
   );
+  // Hover shows the card unless it is docked open; the tooltip would only cover it.
+  const openThreadPanelOnHover = threadPanelPresentation === "popover" || !threadPanelOpen;
   const threadPanelControl = (
     <SharedTooltipTrigger
       render={<span className="flex shrink-0" data-thread-panel-toggle />}
@@ -80,12 +82,13 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
           : gt("Toggle thread details")
       }
       side="bottom"
+      disabled={openThreadPanelOnHover}
     >
-      {threadPanelPresentation === "popover" ? (
-        <PopoverTrigger handle={threadPanelPopoverHandle} render={threadPanelToggle} />
-      ) : (
-        threadPanelToggle
-      )}
+      <PopoverTrigger
+        handle={threadPanelPopoverHandle}
+        openOnHover={openThreadPanelOnHover}
+        render={threadPanelToggle}
+      />
     </SharedTooltipTrigger>
   );
 

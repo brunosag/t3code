@@ -49,6 +49,8 @@ export function ThreadDetailsCard({
   const popoverOpen = useRightPanelStore((state) =>
     selectThreadPanelOpen(state.threadPanelVisibilityByThreadKey, threadRef, "popover"),
   );
+  // Hovering the toggle also shows the card as a popover while the inline card is closed.
+  const popoverAvailable = mode === "popover" || !inlineOpen;
   const measurementKey = `${threadRef.environmentId}:${threadRef.threadId}:${preferredPlacement?.width ?? "popup"}:${contentKey}`;
   const [measurements, setMeasurements] = useState({
     key: measurementKey,
@@ -62,13 +64,13 @@ export function ThreadDetailsCard({
   const cardWidth = preferredPlacement?.width;
   // The mode derives from canvas measurements, the preview frame and the
   // inline flag, which live in three stores, so no single write site sees the
-  // card leave popover mode. A flag left set would reopen the popover unasked
-  // when the card returns to popover mode.
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- closes the popover flag in the right panel store when the derived mode turns inline
+  // popover become unavailable. A flag left set would reopen the popover unasked
+  // when it becomes available again.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- closes the popover flag in the right panel store when the inline card takes over
   useLayoutEffect(() => {
-    if (mode === "inline" && popoverOpen)
+    if (!popoverAvailable && popoverOpen)
       useRightPanelStore.getState().setThreadPanelOpen(threadRef, "popover", false);
-  }, [mode, popoverOpen, threadRef]);
+  }, [popoverAvailable, popoverOpen, threadRef]);
   const [contentElement, setContentElement] = useState<HTMLDivElement | null>(null);
   const { environmentId, threadId } = threadRef;
   // Re-measures when the density or measurement key changes, so each density's
@@ -133,8 +135,13 @@ export function ThreadDetailsCard({
   return (
     <Popover
       handle={handle}
-      open={mode === "popover" && popoverOpen}
+      open={popoverAvailable && popoverOpen}
       onOpenChange={(open, details) => {
+        // In inline mode the toggle's press docks or closes the inline card instead.
+        if (mode === "inline" && details.reason === "trigger-press") {
+          details.cancel();
+          return;
+        }
         const target =
           details.reason === "focus-out"
             ? (details.event as FocusEvent).relatedTarget
@@ -173,7 +180,7 @@ export function ThreadDetailsCard({
           mounted, because its exit animation never finishes. Staying in the tree
           lets it close cleanly when the card switches inline. */}
       <PopoverPopup
-        {...(mode === "popover" ? detailsArea : {})}
+        {...(popoverAvailable ? detailsArea : {})}
         role="dialog"
         data-workspace-focus-key={`details:${threadRef.environmentId}:${threadRef.threadId}`}
         initialFocus={() => {
@@ -190,7 +197,7 @@ export function ThreadDetailsCard({
         variant="panel"
         padding="none"
       >
-        {mode === "popover" ? (
+        {popoverAvailable ? (
           <div data-density={density} data-thread-details-panel="popover">
             {card}
           </div>
