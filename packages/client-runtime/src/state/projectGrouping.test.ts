@@ -6,6 +6,7 @@ import { chooseLoadBalancedEnvironment } from "../load-balancing.ts";
 import {
   buildProjectGroups,
   deriveLogicalProjectKeyFromSettings,
+  groupIconFallbacks,
   pickableProjectGroups,
   derivePhysicalProjectKey,
   resolveGroupDefaultProject,
@@ -360,6 +361,56 @@ describe("buildProjectGroups", () => {
     expect(groups[1]?.label).toBe("julius/t3code-fork");
   });
 
+  // regression: #15049 a rename to the repository name snapped back to the display path
+  it("labels a renamed group by its title even when it matches the repository name", () => {
+    const folderTitles = [
+      makeProject("t3code", "/work/t3code", { title: "t3code" }),
+      makeProject("t3code-2", "/work/t3code-2", { title: "t3code" }),
+    ];
+    const renamed = folderTitles.map((project) => ({ ...project, hasCustomTitle: true }));
+
+    const label = (projects: ReadonlyArray<EnvironmentProject>) =>
+      buildProjectGroups({ projects, settings: settings("repository") })[0]?.label;
+    // fork: a title every member shares names the group, renamed or not.
+    expect(label(folderTitles)).toBe("t3code");
+    expect(label(renamed)).toBe("t3code");
+  });
+
+  it("labels a renamed group by its rename after a checkout with a folder title joins it", () => {
+    const checkout = (id: string, root: string, overrides: Partial<EnvironmentProject> = {}) =>
+      makeProject(id, root, {
+        title: "t3code",
+        repositoryIdentity: { ...repositoryIdentity, rootPath: root },
+        ...overrides,
+      });
+    const renamed = checkout("renamed", "/work/t3code", { title: "T3", hasCustomTitle: true });
+    const joined = checkout("joined", "/remote/t3code", {
+      environmentId: EnvironmentId.make("remote"),
+    });
+    const renamedSubfolder = makeProject("web", "/remote/t3code/apps/web", {
+      title: "Web",
+      hasCustomTitle: true,
+      repositoryIdentity: { ...repositoryIdentity, rootPath: "/remote/t3code" },
+    });
+
+    const label = (projects: ReadonlyArray<EnvironmentProject>) =>
+      buildProjectGroups({ projects, settings: settings("repository") })[0]?.label;
+    expect(label([renamed, joined])).toBe("T3");
+    expect(label([joined, renamedSubfolder])).toBe("T3 Code");
+    // An older server may not send the repository root; like grouping, read that as the root.
+    expect(label([{ ...renamed, repositoryIdentity }, joined])).toBe("T3");
+
+    const joinedSubfolder = makeProject("web", "/work/t3code/apps/web", {
+      title: "web",
+      repositoryIdentity: { ...repositoryIdentity, rootPath: "/work/t3code" },
+    });
+    const folderGroupLabel = buildProjectGroups({
+      projects: [renamedSubfolder, joinedSubfolder],
+      settings: settings("repository_path"),
+    })[0]?.label;
+    expect(folderGroupLabel).toBe("Web");
+  });
+
   it("labels a group by its repository when clones disagree on its casing", () => {
     // A subfolder project, its repository root, and a clone whose remote URL is
     // lowercased: no shared title or display name, but one repository.
@@ -579,5 +630,15 @@ describe("sortProjectsByGroupOrder", () => {
       ],
     );
     expect(sorted.map((entry) => entry.id)).toEqual(["pinned", "recent", "archived", "unlisted"]);
+  });
+});
+
+describe("groupIconFallbacks", () => {
+  it("lists the group's other members in order, leaving out its representative", () => {
+    const remote = EnvironmentId.make("remote");
+    const root = makeProject("root", "/work/t3code");
+    const web = makeProject("web", "/work/t3code/apps/web");
+    const remoteRoot = makeProject("root", "/work/t3code", { environmentId: remote });
+    expect(groupIconFallbacks([web, root, remoteRoot], root)).toEqual([web, remoteRoot]);
   });
 });

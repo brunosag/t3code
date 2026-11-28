@@ -1,4 +1,5 @@
 import { expect, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
   EventId,
   MessageId,
@@ -23,7 +24,10 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as SleepInhibitor from "./SleepInhibitor.ts";
 
-const layer = ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory));
+const layer = ProjectionStore.layer.pipe(
+  Layer.provide(NodeCrypto.layerDigest),
+  Layer.provide(SqlitePersistence.layerMemory),
+);
 
 it.layer(layer)("SleepInhibitor persisted work", (it) => {
   it.effect.each([
